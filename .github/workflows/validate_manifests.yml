@@ -1,0 +1,79 @@
+name: Validate Manifests
+
+# Cancel superseded runs per workflow+ref so rapid pushes don't pile up;
+# ref-keyed so tag/release runs are isolated from branch CI (#966).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    paths:
+      - 'catalog/**'
+  pull_request:
+    paths:
+      - 'catalog/**'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    # Public CI runs on free GitHub-hosted runners.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Install the full runtime deps (CLAUDE.md CI-checklist #5): the manifest
+        # loader imports backend.core.logging → structlog, so an ad-hoc
+        # `pip install fastapi pydantic` silently omits a transitive dep and the
+        # job fails at import time. requirements.txt is the single source of truth.
+        run: pip install -r requirements.txt --root-user-action=ignore -q
+
+      - name: Validate YAML syntax
+        run: |
+          python -c "
+          import yaml
+          from pathlib import Path
+          errors = []
+          for f in sorted(Path('catalog').rglob('*.yaml')):
+              if 'registry' in str(f): continue
+              try:
+                  yaml.safe_load(f.read_text())
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors: print(e)
+              exit(1)
+          print(f'All catalog YAML files valid')
+          "
+
+      - name: Validate manifest required fields
+        run: |
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          from backend.manifests.loader import load_all_manifests, clear_cache
+          clear_cache()
+          manifests = load_all_manifests()
+          errors = []
+          required = ['key', 'display_name', 'description', 'category', 'image']
+          for key, m in manifests.items():
+              for field in required:
+                  if not getattr(m, field, None):
+                      errors.append(f'{key}: missing {field}')
+          if errors:
+              for e in errors: print(e)
+              sys.exit(1)
+          print(f'{len(manifests)} manifests all valid')
+          "
+        env:
+          PYTHONPATH: .

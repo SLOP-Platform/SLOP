@@ -1,0 +1,72 @@
+key: rclone
+display_name: rclone
+slot: storage
+description: Cloud and remote filesystem mounter — S3, Backblaze B2, Google Drive, SFTP, SMB, and 40+ providers via FUSE
+category: infra
+tier: 1
+icon: ☁️
+version: "1.0"
+
+# rclone in SLOP is used to mount cloud/remote storage sources as
+# local filesystems. Each storage source defined in the Storage wizard
+# generates a separate rclone service instance.
+#
+# Supported backends: S3 (AWS, Backblaze B2, Wasabi, MinIO), Google Drive,
+# Dropbox, SFTP, WebDAV, SMB, OneDrive, Box, Mega, and 40+ more.
+#
+# For LAN NAS (NFS/SMB): use the Storage wizard which generates host-level
+# systemd mount units instead — no Docker container needed.
+#
+# FUSE requirements (handled automatically by SLOP installer):
+#   cap_add: SYS_ADMIN
+#   security_opt: apparmor:unconfined
+#   devices: /dev/fuse
+#   volumes: /mnt:/mnt:rshared
+
+image: rclone/rclone
+image_tag: latest
+linuxserver: false
+
+ports: {}
+
+volumes:
+  config: /config/rclone
+  custom:
+    - host: /mnt
+      container: /mnt
+      readonly: false
+
+capabilities:
+  - SYS_ADMIN
+
+security_opt:
+  - apparmor:unconfined
+
+devices:
+  - /dev/fuse:/dev/fuse:rwm
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+
+traefik:
+  enabled: false
+
+# rclone runs as a long-lived FUSE mount daemon with no HTTP/TCP endpoint —
+# a process check verifies the mount process is alive.
+health:
+  checks:
+    - name: process_running
+      type: process
+      interval: 60
+  self_heal:
+    - condition: process_running
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [storage, cloud, mount, fuse, s3, sftp, infra]
+links:
+  docs: https://rclone.org/docs/
+  github: https://github.com/rclone/rclone

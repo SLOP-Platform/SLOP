@@ -1,0 +1,51 @@
+key: pulsarr
+display_name: Pulsarr
+description: TODO — add a one-line description of Pulsarr
+category: arr
+tier: 2
+
+image: lakker/pulsarr
+image_tag: latest
+
+ports:
+  web: 3003
+
+reverse_proxy:
+  enabled: true
+  subdomain: pulsarr
+
+volumes:
+  config: /app/data
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 3003
+      expect_status: 200
+      interval: 30
+
+wiring:
+  connects_to:
+    - type: media_request
+      to: sonarr
+      optional: true
+      description: Register Pulsarr as media_request in sonarr
+    - type: media_request
+      to: radarr
+      optional: true
+      description: Register Pulsarr as media_request in radarr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+  - type: wire
+    target: sonarr
+    wire_type: media_request
+  - type: wire
+    target: radarr
+    wire_type: media_request

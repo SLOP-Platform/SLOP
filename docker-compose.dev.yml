@@ -1,0 +1,93 @@
+# SLOP v3 — manager stack (build from source / development)
+# Use this file to build and run SLOP from local source code.
+# For production / new installs use docker-compose.yml (pre-built image pull).
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+#   docker compose down
+
+name: slop
+
+services:
+  slop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # OR pull a pre-built image instead of building locally:
+    # image: ghcr.io/nnyan/slop:latest
+    container_name: slop
+    restart: unless-stopped
+
+    ports:
+      # Web UI and API — change left side to use a different host port
+      - "${MS_PORT:-8080}:8080"
+
+    volumes:
+      # ── Required ─────────────────────────────────────────────────────────
+      # Docker socket — SLOP creates and manages other containers via this
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # State database, compose fragments, and secrets
+      - slop_data:/data
+
+      # ── Required: config and media directories must be the same path ──────
+      # inside and outside this container so generated compose files work
+      # correctly when Docker runs them on the host.
+      # Replace these with your actual paths:
+      - ${CONFIG_ROOT:-/srv/slop/config}:${CONFIG_ROOT:-/srv/slop/config}
+      - ${MEDIA_ROOT:-/mnt/media}:${MEDIA_ROOT:-/mnt/media}
+
+    environment:
+      MS_DATA_DIR: /data
+      MS_PORT: "8080"
+      TZ: ${TZ:-UTC}
+
+    # Secrets file — copy .env.example to .env and fill in values before starting
+    env_file:
+      - .env
+
+    # The managed apps network — Traefik, Sonarr, etc. join this
+    networks:
+      - slop
+
+    # Require Docker socket access before starting
+    group_add:
+      # Add the docker group so the container can use the socket without root
+      # Run: stat -c '%g' /var/run/docker.sock  to find your docker GID
+      - "${DOCKER_GID:-999}"
+
+  # ntfy — SLOP's internal notification service (push alerts to the UI and mobile)
+  ntfy:
+    image: binwiederhier/ntfy  # last-verified: 2026-06-21 — intentional upstream-tracking float (matches catalog/apps/ntfy.yaml convention; #945)
+    container_name: ntfy
+    # `serve` is required — without a command the image just prints help and
+    # exits 0, crash-looping under restart: unless-stopped (the /v1/health
+    # healthcheck then never passes). Caught by the MODEL-C W2 hermetic install.
+    command: serve
+    restart: unless-stopped
+    volumes:
+      - /srv/slop/data/ntfy:/var/lib/ntfy
+    networks:
+      - slop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+# ── Shared infrastructure network ─────────────────────────────────────────
+# This is the network Traefik and all managed apps join.
+# The name must match the network_name you set in the wizard (default: slop).
+# Pre-create before first `up`: docker network create slop
+networks:
+  slop:
+    name: slop
+    external: true
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  # State database, compose fragments, and secrets (/data inside container)
+  slop_data:
+    driver: local

@@ -1,0 +1,74 @@
+key: prowlarr
+display_name: Prowlarr
+description: Indexer manager — syncs indexer config to all *arr apps automatically
+category: arr
+tier: 2
+icon: 🔍
+version: "1.0"
+
+image: lscr.io/linuxserver/prowlarr
+start_grace_s: 120
+health_grace_s: 120
+image_tag: latest
+linuxserver: true
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+
+ports:
+  web: 9696
+
+volumes:
+  config: /config
+
+reverse_proxy:
+  enabled: true
+  subdomain: prowlarr
+
+wiring:
+  connects_to:
+    - type: indexer
+      to: sonarr
+      optional: true
+      description: Register all indexers in Sonarr
+    - type: indexer
+      to: radarr
+      optional: true
+      description: Register all indexers in Radarr
+    - type: indexer
+      to: lidarr
+      optional: true
+      description: Register all indexers in Lidarr
+    - type: indexer
+      to: readarr
+      optional: true
+      description: Register all indexers in Readarr
+    - type: indexer
+      to: whisparr
+      optional: true
+      description: Register all indexers in Whisparr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/v1/system/status
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/v1/system/status
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [arr, indexers]
+links:
+  docs: https://wiki.servarr.com/prowlarr
+  github: https://github.com/Prowlarr/Prowlarr

@@ -1,0 +1,45 @@
+key: anythingllm
+display_name: AnythingLLM
+description: All-in-one AI desktop and server — chat with documents, websites, and local models
+category: ai
+tier: 2
+
+image: mintplexlabs/anythingllm
+image_tag: latest
+start_grace_s: 60
+
+ports:
+  web: 3001
+
+volumes:
+  config: /app/server/storage
+
+reverse_proxy:
+  enabled: true
+  subdomain: anythingllm
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/ping
+      port: 3001
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/ping
+    timeout: 120
+
+tags: [ai, llm, rag, documents, chat]
+links:
+  github: https://github.com/Mintplex-Labs/anything-llm
+  docs: https://docs.anythingllm.com

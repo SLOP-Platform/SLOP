@@ -1,0 +1,46 @@
+key: bentopdf
+display_name: BentoPDF
+description: Privacy-first browser-based PDF toolkit — merge, split, compress, convert
+category: tools
+tier: 2
+icon: 📄
+version: "1.0"
+
+image: ghcr.io/alam00000/bentopdf
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8080
+
+volumes:
+  config: /tmp/bentopdf
+
+reverse_proxy:
+  enabled: true
+  subdomain: pdf
+  # BentoPDF requires these headers for Office file conversion (SharedArrayBuffer)
+  headers:
+    Cross-Origin-Opener-Policy: same-origin
+    Cross-Origin-Embedder-Policy: require-corp
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    expect_status: 200
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [pdf, tools, productivity]
+links:
+  docs: https://bentopdf.com/docs
+  github: https://github.com/alam00000/bentopdf

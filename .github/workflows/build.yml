@@ -1,0 +1,54 @@
+name: Build Frontend
+
+# Cancel superseded runs per workflow+ref so rapid pushes don't pile up;
+# ref-keyed so tag/release runs are isolated from branch CI (#966).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+  pull_request:
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: [self-hosted, 4-lom]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Check bundle size
+        run: |
+          du -sh backend/static/
+          # Fail if bundle exceeds 2MB
+          SIZE=$(du -sb backend/static/ | cut -f1)
+          if [ "$SIZE" -gt "2097152" ]; then
+            echo "Bundle too large: ${SIZE} bytes (max 2MB)"
+            exit 1
+          fi
+          echo "Bundle size OK: ${SIZE} bytes"

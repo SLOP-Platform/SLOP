@@ -1,0 +1,54 @@
+key: adguard_home
+display_name: AdGuard Home
+description: Network-wide ad and tracker blocker with DNS-over-HTTPS and DNS-over-TLS support
+category: monitoring
+tier: 2
+icon: 🚫
+version: "1.0"
+
+image: adguard/adguardhome
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 3000
+  extra:
+    - name: dns
+      internal: 53
+      protocol: tcp
+    - name: dns-udp
+      internal: 53
+      protocol: udp
+    - name: doh
+      internal: 443
+      protocol: tcp
+
+volumes:
+  config: /opt/adguardhome/conf
+  custom:
+    - host: "{config_root}/adguard_home/work"
+      container: /opt/adguardhome/work
+
+reverse_proxy:
+  enabled: true
+  subdomain: adguard
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [dns, adblock, privacy, monitoring]
+links:
+  docs: https://github.com/AdguardTeam/AdGuardHome/wiki
+  github: https://github.com/AdguardTeam/AdGuardHome

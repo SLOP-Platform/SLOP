@@ -1,0 +1,34 @@
+key: maintainerr
+display_name: Maintainerr
+description: TODO — add a one-line description of Maintainerr
+category: arr
+tier: 2
+
+image: ghcr.io/maintainerr/maintainerr
+image_tag: latest
+
+ports:
+  web: 6246
+
+reverse_proxy:
+  enabled: true
+  subdomain: maintainerr
+
+volumes:
+  config: /opt/data
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 6246
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

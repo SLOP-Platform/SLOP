@@ -1,0 +1,77 @@
+key: open_webui
+display_name: Open WebUI
+description: >
+  Sleek, feature-rich chat interface for local LLMs. Works with Ollama and any
+  OpenAI-compatible API. Includes RAG, image generation, web search, and model
+  management — no cloud required. Pre-configured to connect to the Ollama
+  service on the internal Docker network.
+category: ai
+tier: 2
+icon: 💬
+version: "1.0"
+linuxserver: false
+
+image: ghcr.io/open-webui/open-webui
+image_tag: main
+start_grace_s: 90
+health_grace_s: 90
+
+ports:
+  web: 8080
+
+volumes:
+  config: /app/backend/data
+
+env:
+  OLLAMA_BASE_URL: "http://ollama:11434"
+
+auto_secrets:
+  - WEBUI_SECRET_KEY
+
+reverse_proxy:
+  enabled: true
+  subdomain: openwebui
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /health
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /health
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+post_install:
+  - title: Connect to Ollama
+    description: >
+      Open WebUI is pre-configured to connect to Ollama on the internal Docker
+      network (http://ollama:11434). Install Ollama from the catalog if not
+      already installed, then refresh Open WebUI in your browser.
+    required: false
+  - title: First launch
+    description: >
+      On first visit, create an admin account — the first signup is always the
+      admin regardless of the signup setting. Subsequent signups can be disabled
+      from Admin Panel → Settings → General.
+    required: false
+
+tags:
+  - ai
+  - llm
+  - local-ai
+  - chat
+
+links:
+  github: https://github.com/open-webui/open-webui
+  docs: https://docs.openwebui.com

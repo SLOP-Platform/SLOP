@@ -1,0 +1,59 @@
+key: zilean
+display_name: Zilean
+description: Real-Debrid content indexer — exposes your RD library to Prowlarr so the *arrs know what's instantly available
+category: arr
+tier: 2
+icon: 🔮
+version: "1.0"
+
+# Zilean scrapes Real-Debrid's cached torrent index and exposes it as a
+# Torznab-compatible indexer for Prowlarr. When Sonarr/Radarr search for
+# content, Prowlarr checks Zilean first — if it's cached on RD, the *arr
+# marks it as instantly available and Decypharr/DUMB grabs it.
+#
+# Add to Prowlarr: Indexers → Add → Torznab → Custom
+#   URL: http://zilean:8181/api/v1/scrapers/prowlarr
+#   API Key: (any string, not validated)
+
+image: ghcr.io/iPromKnight/zilean
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8181
+
+volumes:
+  config: /zilean/app/data
+
+env:
+  TZ: "${TZ}"
+  ZILEAN__IMDB__IMPORT_ENABLED: "true"
+  ZILEAN__DMBS__IMPORT_ENABLED: "true"
+  ZILEAN__DATABASE__CONNECTION_STRING: "Host=postgres;Port=5432;Database=zilean;Username=slop;Password=${POSTGRES_PASSWORD}"
+
+dependencies:
+  postgres: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: zilean
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /api/v1/healthcheck/ping
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/v1/healthcheck/ping
+      expect_status: 200
+      interval: 60
+
+tags: [debrid, real-debrid, indexer, prowlarr, arr]
+links:
+  docs: https://github.com/iPromKnight/zilean/wiki
+  github: https://github.com/iPromKnight/zilean

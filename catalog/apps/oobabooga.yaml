@@ -1,0 +1,62 @@
+key: oobabooga
+display_name: Text Generation WebUI
+description: >
+  Web UI for running local LLMs (Llama, Mistral, Phi, etc.) with fine-grained
+  inference control. Supports GGUF, safetensors, GPTQ, and AWQ formats. Exposes
+  an OpenAI-compatible API on port 5000 for use with SillyTavern, Open WebUI,
+  and LiteLLM.
+category: ai
+tier: 2
+
+image: atinoda/text-generation-webui
+image_tag: latest-cpu
+start_grace_s: 90
+
+ports:
+  web: 7860
+  extra:
+    - name: api
+      internal: 5000
+      protocol: tcp
+
+volumes:
+  config: /home/user/app/user_data
+
+gpu:
+  optional: true
+  warn_if_absent: false
+  nvidia: true
+  amd: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: oobabooga
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 7860
+      expect_status: 200
+      interval: 60
+
+post_install:
+  - title: Download a model
+    description: >
+      Download a model via the Model tab before chatting. GGUF models work on
+      CPU; safetensors/GPTQ/AWQ require GPU.
+    required: false
+  - title: Use as LLM backend
+    description: >
+      To use Oobabooga as an LLM backend for SillyTavern or Open WebUI, point
+      them to http://oobabooga:5000/v1 (OpenAI-compatible API).
+    required: false
+
+tags: [ai, llm, local-ai, inference, gguf, huggingface]
+links:
+  github: https://github.com/oobabooga/text-generation-webui

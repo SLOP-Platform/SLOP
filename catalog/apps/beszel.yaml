@@ -1,0 +1,63 @@
+key: beszel
+display_name: Beszel
+description: Lightweight server and Docker monitoring hub with agent model, historical charts, and alerts
+category: monitoring
+tier: 2
+icon: 📡
+version: "1.0"
+
+# Beszel uses a hub+agent model.
+# The hub (this manifest) provides the web UI and stores data.
+# The agent (beszel-agent) runs on monitored hosts and reports metrics.
+# SLOP deploys both on the same host automatically.
+
+image: ghcr.io/henrygd/beszel
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8090
+
+volumes:
+  config: /beszel_data
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: true
+
+companions:
+  - key: beszel-agent
+    image: ghcr.io/henrygd/beszel-agent
+    image_tag: latest
+    container_name: beszel-agent
+    volumes:
+      - host: /var/run/docker.sock
+        container: /var/run/docker.sock
+        readonly: true
+    env:
+      LISTEN: "/var/run/beszel-agent.sock"
+      EXTRA_FILESYSTEMS: "sda,sdb"
+
+reverse_proxy:
+  enabled: true
+  subdomain: beszel
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [monitoring, metrics, docker, server, alerts]
+links:
+  docs: https://beszel.dev/guide/getting-started
+  github: https://github.com/henrygd/beszel

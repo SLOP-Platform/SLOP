@@ -1,0 +1,28 @@
+key: recyclarr
+display_name: Recyclarr
+description: CLI tool — no web UI. Configure via environment vars. Syncs Radarr/Sonarr quality profiles and custom formats from TRaSH-Guides.
+category: tools
+tier: 2
+
+image: recyclarr/recyclarr
+image_tag: latest
+
+volumes:
+  config: /config
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+
+# Recyclarr runs as a persistent scheduled-sync container (built-in cron),
+# so it has no HTTP/TCP endpoint — a process check verifies the daemon is alive.
+health:
+  checks:
+    - name: process_running
+      type: process
+      interval: 60
+  self_heal:
+    - condition: process_running
+      action: restart
+      max_attempts: 3
+      cooldown: 60

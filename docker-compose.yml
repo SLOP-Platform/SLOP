@@ -1,0 +1,92 @@
+# SLOP v4 — Docker-only deployment (default / production / new installs)
+# Pulls the pre-built image (ghcr.io/nnyan/slop:latest).
+# Use docker-compose.dev.yml instead if you need to build from source (dev / CI).
+#
+# Quick start (new install):
+#   mkdir -p /srv/slop && cd /srv/slop
+#   curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/docker-compose.yml \
+#     -o docker-compose.yml
+#   cp .env.example .env && nano .env   # set your domain and secrets
+#   docker network create slop    # network is external — create it first
+#   docker compose up -d
+#
+# Update:
+#   docker compose pull && docker compose up -d
+#
+# ─── Critical volume contract ─────────────────────────────────────────────
+# SLOP writes compose fragments containing HOST filesystem paths like:
+#   /srv/slop/config/sonarr:/config
+# The Docker daemon on the HOST reads these paths — they must be identical
+# inside and outside the SLOP container. Mount the data and config
+# directories at the SAME absolute path inside the container as on the host.
+#
+# Default: /srv/slop/data and /srv/slop/config
+# If you change MS_HOST_DATA_DIR or MS_HOST_CONFIG_DIR, mount accordingly.
+
+name: slop
+
+services:
+  slop:
+    image: ghcr.io/nnyan/slop:latest  # last-verified: 2026-06-21 — intentional self-update float (users pull :latest to auto-update; #945)
+    container_name: slop
+    restart: unless-stopped
+    labels:
+      - "slop.managed=true"
+    ports:
+      - "8080:8080"
+    volumes:
+      # ── CRITICAL: mount at the same absolute path as MS_HOST_DATA_DIR ──
+      - /srv/slop/data:/srv/slop/data
+      - /srv/slop/config:/srv/slop/config
+      # Docker socket — required to manage host containers.  Mounted :ro (read-only)
+      # because SLOP only reads container/service state; it never creates privileged
+      # containers via direct socket calls.  Docker socket access is root-equivalent
+      # on the host, so :ro limits the blast radius if the container is compromised.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # .env — read by SLOP AND by docker compose when starting apps
+      - /srv/slop/.env:/srv/slop/.env
+    environment:
+      # Internal paths (inside container) — same as host due to volume mount
+      MS_DATA_DIR: /srv/slop/data
+      MS_CONFIG_ROOT: /srv/slop/config
+      # Host paths — used when writing compose fragment volume mounts
+      # Must match the left-hand side of the volume entries above
+      MS_HOST_DATA_DIR: /srv/slop/data
+      MS_HOST_CONFIG_DIR: /srv/slop/config
+      MS_HOST_ENV_FILE: /srv/slop/.env
+      PYTHONPATH: /app
+    networks:
+      - slop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/ping"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+  # ntfy — SLOP's internal notification service (push alerts to the UI and mobile)
+  ntfy:
+    image: binwiederhier/ntfy  # last-verified: 2026-06-21 — intentional upstream-tracking float (matches catalog/apps/ntfy.yaml convention; #945)
+    container_name: ntfy
+    # `serve` is required — without a command the image just prints help and
+    # exits 0, crash-looping under restart: unless-stopped (the /v1/health
+    # healthcheck then never passes). Caught by the MODEL-C W2 hermetic install.
+    command: serve
+    restart: unless-stopped
+    labels:
+      - "slop.managed=true"
+    volumes:
+      - /srv/slop/data/ntfy:/var/lib/ntfy
+    networks:
+      - slop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+networks:
+  slop:
+    name: slop
+    external: true

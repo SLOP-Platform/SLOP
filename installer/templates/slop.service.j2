@@ -1,0 +1,19 @@
+[Unit]
+Description=SLOP service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=slop
+Group=slop
+WorkingDirectory={{ install_dir }}
+Environment=MS_DATA_DIR={{ data_dir }}
+ExecStart={{ install_dir }}/.venv/bin/uvicorn backend.api.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

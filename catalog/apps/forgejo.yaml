@@ -1,0 +1,39 @@
+key: forgejo
+display_name: Forgejo
+description: Lightweight self-hosted Git service — Gitea-compatible forge with CI/CD
+category: tools
+tier: 2
+
+image: codeberg.org/forgejo/forgejo
+image_tag: "10"
+
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+
+ports:
+  web: 3100
+  ssh: 222
+
+reverse_proxy:
+  enabled: true
+  subdomain: forgejo
+
+volumes:
+  config: /data
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 3100
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

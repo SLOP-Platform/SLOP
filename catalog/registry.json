@@ -1,0 +1,1571 @@
+{
+  "version": "3.0",
+  "updated": "2026-06-11T01:20:19Z",
+  "manifests": [
+    {
+      "key": "actual_budget",
+      "display_name": "Actual Budget",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcb0",
+      "tags": ["finance", "budget", "money", "productivity", "local-first"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/actual_budget.yaml",
+      "image": "ghcr.io/actualbudget/actual-server",
+      "image_tag": "latest"
+    },
+    {
+      "key": "adguard_home",
+      "display_name": "AdGuard Home",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udeab",
+      "tags": ["dns", "adblock", "privacy", "monitoring"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/adguard_home.yaml",
+      "image": "adguard/adguardhome",
+      "image_tag": "latest"
+    },
+    {
+      "key": "affine",
+      "display_name": "AFFiNE",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udfa8",
+      "tags": ["notes", "wiki", "whiteboard", "productivity", "collaboration", "notion-alternative"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/affine.yaml",
+      "image": "ghcr.io/toeverything/affine-graphql",
+      "image_tag": "stable"
+    },
+    {
+      "key": "anythingllm",
+      "display_name": "AnythingLLM",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "llm", "rag", "documents", "chat"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/anythingllm.yaml",
+      "image": "mintplexlabs/anythingllm",
+      "image_tag": "latest"
+    },
+    {
+      "key": "audiobookshelf",
+      "display_name": "Audiobookshelf",
+      "category": "media",
+      "service_type": "media",
+      "tier": 2,
+      "icon": "\ud83c\udfa7",
+      "tags": ["audiobooks", "podcasts", "media-server", "mobile"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/audiobookshelf.yaml",
+      "image": "ghcr.io/advplyr/audiobookshelf",
+      "image_tag": "latest"
+    },
+    {
+      "key": "autobrr",
+      "display_name": "Autobrr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/autobrr.yaml",
+      "image": "ghcr.io/autobrr/autobrr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "bazarr",
+      "display_name": "Bazarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcac",
+      "tags": ["arr", "subtitles", "sonarr", "radarr", "media"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/bazarr.yaml",
+      "image": "lscr.io/linuxserver/bazarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "bentopdf",
+      "display_name": "BentoPDF",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcc4",
+      "tags": ["pdf", "tools", "productivity"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/bentopdf.yaml",
+      "image": "ghcr.io/alam00000/bentopdf",
+      "image_tag": "latest"
+    },
+    {
+      "key": "beszel",
+      "display_name": "Beszel",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udce1",
+      "tags": ["monitoring", "metrics", "docker", "server", "alerts"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/beszel.yaml",
+      "image": "ghcr.io/henrygd/beszel",
+      "image_tag": "latest"
+    },
+    {
+      "key": "booklore",
+      "display_name": "Booklore",
+      "category": "media",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcda",
+      "tags": ["ebooks", "books", "library", "epub", "pdf", "comics", "kobo"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/booklore.yaml",
+      "image": "ghcr.io/booklore-app/booklore",
+      "image_tag": "latest"
+    },
+    {
+      "key": "changedetection",
+      "display_name": "Changedetection.io",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udc41\ufe0f",
+      "tags": ["monitoring", "alerts", "tracking", "websites", "automation"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/changedetection.yaml",
+      "image": "ghcr.io/dgtlmoon/changedetection.io",
+      "image_tag": "latest"
+    },
+    {
+      "key": "comfyui",
+      "display_name": "ComfyUI",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "stable-diffusion", "image-generation", "gpu"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/comfyui.yaml",
+      "image": "ghcr.io/ai-dock/comfyui",
+      "image_tag": "latest-cuda"
+    },
+    {
+      "key": "crowdsec",
+      "display_name": "CrowdSec",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udee1\ufe0f",
+      "tags": ["security", "firewall", "ips", "threat-intelligence"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/crowdsec.yaml",
+      "image": "crowdsecurity/crowdsec",
+      "image_tag": "latest"
+    },
+    {
+      "key": "ddns_updater",
+      "display_name": "DDNS Updater",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udf10",
+      "tags": ["ddns", "dns", "dynamic-ip", "tools", "networking", "residential"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ddns_updater.yaml",
+      "image": "qmcgaw/ddns-updater",
+      "image_tag": "latest"
+    },
+    {
+      "key": "decypharr",
+      "display_name": "Decypharr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\u26a1",
+      "tags": ["debrid", "real-debrid", "arr", "download-client", "torrent", "usenet", "streaming"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/decypharr.yaml",
+      "image": "cy01/blackhole",
+      "image_tag": "latest"
+    },
+    {
+      "key": "docker_socket_proxy",
+      "display_name": "Docker Socket Proxy",
+      "category": "tools",
+      "service_type": "",
+      "tier": 1,
+      "icon": "\ud83d\udd12",
+      "tags": ["security", "docker", "proxy", "infrastructure", "traefik"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/docker_socket_proxy.yaml",
+      "image": "tecnativa/docker-socket-proxy",
+      "image_tag": "latest"
+    },
+    {
+      "key": "dockge",
+      "display_name": "Dockge",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udfa9",
+      "tags": ["docker", "compose", "stacks", "management", "tools"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dockge.yaml",
+      "image": "louislam/dockge",
+      "image_tag": "1"
+    },
+    {
+      "key": "dockhand",
+      "display_name": "Dockhand",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udc0b",
+      "tags": ["docker", "management", "containers", "stacks", "git", "tools"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dockhand.yaml",
+      "image": "fnsys/dockhand",
+      "image_tag": "latest"
+    },
+    {
+      "key": "donetick",
+      "display_name": "Donetick",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\u2705",
+      "tags": ["tasks", "chores", "productivity", "household"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/donetick.yaml",
+      "image": "ghcr.io/donetick/donetick",
+      "image_tag": "latest"
+    },
+    {
+      "key": "dozzle",
+      "display_name": "Dozzle",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\udeb5",
+      "tags": ["logs", "docker", "monitoring", "debugging"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dozzle.yaml",
+      "image": "amir20/dozzle",
+      "image_tag": "latest"
+    },
+    {
+      "key": "dumb",
+      "display_name": "DUMB",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udf0a",
+      "tags": ["debrid", "real-debrid", "zurg", "rclone", "zilean", "all-in-one", "streaming"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dumb.yaml",
+      "image": "iampuid0/dumb",
+      "image_tag": "latest"
+    },
+    {
+      "key": "emby",
+      "display_name": "Emby Server",
+      "category": "media",
+      "service_type": "media",
+      "tier": 1,
+      "icon": "\ud83d\udcfa",
+      "tags": ["media", "emby", "streaming", "movies", "tv", "music"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/emby.yaml",
+      "image": "emby/embyserver",
+      "image_tag": "latest"
+    },
+    {
+      "key": "filebot",
+      "display_name": "FileBot",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/filebot.yaml",
+      "image": "jlesage/filebot",
+      "image_tag": "latest"
+    },
+    {
+      "key": "filebrowser",
+      "display_name": "Filebrowser",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcc2",
+      "tags": ["files", "browser", "upload", "manager", "tools"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/filebrowser.yaml",
+      "image": "filebrowser/filebrowser",
+      "image_tag": "s6"
+    },
+    {
+      "key": "fileflows",
+      "display_name": "FileFlows",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd04",
+      "tags": ["files", "automation", "transcoding", "processing", "workflow"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/fileflows.yaml",
+      "image": "revenz/fileflows",
+      "image_tag": "latest"
+    },
+    {
+      "key": "forgejo",
+      "display_name": "Forgejo",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/forgejo.yaml",
+      "image": "codeberg.org/forgejo/forgejo:10",
+      "image_tag": "latest"
+    },
+    {
+      "key": "freshrss",
+      "display_name": "FreshRSS",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udce1",
+      "tags": ["rss", "feeds", "news", "productivity", "reader"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/freshrss.yaml",
+      "image": "lscr.io/linuxserver/freshrss",
+      "image_tag": "latest"
+    },
+    {
+      "key": "glance",
+      "display_name": "Glance",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udc40",
+      "tags": ["dashboard", "rss", "feeds", "monitoring", "widgets"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/glance.yaml",
+      "image": "glanceapp/glance",
+      "image_tag": "latest"
+    },
+    {
+      "key": "grocy",
+      "display_name": "Grocy",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/grocy.yaml",
+      "image": "lscr.io/linuxserver/grocy",
+      "image_tag": "latest"
+    },
+    {
+      "key": "hermes_agent",
+      "display_name": "Hermes Agent",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "llm", "agent", "tool-use", "local"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/hermes_agent.yaml",
+      "image": "ghcr.io/nesquena/hermes-webui",
+      "image_tag": "latest"
+    },
+    {
+      "key": "homeassistant",
+      "display_name": "Home Assistant",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["home-automation", "iot", "smart-home"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/homeassistant.yaml",
+      "image": "lscr.io/linuxserver/homeassistant",
+      "image_tag": "latest"
+    },
+    {
+      "key": "immich",
+      "display_name": "Immich",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcf7",
+      "tags": ["photos", "media", "self-hosted"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/immich.yaml",
+      "image": "ghcr.io/immich-app/immich-server",
+      "image_tag": "release"
+    },
+    {
+      "key": "jackett",
+      "display_name": "Jackett",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/jackett.yaml",
+      "image": "lscr.io/linuxserver/jackett",
+      "image_tag": "latest"
+    },
+    {
+      "key": "jellyfin",
+      "display_name": "Jellyfin",
+      "category": "media",
+      "service_type": "media",
+      "tier": 1,
+      "icon": "\ud83c\udf9e\ufe0f",
+      "tags": ["media", "jellyfin", "streaming", "movies", "tv", "music", "open-source"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/jellyfin.yaml",
+      "image": "jellyfin/jellyfin",
+      "image_tag": "latest"
+    },
+    {
+      "key": "kavita",
+      "display_name": "Kavita",
+      "category": "media",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcd6",
+      "tags": ["manga", "comics", "books", "reader", "library", "opds"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/kavita.yaml",
+      "image": "jvmilazz0/kavita",
+      "image_tag": "latest"
+    },
+    {
+      "key": "komodo",
+      "display_name": "Komodo",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\udd8e",
+      "tags": ["docker", "management", "multi-server", "git", "deploy", "automation", "tools"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/komodo.yaml",
+      "image": "ghcr.io/moghtech/komodo-core",
+      "image_tag": "latest"
+    },
+    {
+      "key": "lazylibrarian",
+      "display_name": "LazyLibrarian",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/lazylibrarian.yaml",
+      "image": "lscr.io/linuxserver/lazylibrarian",
+      "image_tag": "latest"
+    },
+    {
+      "key": "lidarr",
+      "display_name": "Lidarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udfb5",
+      "tags": ["arr", "music", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/lidarr.yaml",
+      "image": "lscr.io/linuxserver/lidarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "llamacpp_server",
+      "display_name": "llama.cpp Server",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\udd99",
+      "tags": ["ai", "llm", "inference", "local-ai", "gguf"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/llamacpp_server.yaml",
+      "image": "ghcr.io/ggerganov/llama.cpp",
+      "image_tag": "server"
+    },
+    {
+      "key": "localai",
+      "display_name": "LocalAI",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\udd16",
+      "tags": ["ai", "llm", "inference", "local-ai", "openai-compatible"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/localai.yaml",
+      "image": "localai/localai",
+      "image_tag": "latest"
+    },
+    {
+      "key": "maintainerr",
+      "display_name": "Maintainerr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/maintainerr.yaml",
+      "image": "ghcr.io/maintainerr/maintainerr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "mealie",
+      "display_name": "Mealie",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udf7d\ufe0f",
+      "tags": ["recipes", "meal-planning", "cooking", "productivity"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/mealie.yaml",
+      "image": "ghcr.io/mealie-recipes/mealie",
+      "image_tag": "latest"
+    },
+    {
+      "key": "memos",
+      "display_name": "Memos",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcdd",
+      "tags": ["notes", "markdown", "productivity", "lightweight"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/memos.yaml",
+      "image": "neosmemo/memos",
+      "image_tag": "stable"
+    },
+    {
+      "key": "midarr",
+      "display_name": "Midarr",
+      "category": "media",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["media", "streaming", "sonarr", "radarr"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/midarr.yaml",
+      "image": "ghcr.io/midarrlabs/midarr-server",
+      "image_tag": "latest"
+    },
+    {
+      "key": "mylar3",
+      "display_name": "Mylar3",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\uddb8",
+      "tags": ["arr", "comics", "manga", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/mylar3.yaml",
+      "image": "lscr.io/linuxserver/mylar3",
+      "image_tag": "latest"
+    },
+    {
+      "key": "n8n",
+      "display_name": "n8n",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/n8n.yaml",
+      "image": "n8nio/n8n",
+      "image_tag": "latest"
+    },
+    {
+      "key": "netdata",
+      "display_name": "Netdata",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcca",
+      "tags": ["monitoring", "metrics", "performance", "system"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/netdata.yaml",
+      "image": "netdata/netdata",
+      "image_tag": "latest"
+    },
+    {
+      "key": "ntfy",
+      "display_name": "ntfy",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd14",
+      "tags": ["notifications", "push", "alerts", "tools"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ntfy.yaml",
+      "image": "binwiederhier/ntfy",
+      "image_tag": "latest"
+    },
+    {
+      "key": "nzbget",
+      "display_name": "NZBGet",
+      "category": "downloader",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/nzbget.yaml",
+      "image": "lscr.io/linuxserver/nzbget",
+      "image_tag": "latest"
+    },
+    {
+      "key": "ollama",
+      "display_name": "Ollama",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83e\udd16",
+      "tags": ["ai", "llm", "local-ai"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ollama.yaml",
+      "image": "ollama/ollama",
+      "image_tag": "latest"
+    },
+    {
+      "key": "opencode",
+      "display_name": "OpenCode",
+      "description": "Browser-accessible AI coding assistant. Connect your own LLM API keys \u2014 no local GPU required.",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcbb",
+      "tags": ["ai", "llm", "coding", "assistant", "openai-compatible"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/opencode.yaml",
+      "image": "node:24-trixie",
+      "image_tag": "latest"
+    },
+    {
+      "key": "ombi",
+      "display_name": "Ombi",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ombi.yaml",
+      "image": "lscr.io/linuxserver/ombi",
+      "image_tag": "latest"
+    },
+    {
+      "key": "open_webui",
+      "display_name": "Open WebUI",
+      "description": "Sleek, feature-rich chat interface for local LLMs",
+      "category": "ai",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/open_webui.yaml",
+      "image": "ghcr.io/open-webui/open-webui"
+    },
+    {
+      "key": "overseerr",
+      "display_name": "Overseerr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/overseerr.yaml",
+      "image": "sctx/overseerr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "paperless_ngx",
+      "display_name": "Paperless-ngx",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcc1",
+      "tags": ["documents", "ocr", "productivity", "scan"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/paperless_ngx.yaml",
+      "image": "ghcr.io/paperless-ngx/paperless-ngx",
+      "image_tag": "latest"
+    },
+    {
+      "key": "plex",
+      "display_name": "Plex Media Server",
+      "category": "media",
+      "service_type": "media",
+      "tier": 1,
+      "icon": "\ud83c\udfac",
+      "tags": ["media", "plex", "streaming", "movies", "tv", "music"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/plex.yaml",
+      "image": "plexinc/pms-docker",
+      "image_tag": "latest"
+    },
+    {
+      "key": "posteria",
+      "display_name": "Posteria",
+      "category": "media",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/posteria.yaml",
+      "image": "bozodev/posteria",
+      "image_tag": "latest"
+    },
+    {
+      "key": "prowlarr",
+      "display_name": "Prowlarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd0d",
+      "tags": ["arr", "indexers"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/prowlarr.yaml",
+      "image": "lscr.io/linuxserver/prowlarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "pulsarr",
+      "display_name": "Pulsarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/pulsarr.yaml",
+      "image": "lakker/pulsarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "qbittorrent",
+      "display_name": "qBittorrent",
+      "category": "downloader",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/qbittorrent.yaml",
+      "image": "lscr.io/linuxserver/qbittorrent",
+      "image_tag": "latest"
+    },
+    {
+      "key": "radarr",
+      "display_name": "Radarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udfa5",
+      "tags": ["arr", "movies", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/radarr.yaml",
+      "image": "lscr.io/linuxserver/radarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "readarr",
+      "display_name": "Readarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcd7",
+      "tags": ["arr", "books", "ebooks", "audiobooks", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/readarr.yaml",
+      "image": "lscr.io/linuxserver/readarr",
+      "image_tag": "develop"
+    },
+    {
+      "key": "recyclarr",
+      "display_name": "Recyclarr",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/recyclarr.yaml",
+      "image": "recyclarr/recyclarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "resilio_sync",
+      "display_name": "Resilio Sync",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["sync", "p2p", "file-sharing", "bittorrent"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/resilio_sync.yaml",
+      "image": "lscr.io/linuxserver/resilio-sync",
+      "image_tag": "latest"
+    },
+    {
+      "key": "sabnzbd",
+      "display_name": "SABnzbd",
+      "description": "Usenet binary newsreader and download manager",
+      "category": "downloader",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sabnzbd.yaml",
+      "image": "ghcr.io/linuxserver/sabnzbd"
+    },
+    {
+      "key": "scrutiny",
+      "display_name": "Scrutiny",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcbf",
+      "tags": ["smart", "disk-health", "monitoring", "storage", "hardware"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/scrutiny.yaml",
+      "image": "ghcr.io/analogj/scrutiny",
+      "image_tag": "master-omnibus"
+    },
+    {
+      "key": "seerr",
+      "display_name": "Seerr",
+      "category": "arr",
+      "service_type": "management",
+      "tier": 2,
+      "icon": "\ud83c\udfaf",
+      "tags": ["requests", "plex", "jellyfin", "automation", "discovery"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/seerr.yaml",
+      "image": "ghcr.io/fallenbagel/jellyseerr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "silverbullet",
+      "display_name": "SilverBullet",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd2b",
+      "tags": ["notes", "wiki", "markdown", "knowledge-base", "offline-first", "lightweight"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/silverbullet.yaml",
+      "image": "ghcr.io/silverbulletmd/silverbullet",
+      "image_tag": "latest"
+    },
+    {
+      "key": "snapraid_ui",
+      "display_name": "SnapRAID UI",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\uddc4\ufe0f",
+      "tags": ["snapraid", "mergerfs", "storage", "parity", "monitoring"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/snapraid_ui.yaml",
+      "image": "ghcr.io/firsttris/snapraid-ui",
+      "image_tag": "latest"
+    },
+    {
+      "key": "sonarr",
+      "display_name": "Sonarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcfa",
+      "tags": ["arr", "tv", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sonarr.yaml",
+      "image": "lscr.io/linuxserver/sonarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "speedtest_tracker",
+      "display_name": "Speedtest Tracker",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\u26a1",
+      "tags": ["monitoring", "network", "speed", "isp", "performance"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/speedtest_tracker.yaml",
+      "image": "ghcr.io/alexjustesen/speedtest-tracker",
+      "image_tag": "latest"
+    },
+    {
+      "key": "stirling_pdf",
+      "display_name": "Stirling-PDF",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcc4",
+      "tags": ["pdf", "tools", "ocr", "documents", "server-side"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/stirling_pdf.yaml",
+      "image": "frooodle/s-pdf",
+      "image_tag": "latest"
+    },
+    {
+      "key": "syncthing",
+      "display_name": "Syncthing",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd01",
+      "tags": ["sync", "files", "p2p", "encrypted", "dropbox-alternative"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/syncthing.yaml",
+      "image": "lscr.io/linuxserver/syncthing",
+      "image_tag": "latest"
+    },
+    {
+      "key": "tautulli",
+      "display_name": "Tautulli",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/tautulli.yaml",
+      "image": "lscr.io/linuxserver/tautulli",
+      "image_tag": "latest"
+    },
+    {
+      "key": "tdarr",
+      "display_name": "Tdarr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83c\udf9e\ufe0f",
+      "tags": ["transcoding", "media", "automation", "video", "arr"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/tdarr.yaml",
+      "image": "ghcr.io/haveagitgat/tdarr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "thelounge",
+      "display_name": "The Lounge",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/thelounge.yaml",
+      "image": "lscr.io/linuxserver/thelounge",
+      "image_tag": "latest"
+    },
+    {
+      "key": "umami",
+      "display_name": "Umami",
+      "category": "monitoring",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udcca",
+      "tags": ["analytics", "privacy", "gdpr", "monitoring", "web-analytics"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/umami.yaml",
+      "image": "ghcr.io/umami-software/umami",
+      "image_tag": "postgresql-latest"
+    },
+    {
+      "key": "unifi",
+      "display_name": "Unifi Network Application",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["networking", "ubiquiti", "unifi", "controller"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unifi.yaml",
+      "image": "lscr.io/linuxserver/unifi-network-application",
+      "image_tag": "latest"
+    },
+    {
+      "key": "unmanic",
+      "display_name": "Unmanic",
+      "category": "media",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unmanic.yaml",
+      "image": "josh5/unmanic",
+      "image_tag": "latest"
+    },
+    {
+      "key": "unpackerr",
+      "display_name": "Unpackerr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unpackerr.yaml",
+      "image": "golift/unpackerr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "vaultwarden",
+      "display_name": "Vaultwarden",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd10",
+      "tags": ["passwords", "security", "bitwarden", "productivity"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vaultwarden.yaml",
+      "image": "vaultwarden/server",
+      "image_tag": "latest"
+    },
+    {
+      "key": "vikunja",
+      "display_name": "Vikunja",
+      "category": "productivity",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udccb",
+      "tags": ["tasks", "kanban", "projects", "productivity", "team"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vikunja.yaml",
+      "image": "vikunja/vikunja",
+      "image_tag": "latest"
+    },
+    {
+      "key": "vsftpd",
+      "display_name": "vsftpd",
+      "category": "tools",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": [],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vsftpd.yaml",
+      "image": "fauria/vsftpd",
+      "image_tag": "latest"
+    },
+    {
+      "key": "whisparr",
+      "display_name": "Whisparr",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd1e",
+      "tags": ["arr", "adult", "media-management"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/whisparr.yaml",
+      "image": "ghcr.io/hotio/whisparr",
+      "image_tag": "latest"
+    },
+    {
+      "key": "zilean",
+      "display_name": "Zilean",
+      "category": "arr",
+      "service_type": "",
+      "tier": 2,
+      "icon": "\ud83d\udd2e",
+      "tags": ["debrid", "real-debrid", "indexer", "prowlarr", "arr"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/zilean.yaml",
+      "image": "ghcr.io/iPromKnight/zilean",
+      "image_tag": "latest"
+    },
+    {
+      "key": "sillytavern",
+      "display_name": "SillyTavern",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "llm", "chat", "roleplay", "local-ai"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sillytavern.yaml",
+      "image": "ghcr.io/sillytavern/sillytavern",
+      "image_tag": "latest"
+    },
+    {
+      "key": "oobabooga",
+      "display_name": "Text Generation WebUI",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "llm", "local-ai", "inference", "gguf", "huggingface"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/oobabooga.yaml",
+      "image": "atinoda/text-generation-webui",
+      "image_tag": "latest-cpu"
+    },
+    {
+      "key": "litellm",
+      "display_name": "LiteLLM Proxy",
+      "category": "ai",
+      "service_type": "",
+      "tier": 2,
+      "icon": "",
+      "tags": ["ai", "llm", "proxy", "router", "api", "openai-compatible"],
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/litellm.yaml",
+      "image": "ghcr.io/berriai/litellm",
+      "image_tag": "main-latest"
+    }
+  ],
+  "actual_budget": {
+    "display_name": "Actual Budget",
+    "description": "Privacy-first local-first personal finance and budgeting \u2014 zero-based budgeting that actually works",
+    "category": "productivity",
+    "image": "ghcr.io/actualbudget/actual-server"
+  },
+  "adguard_home": {
+    "display_name": "AdGuard Home",
+    "description": "Network-wide ad and tracker blocker with DNS-over-HTTPS and DNS-over-TLS support",
+    "category": "monitoring",
+    "image": "adguard/adguardhome"
+  },
+  "affine": {
+    "display_name": "AFFiNE",
+    "description": "Open-source Notion alternative \u2014 block-based docs, whiteboards, and databases in one workspace",
+    "category": "productivity",
+    "image": "ghcr.io/toeverything/affine-graphql"
+  },
+  "audiobookshelf": {
+    "display_name": "Audiobookshelf",
+    "description": "Self-hosted audiobook and podcast server with iOS/Android apps and e-reader support",
+    "category": "media",
+    "image": "ghcr.io/advplyr/audiobookshelf"
+  },
+  "bazarr": {
+    "display_name": "Bazarr",
+    "description": "Automated subtitle manager \u2014 downloads and syncs subtitles for Sonarr and Radarr libraries",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/bazarr"
+  },
+  "bentopdf": {
+    "display_name": "BentoPDF",
+    "description": "Privacy-first browser-based PDF toolkit \u2014 merge, split, compress, convert",
+    "category": "tools",
+    "image": "ghcr.io/alam00000/bentopdf"
+  },
+  "beszel": {
+    "display_name": "Beszel",
+    "description": "Lightweight server and Docker monitoring hub with agent model, historical charts, and alerts",
+    "category": "monitoring",
+    "image": "ghcr.io/henrygd/beszel"
+  },
+  "booklore": {
+    "display_name": "Booklore",
+    "description": "Jellyfin for ebooks \u2014 EPUB, PDF, and comics with Kobo sync, smart shelves, and auto metadata",
+    "category": "media",
+    "image": "ghcr.io/booklore-app/booklore"
+  },
+  "changedetection": {
+    "display_name": "Changedetection.io",
+    "description": "Monitor any website for changes \u2014 price tracking, page updates, content alerts",
+    "category": "monitoring",
+    "image": "ghcr.io/dgtlmoon/changedetection.io"
+  },
+  "crowdsec": {
+    "display_name": "CrowdSec",
+    "description": "Collaborative intrusion prevention \u2014 blocks malicious IPs using crowd-sourced threat intelligence",
+    "category": "monitoring",
+    "image": "crowdsecurity/crowdsec"
+  },
+  "ddns_updater": {
+    "display_name": "DDNS Updater",
+    "description": "Dynamic DNS client \u2014 keeps your DNS records pointed at your home IP when it changes, required for direct media server access on residential connections",
+    "category": "tools",
+    "image": "qmcgaw/ddns-updater"
+  },
+  "decypharr": {
+    "display_name": "Decypharr",
+    "description": "Mock qBittorrent + SABnzbd download client that routes through Real-Debrid, AllDebrid, TorBox, and Usenet \u2014 no local downloads, no hard drives",
+    "category": "arr",
+    "image": "cy01/blackhole"
+  },
+  "docker_socket_proxy": {
+    "display_name": "Docker Socket Proxy",
+    "description": "Secure Docker socket proxy \u2014 eliminates Traefik/Docker API version incompatibilities and restricts API access to read-only by default",
+    "category": "tools",
+    "image": "tecnativa/docker-socket-proxy"
+  },
+  "dockge": {
+    "display_name": "Dockge",
+    "description": "Reactive Docker Compose stack manager \u2014 edit, deploy, and monitor compose.yaml files through a clean web UI",
+    "category": "tools",
+    "image": "louislam/dockge"
+  },
+  "dockhand": {
+    "display_name": "Dockhand",
+    "description": "Modern Docker management \u2014 containers, Compose stacks, Git deployments, vulnerability scanning, and update tracking in one lightweight container",
+    "category": "tools",
+    "image": "fnsys/dockhand"
+  },
+  "donetick": {
+    "display_name": "Donetick",
+    "description": "Household task and chore tracker with scheduling, reminders, and shared lists",
+    "category": "productivity",
+    "image": "ghcr.io/donetick/donetick"
+  },
+  "dozzle": {
+    "display_name": "Dozzle",
+    "description": "Real-time Docker container log viewer \u2014 lightweight, no storage, live streaming",
+    "category": "monitoring",
+    "image": "amir20/dozzle"
+  },
+  "dumb": {
+    "display_name": "DUMB",
+    "description": "Debrid Unlimited Media Bridge \u2014 all-in-one orchestrator for zurg, rclone, Decypharr, Zilean, and cli_debrid with a unified management dashboard",
+    "category": "arr",
+    "image": "iampuid0/dumb"
+  },
+  "emby": {
+    "display_name": "Emby Server",
+    "description": "Personal media server with rich metadata, mobile sync, and hardware transcoding \u2014 Premiere optional",
+    "category": "media",
+    "image": "emby/embyserver"
+  },
+  "filebrowser": {
+    "display_name": "Filebrowser",
+    "description": "Web-based file manager for your server \u2014 browse, upload, share, and edit files in the browser",
+    "category": "tools",
+    "image": "filebrowser/filebrowser"
+  },
+  "fileflows": {
+    "display_name": "FileFlows",
+    "description": "File processing automation \u2014 watch folders, apply flows, rename/transcode/move files",
+    "category": "tools",
+    "image": "revenz/fileflows"
+  },
+  "freshrss": {
+    "display_name": "FreshRSS",
+    "description": "Self-hosted RSS feed aggregator \u2014 replace Feedly with a fast, extensible reader",
+    "category": "productivity",
+    "image": "lscr.io/linuxserver/freshrss"
+  },
+  "glance": {
+    "display_name": "Glance",
+    "description": "Feed-centric dashboard \u2014 RSS, Reddit, YouTube, weather, Docker stats and more in one page",
+    "category": "monitoring",
+    "image": "glanceapp/glance"
+  },
+  "immich": {
+    "display_name": "Immich",
+    "description": "High-performance, self-hosted photo and video management",
+    "category": "productivity",
+    "image": "ghcr.io/immich-app/immich-server"
+  },
+  "jellyfin": {
+    "display_name": "Jellyfin",
+    "description": "Free and open-source media server \u2014 no Plex Pass required, hardware transcoding included, no tracking",
+    "category": "media",
+    "image": "jellyfin/jellyfin"
+  },
+  "kavita": {
+    "display_name": "Kavita",
+    "description": "Fast, feature-rich digital library for manga, comics, and books \u2014 OPDS, reading progress, collections",
+    "category": "media",
+    "image": "jvmilazz0/kavita"
+  },
+  "komodo": {
+    "display_name": "Komodo",
+    "description": "Multi-server Docker and Compose management with Git-driven deployments, build automation, and procedures \u2014 100% open source, no editions",
+    "category": "tools",
+    "image": "ghcr.io/moghtech/komodo-core"
+  },
+  "lidarr": {
+    "display_name": "Lidarr",
+    "description": "Automated music collection manager \u2014 monitors releases, downloads, and organises albums",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/lidarr"
+  },
+  "llamacpp_server": {
+    "display_name": "llama.cpp Server",
+    "description": "Lightweight OpenAI-compatible inference server for GGUF models \u2014 CPU and GPU, minimal RAM",
+    "category": "ai",
+    "image": "ghcr.io/ggerganov/llama.cpp"
+  },
+  "localai": {
+    "display_name": "LocalAI",
+    "description": "Local OpenAI-compatible inference server. Runs LLMs, image generation, speech, and embeddings. Drop-in replacement for the OpenAI API \u2014 36+ backends including llama.cpp, vLLM, Whisper, and Stable Diffusion. GPU acceleration for NVIDIA (CUDA), AMD (ROCm), Intel (SYCL), and Apple Silicon (Metal). Use as an inference provider for the SLOP Health Agent.\n",
+    "category": "ai",
+    "image": "localai/localai"
+  },
+  "mealie": {
+    "display_name": "Mealie",
+    "description": "Self-hosted recipe manager with meal planning, shopping lists, and cookbook import",
+    "category": "productivity",
+    "image": "ghcr.io/mealie-recipes/mealie"
+  },
+  "memos": {
+    "display_name": "Memos",
+    "description": "Lightweight privacy-first note-taking \u2014 quick capture, markdown, tags, and sharing",
+    "category": "productivity",
+    "image": "neosmemo/memos"
+  },
+  "mylar3": {
+    "display_name": "Mylar3",
+    "description": "Automated comic book manager \u2014 monitors ComicVine releases, downloads, and organises issues",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/mylar3"
+  },
+  "netdata": {
+    "display_name": "Netdata",
+    "description": "Real-time system performance monitoring \u2014 CPU, memory, disk, network with zero config",
+    "category": "monitoring",
+    "image": "netdata/netdata"
+  },
+  "ntfy": {
+    "display_name": "ntfy",
+    "description": "Self-hosted push notification service \u2014 send notifications to phone and desktop",
+    "category": "tools",
+    "image": "binwiederhier/ntfy"
+  },
+  "ollama": {
+    "display_name": "Ollama",
+    "description": "Run large language models locally \u2014 Llama, Mistral, Gemma and more",
+    "category": "ai",
+    "image": "ollama/ollama"
+  },
+  "paperless_ngx": {
+    "display_name": "Paperless-ngx",
+    "description": "Document management system \u2014 scan, index, and archive physical documents",
+    "category": "productivity",
+    "image": "ghcr.io/paperless-ngx/paperless-ngx"
+  },
+  "plex": {
+    "display_name": "Plex Media Server",
+    "description": "The gold standard media server \u2014 Plex Pass optional, clients on every platform, hardware transcoding support",
+    "category": "media",
+    "image": "plexinc/pms-docker"
+  },
+  "prowlarr": {
+    "display_name": "Prowlarr",
+    "description": "Indexer manager \u2014 syncs indexer config to all *arr apps automatically",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/prowlarr"
+  },
+  "radarr": {
+    "display_name": "Radarr",
+    "description": "Automated movie manager \u2014 monitors, downloads, and organises films",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/radarr"
+  },
+  "readarr": {
+    "display_name": "Readarr",
+    "description": "Automated ebook and audiobook manager \u2014 monitors releases, downloads, and organises books",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/readarr"
+  },
+  "sabnzbd": {
+    "display_name": "SABnzbd",
+    "description": "Usenet binary newsreader and download manager",
+    "category": "downloader",
+    "image": "ghcr.io/linuxserver/sabnzbd"
+  },
+  "scrutiny": {
+    "display_name": "Scrutiny",
+    "description": "SMART disk health monitoring with a clean web UI \u2014 tracks drive health, temperature, and pre-failure symptoms",
+    "category": "monitoring",
+    "image": "ghcr.io/analogj/scrutiny"
+  },
+  "seerr": {
+    "display_name": "Seerr",
+    "description": "Media request management platform \u2014 the merged successor to Overseerr and Jellyseerr",
+    "category": "arr",
+    "image": "ghcr.io/fallenbagel/jellyseerr"
+  },
+  "silverbullet": {
+    "display_name": "SilverBullet",
+    "description": "Offline-first personal knowledge base \u2014 linked markdown notes, full-text search, no external dependencies",
+    "category": "productivity",
+    "image": "ghcr.io/silverbulletmd/silverbullet"
+  },
+  "snapraid_ui": {
+    "display_name": "SnapRAID UI",
+    "description": "Web interface for managing an existing SnapRAID installation \u2014 sync, scrub, diff, and status",
+    "category": "monitoring",
+    "image": "ghcr.io/firsttris/snapraid-ui"
+  },
+  "sonarr": {
+    "display_name": "Sonarr",
+    "description": "Automated TV series manager \u2014 monitors, downloads, and organises episodes",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/sonarr"
+  },
+  "speedtest_tracker": {
+    "display_name": "Speedtest Tracker",
+    "description": "Track ISP performance over time \u2014 scheduled speed tests with charts and alerts",
+    "category": "monitoring",
+    "image": "ghcr.io/alexjustesen/speedtest-tracker"
+  },
+  "stirling_pdf": {
+    "display_name": "Stirling-PDF",
+    "description": "Server-side PDF toolkit \u2014 50+ tools including merge, split, OCR, compress, and convert",
+    "category": "tools",
+    "image": "frooodle/s-pdf"
+  },
+  "syncthing": {
+    "display_name": "Syncthing",
+    "description": "Encrypted peer-to-peer file sync \u2014 replace Dropbox with no central server, no cloud",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/syncthing"
+  },
+  "tdarr": {
+    "display_name": "Tdarr",
+    "description": "Distributed audio/video transcoding automation with plugins and health checks",
+    "category": "arr",
+    "image": "ghcr.io/haveagitgat/tdarr"
+  },
+  "umami": {
+    "display_name": "Umami",
+    "description": "Privacy-focused, cookie-free web analytics \u2014 simple, fast alternative to Google Analytics",
+    "category": "monitoring",
+    "image": "ghcr.io/umami-software/umami"
+  },
+  "vaultwarden": {
+    "display_name": "Vaultwarden",
+    "description": "Bitwarden-compatible self-hosted password manager \u2014 browser extensions, mobile apps, and sharing",
+    "category": "productivity",
+    "image": "vaultwarden/server"
+  },
+  "vikunja": {
+    "display_name": "Vikunja",
+    "description": "Open-source project management \u2014 tasks, kanban, gantt, calendars, and team sharing",
+    "category": "productivity",
+    "image": "vikunja/vikunja"
+  },
+  "whisparr": {
+    "display_name": "Whisparr",
+    "description": "Arr-style adult content manager \u2014 automated download management for adult media",
+    "category": "arr",
+    "image": "ghcr.io/hotio/whisparr"
+  },
+  "zilean": {
+    "display_name": "Zilean",
+    "description": "Real-Debrid content indexer \u2014 exposes your RD library to Prowlarr so the *arrs know what's instantly available",
+    "category": "arr",
+    "image": "ghcr.io/iPromKnight/zilean"
+  },
+  "anythingllm": {
+    "display_name": "AnythingLLM",
+    "description": "All-in-one AI desktop and server \u2014 chat with documents, websites, and local models",
+    "category": "ai",
+    "image": "mintplexlabs/anythingllm"
+  },
+  "autobrr": {
+    "display_name": "Autobrr",
+    "description": "TODO \u2014 add a one-line description of Autobrr",
+    "category": "arr",
+    "image": "ghcr.io/autobrr/autobrr"
+  },
+  "comfyui": {
+    "display_name": "ComfyUI",
+    "description": "Node-based stable diffusion GUI \u2014 visual workflow editor for AI image generation",
+    "category": "ai",
+    "image": "ghcr.io/ai-dock/comfyui"
+  },
+  "filebot": {
+    "display_name": "FileBot",
+    "description": "TODO \u2014 add a one-line description of FileBot",
+    "category": "tools",
+    "image": "jlesage/filebot"
+  },
+  "forgejo": {
+    "display_name": "Forgejo",
+    "description": "Lightweight self-hosted Git service \u2014 Gitea-compatible forge with CI/CD",
+    "category": "tools",
+    "image": "codeberg.org/forgejo/forgejo:10"
+  },
+  "grocy": {
+    "display_name": "Grocy",
+    "description": "TODO \u2014 add a one-line description of Grocy",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/grocy"
+  },
+  "hermes_agent": {
+    "display_name": "Hermes Agent",
+    "description": "NousResearch Hermes agent with web UI \u2014 local LLM agent with tool use and memory",
+    "category": "ai",
+    "image": "ghcr.io/nesquena/hermes-webui"
+  },
+  "homeassistant": {
+    "display_name": "Home Assistant",
+    "description": "Open-source home automation platform \u2014 integrates with thousands of smart home devices",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/homeassistant"
+  },
+  "jackett": {
+    "display_name": "Jackett",
+    "description": "Torznab proxy \u2014 bridges torrent indexers to Sonarr/Radarr/etc via Torznab API",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/jackett"
+  },
+  "lazylibrarian": {
+    "display_name": "LazyLibrarian",
+    "description": "Automated book, magazine, and comic manager \u2014 monitors and downloads publications",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/lazylibrarian"
+  },
+  "maintainerr": {
+    "display_name": "Maintainerr",
+    "description": "TODO \u2014 add a one-line description of Maintainerr",
+    "category": "arr",
+    "image": "ghcr.io/maintainerr/maintainerr"
+  },
+  "midarr": {
+    "display_name": "Midarr",
+    "description": "Minimal movie and TV streaming server \u2014 clean, fast media front-end for Radarr/Sonarr",
+    "category": "media",
+    "image": "ghcr.io/midarrlabs/midarr-server"
+  },
+  "n8n": {
+    "display_name": "n8n",
+    "description": "TODO \u2014 add a one-line description of n8n",
+    "category": "tools",
+    "image": "n8nio/n8n"
+  },
+  "nzbget": {
+    "display_name": "NZBGet",
+    "description": "TODO \u2014 add a one-line description of NZBGet",
+    "category": "downloader",
+    "image": "lscr.io/linuxserver/nzbget"
+  },
+  "ombi": {
+    "display_name": "Ombi",
+    "description": "TODO \u2014 add a one-line description of Ombi",
+    "category": "arr",
+    "image": "lscr.io/linuxserver/ombi"
+  },
+  "overseerr": {
+    "display_name": "Overseerr",
+    "description": "TODO \u2014 add a one-line description of Overseerr",
+    "category": "arr",
+    "image": "sctx/overseerr"
+  },
+  "posteria": {
+    "display_name": "Posteria",
+    "description": "TODO \u2014 add a one-line description of Posteria",
+    "category": "media",
+    "image": "bozodev/posteria"
+  },
+  "pulsarr": {
+    "display_name": "Pulsarr",
+    "description": "TODO \u2014 add a one-line description of Pulsarr",
+    "category": "arr",
+    "image": "lakker/pulsarr"
+  },
+  "qbittorrent": {
+    "display_name": "qBittorrent",
+    "description": "TODO \u2014 add a one-line description of qBittorrent",
+    "category": "downloader",
+    "image": "lscr.io/linuxserver/qbittorrent"
+  },
+  "recyclarr": {
+    "display_name": "Recyclarr",
+    "description": "CLI tool \u2014 no web UI. Configure via environment vars. Syncs Radarr/Sonarr quality profiles and custom formats from TRaSH-Guides.",
+    "category": "tools",
+    "image": "recyclarr/recyclarr"
+  },
+  "resilio_sync": {
+    "display_name": "Resilio Sync",
+    "description": "Peer-to-peer file synchronisation \u2014 fast distributed file sync using BitTorrent protocol",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/resilio-sync"
+  },
+  "tautulli": {
+    "display_name": "Tautulli",
+    "description": "TODO \u2014 add a one-line description of Tautulli",
+    "category": "monitoring",
+    "image": "lscr.io/linuxserver/tautulli"
+  },
+  "thelounge": {
+    "display_name": "The Lounge",
+    "description": "TODO \u2014 add a one-line description of The Lounge",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/thelounge"
+  },
+  "unifi": {
+    "display_name": "Unifi Network Application",
+    "description": "Ubiquiti UniFi network controller \u2014 manage UniFi access points, switches, and gateways",
+    "category": "tools",
+    "image": "lscr.io/linuxserver/unifi-network-application"
+  },
+  "unmanic": {
+    "display_name": "Unmanic",
+    "description": "TODO \u2014 add a one-line description of Unmanic",
+    "category": "media",
+    "image": "josh5/unmanic"
+  },
+  "unpackerr": {
+    "display_name": "Unpackerr",
+    "description": "TODO \u2014 add a one-line description of Unpackerr",
+    "category": "arr",
+    "image": "golift/unpackerr"
+  },
+  "vsftpd": {
+    "display_name": "vsftpd",
+    "description": "FTP server \u2014 no web UI. Configure via environment vars. Very Secure FTP Daemon.",
+    "category": "tools",
+    "image": "fauria/vsftpd"
+  },
+  "sillytavern": {
+    "display_name": "SillyTavern",
+    "description": "Feature-rich web UI for character-based LLM chat and roleplay. Supports Ollama, llama.cpp, OpenAI-compatible APIs, and 20+ other backends. Personas, memory, advanced prompt engineering, and extension system.",
+    "category": "ai",
+    "image": "ghcr.io/sillytavern/sillytavern"
+  },
+  "oobabooga": {
+    "display_name": "Text Generation WebUI",
+    "description": "Web UI for running local LLMs (Llama, Mistral, Phi, etc.) with fine-grained inference control. Supports GGUF, safetensors, GPTQ, and AWQ formats. Exposes an OpenAI-compatible API on port 5000 for use with SillyTavern, Open WebUI, and LiteLLM.",
+    "category": "ai",
+    "image": "atinoda/text-generation-webui"
+  },
+  "litellm": {
+    "display_name": "LiteLLM Proxy",
+    "description": "OpenAI-compatible LLM API proxy and router. Unify all your LLM backends — Ollama, llama.cpp, OpenAI, Anthropic, Groq, and 100+ others — behind a single endpoint with key management, usage tracking, rate limiting, and automatic fallback. Configure apps once; swap backends without touching them.",
+    "category": "ai",
+    "image": "ghcr.io/berriai/litellm"
+  }
+}

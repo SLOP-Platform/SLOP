@@ -1,0 +1,55 @@
+key: crowdsec
+display_name: CrowdSec
+description: Collaborative intrusion prevention — blocks malicious IPs using crowd-sourced threat intelligence
+category: monitoring
+tier: 2
+icon: 🛡️
+version: "1.0"
+
+image: crowdsecurity/crowdsec
+image_tag: latest
+linuxserver: false
+
+ports:
+  # No web UI — CrowdSec is an agent. Management via cscli CLI or CrowdSec Console (cloud).
+  extra:
+    - name: lapi
+      internal: 8080
+      protocol: tcp
+
+volumes:
+  config: /etc/crowdsec
+  custom:
+    - host: /var/log
+      container: /var/log
+      readonly: true
+
+env:
+  COLLECTIONS: "crowdsecurity/traefik crowdsecurity/http-cve"
+  GID: "1000"
+
+reverse_proxy:
+  # CrowdSec itself has no web UI — skip Traefik labels.
+  # The cloud Console at app.crowdsec.net is managed by CrowdSec Inc (SaaS, not self-hosted).
+  enabled: false
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+
+health:
+  checks:
+    - name: process_running
+      type: process
+      interval: 60
+  self_heal:
+    - condition: process_running
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [security, firewall, ips, threat-intelligence]
+links:
+  docs: https://docs.crowdsec.net
+  github: https://github.com/crowdsecurity/crowdsec
+  console: https://app.crowdsec.net

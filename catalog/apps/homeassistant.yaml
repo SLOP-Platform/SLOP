@@ -1,0 +1,51 @@
+key: homeassistant
+display_name: Home Assistant
+description: Open-source home automation platform — integrates with thousands of smart home devices
+category: tools
+tier: 2
+
+image: lscr.io/linuxserver/homeassistant
+image_tag: latest
+linuxserver: true
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+start_grace_s: 120
+
+ports:
+  web: 8123
+
+volumes:
+  config: /config
+
+network_mode: host
+
+reverse_proxy:
+  enabled: true
+  subdomain: homeassistant
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 8123
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /
+    timeout: 180
+
+tags: [home-automation, iot, smart-home]
+links:
+  docs: https://www.home-assistant.io/docs
+  github: https://github.com/home-assistant/core

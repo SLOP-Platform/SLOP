@@ -1,0 +1,59 @@
+key: hermes_agent
+display_name: Hermes Agent
+description: NousResearch Hermes agent with web UI — local LLM agent with tool use and memory
+category: ai
+tier: 2
+
+image: ghcr.io/nesquena/hermes-webui
+image_tag: latest
+start_grace_s: 90
+
+ports:
+  web: 8789
+
+volumes:
+  config: /opt/data
+
+reverse_proxy:
+  enabled: true
+  subdomain: hermes-agent
+
+companions:
+  - key: hermes-agent-backend
+    image: ghcr.io/nousresearch/hermes-agent
+    container_name: hermes-agent-backend
+    ports:
+      - "8642:8642"
+    volumes:
+      # Companion data under the wizard-configured config_root (was root-required
+      # /var/lib/slop/hermes-agent). {config_root} is expanded by _expand_path and the
+      # dir is created+chowned by the executor (the service user); container path is
+      # distinct (/opt/data) so no same-path constraint. /backend keeps it separate
+      # from the main app's config_root/hermes_agent config dir.
+      - host: "{config_root}/hermes_agent/backend"
+        container: /opt/data
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 8789
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 180
+
+tags: [ai, llm, agent, tool-use, local]
+links:
+  github: https://github.com/NousResearch/Hermes-3-Agent

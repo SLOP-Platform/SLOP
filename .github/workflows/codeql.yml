@@ -1,0 +1,61 @@
+# CodeQL — static security analysis (deep taint / inter-procedural).
+# Catches path-traversal, injection, and taint flows that lighter linters miss.
+# Scans the product backend; results upload to this repo's Security tab.
+#
+# This workflow IS the code-scanning setup (GitHub "advanced setup"). Do NOT
+# also turn on default-setup code scanning in repo Settings — the two are
+# mutually exclusive, and enabling both makes this workflow fail.
+
+name: CodeQL Security Analysis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'requirements.txt'
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly — taint analysis is slow.
+    - cron: '0 4 * * 0'
+  # Allow on-demand runs (e.g. to scan after a non-backend change, or to
+  # re-run the analysis without waiting for the weekly schedule).
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # security-extended: full security rule set (incl. medium-confidence
+          # taint) WITHOUT the quality/maintainability rules — those duplicate
+          # ruff/mypy and were pure alert noise on the first scan.
+          queries: security-extended
+          config: |
+            paths:
+              - backend/
+            paths-ignore:
+              - tests/
+              - .venv/
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+          upload: true

@@ -1,0 +1,57 @@
+key: syncthing
+display_name: Syncthing
+description: Encrypted peer-to-peer file sync — replace Dropbox with no central server, no cloud
+category: tools
+tier: 2
+icon: 🔁
+version: "1.0"
+
+image: lscr.io/linuxserver/syncthing
+image_tag: latest
+linuxserver: true
+
+ports:
+  web: 8384
+  extra:
+    - name: sync-tcp
+      internal: 22000
+      protocol: tcp
+    - name: sync-udp
+      internal: 22000
+      protocol: udp
+    - name: discovery
+      internal: 21027
+      protocol: udp
+
+volumes:
+  config: /config
+  custom:
+    - host: "${MEDIA_ROOT}"
+      container: /data
+
+env:
+  TZ: "${TZ}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: syncthing
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /rest/noauth/health
+    timeout: 60
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /rest/noauth/health
+      expect_status: 200
+      interval: 60
+
+tags: [sync, files, p2p, encrypted, dropbox-alternative]
+links:
+  docs: https://docs.syncthing.net
+  github: https://github.com/syncthing/syncthing

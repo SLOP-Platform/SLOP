@@ -1,0 +1,63 @@
+key: whisparr
+display_name: Whisparr
+description: Arr-style adult content manager — automated download management for adult media
+category: arr
+tier: 2
+icon: 🔞
+version: "1.0"
+
+# Note: Whisparr is an adult content manager. It is included in the catalog
+# as it follows the same arr pattern and technical deployment model.
+# Access control via Tinyauth/auth provider is strongly recommended.
+
+image: ghcr.io/hotio/whisparr
+start_grace_s: 60
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 6969
+
+volumes:
+  config: /config
+  media: /data
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: whisparr
+
+wiring:
+  accepts:
+    - type: indexer
+      from: prowlarr
+      description: Prowlarr pushes indexer config to Whisparr via API
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /api/v3/system/status
+    timeout: 180
+  - type: wire
+    target: prowlarr
+    wire_type: indexer
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/v3/system/status
+      expect_status: 200
+      interval: 30
+
+tags: [arr, adult, media-management]
+links:
+  github: https://github.com/Whisparr/Whisparr
+
+requires:
+  - prowlarr

@@ -1,0 +1,23 @@
+SLOP <version> install complete
+========================================
+
+Open your browser to:
+
+    http://<hostname>:<port>/
+
+The setup wizard will guide you through first-run configuration.
+
+Service unit:    slop.service
+Install dir:     <install_dir>
+Data dir:        <data_dir>
+Install user:    slop
+Installed at:    <completed_at>
+
+Useful commands:
+
+    Check status:      sudo systemctl status slop.service
+    View logs:         sudo journalctl -u slop.service -f
+    Stop the service:  sudo systemctl stop slop.service
+    Uninstall:         sudo <install_dir>/bin/slop uninstall
+
+For documentation, see:  https://github.com/Nnyan/SLOP

@@ -1,0 +1,68 @@
+key: llamacpp_server
+display_name: llama.cpp Server
+description: Lightweight OpenAI-compatible inference server for GGUF models — CPU and GPU, minimal RAM
+category: ai
+tier: 2
+icon: 🦙
+version: "1.0"
+
+# llama.cpp server is an alternative to Ollama for the SLOP LLM agent.
+# It runs a single GGUF model file with a minimal footprint.
+# The user provides a GGUF file via the model download UI or direct file drop.
+# SLOP validates the GGUF file before starting the server.
+#
+# Key difference from Ollama:
+#   - Lower idle RAM (model only loaded during inference)
+#   - No model management API — one model per container instance
+#   - Faster cold-start for infrequent inference (agent use case)
+#   - User must supply GGUF file manually
+
+image: ghcr.io/ggerganov/llama.cpp
+image_tag: server
+linuxserver: false
+
+ports:
+  web: 8081
+
+volumes:
+  config: /models
+
+env:
+  LLAMA_ARG_MODEL: /models/model.gguf
+  LLAMA_ARG_HOST: "0.0.0.0"
+  LLAMA_ARG_PORT: "8081"
+  LLAMA_ARG_CTX_SIZE: "4096"
+  LLAMA_ARG_N_PREDICT: "512"
+  LLAMA_ARG_THREADS: "4"
+
+reverse_proxy:
+  # LLM server — expose on LAN only, not through CF Tunnel
+  enabled: true
+  subdomain: llm
+
+gpu:
+  optional: true
+  warn_if_absent: false
+  nvidia: true
+  amd: false
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /health
+    timeout: 180
+
+health:
+  checks:
+    - name: server_ready
+      type: http
+      path: /health
+      expect_status: 200
+      interval: 60
+
+tags: [ai, llm, inference, local-ai, gguf]
+links:
+  docs: https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md
+  github: https://github.com/ggerganov/llama.cpp
+  gguf_models: https://huggingface.co/models?library=gguf&sort=trending

@@ -1,0 +1,43 @@
+# SLOP — production dependencies
+# Policy: floor-only >= pins; upper caps only with a documented breakage reason.
+# Reproducibility comes from uv.lock (committed). Full rationale: installer/DEPENDENCIES.md
+# Install: pip install -r requirements.txt
+# Dev/testing deps: requirements-dev.txt
+
+# Web framework
+fastapi>=0.136.1
+uvicorn[standard]>=0.32.1
+python-multipart>=0.0.20
+
+# HTTP client (health checks, GGUF downloads)
+httpx>=0.28.1
+
+# Docker SDK
+docker>=7.1.0
+
+# Config / data
+pyyaml>=6.0.2
+
+# Pydantic — cap at <3: v3 removes v1-compat shims used by manifest validators.
+pydantic>=2.10.4,<3
+# bcrypt — floor only: v5 reviewed; hashpw+gensalt(rounds=10) API unchanged.
+# v5 change: passwords >72 bytes now raise ValueError (was silent truncation). Existing
+# exception handlers in wizard.py and api/platform.py cover this. No SLOP breakage.
+bcrypt>=4.0.0
+
+# Structured logging
+structlog>=24
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Prometheus metrics — /metrics endpoint. Instrumentation is a thin
+# in-tree ASGI middleware (backend/api/http_metrics.py); the
+# prometheus-fastapi-instrumentator library was dropped because its
+# 8.0.0 (only 8.x release) crashes on Starlette 1.x (route.path on an
+# _IncludedRouter raises AttributeError → 500 on every request).
+prometheus-client>=0.25
+
+# MCP SDK — stdio transport for agent-action MCP server.
+# v1.x floor; previously pulled transitively via semgrep — now explicit.
+mcp>=1

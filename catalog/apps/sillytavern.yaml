@@ -1,0 +1,61 @@
+key: sillytavern
+display_name: SillyTavern
+description: >
+  Feature-rich web UI for character-based LLM chat and roleplay. Supports Ollama,
+  llama.cpp, OpenAI-compatible APIs, and 20+ other backends. Personas, memory,
+  advanced prompt engineering, and extension system.
+category: ai
+tier: 2
+
+image: ghcr.io/sillytavern/sillytavern
+image_tag: latest
+start_grace_s: 30
+
+ports:
+  web: 8008
+
+volumes:
+  config: /home/node/app/config
+  custom:
+    - host: ""
+      container: /home/node/app/data
+
+env:
+  ST_LISTEN_ADDRESS: "0.0.0.0"
+  ST_PORT: "8008"
+
+reverse_proxy:
+  enabled: true
+  subdomain: sillytavern
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+post_install:
+  - title: Connect an LLM backend
+    description: >
+      Connect an LLM backend via Settings → API in the SillyTavern UI. Point it to
+      your Ollama address (http://ollama:11434) or llama.cpp server.
+    required: false
+
+tags: [ai, llm, chat, roleplay, local-ai]
+links:
+  github: https://github.com/SillyTavern/SillyTavern
+  docs: https://docs.sillytavern.app

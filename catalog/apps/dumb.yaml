@@ -1,0 +1,115 @@
+key: dumb
+display_name: DUMB
+description: Debrid Unlimited Media Bridge — all-in-one orchestrator for zurg, rclone, Decypharr, Zilean, and cli_debrid with a unified management dashboard
+category: arr
+tier: 2
+icon: 🌊
+version: "1.0"
+
+# DUMB (Debrid Unlimited Media Bridge) consolidates the entire debrid stack
+# into a single container with built-in process supervision, health checks,
+# and automatic restarts. You enable/disable components via env vars.
+#
+# Components (all optional, enable via env):
+#   ZURG_ENABLED=true       — Real-Debrid WebDAV bridge
+#   DECYPHARR_ENABLED=true  — Mock arr download client (recommended)
+#   ZILEAN_ENABLED=true     — RD content indexer for Prowlarr
+#   CLI_DEBRID_ENABLED=true — CLI debrid manager (alternative to Decypharr)
+#   RCLONE_ENABLED=true     — FUSE mount (auto-enabled when zurg is on)
+#
+# Requires same FUSE privileges as Decypharr. See docs for AppArmor setup.
+# Plex/Jellyfin must share the /mnt/debrid volume with rshared propagation.
+
+image: iampuid0/dumb
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 3013
+  extra:
+    - name: zurg
+      internal: 9999
+      protocol: tcp
+    - name: decypharr
+      internal: 8282
+      protocol: tcp
+    - name: zilean
+      internal: 8181
+      protocol: tcp
+
+volumes:
+  config: /config
+  custom:
+    - host: "{config_root}/dumb/log"
+      container: /log
+    - host: "{config_root}/dumb/zurg"
+      container: /zurg/RD
+    - host: "{config_root}/dumb/zilean"
+      container: /zilean/app/data
+    - host: "{config_root}/dumb/decypharr"
+      container: /decypharr
+    - host: /mnt/debrid
+      container: /mnt/debrid
+      readonly: false
+
+capabilities:
+  - SYS_ADMIN
+
+security_opt:
+  - apparmor:unconfined
+
+devices:
+  - /dev/fuse:/dev/fuse:rwm
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  # Component toggles — configure in SLOP UI after install
+  ZURG_ENABLED: "true"
+  RCLONE_ENABLED: "true"
+  DECYPHARR_ENABLED: "true"
+  ZILEAN_ENABLED: "false"
+  # Credentials — set via SLOP secrets after install
+  RD_API_KEY: "${RD_API_KEY:-}"
+  # Plex integration (optional)
+  PLEX_REFRESH: "false"
+  PLEX_MOUNT_DIR: /mnt/debrid
+  # Rclone mount target
+  RCLONE_MOUNT_NAME: debrid
+
+dependencies:
+  postgres: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: dumb
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: dashboard_reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: dashboard_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 180
+
+tags: [debrid, real-debrid, zurg, rclone, zilean, all-in-one, streaming]
+links:
+  docs: https://i-am-puid-0.github.io/DUMB
+  github: https://github.com/I-am-PUID-0/DUMB
+
+recommends:
+  - sonarr
+  - radarr

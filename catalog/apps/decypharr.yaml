@@ -1,0 +1,83 @@
+key: decypharr
+display_name: Decypharr
+description: Mock qBittorrent + SABnzbd download client that routes through Real-Debrid, AllDebrid, TorBox, and Usenet — no local downloads, no hard drives
+category: arr
+tier: 2
+icon: ⚡
+version: "1.0"
+
+# Decypharr presents itself to Sonarr/Radarr as a standard download client.
+# Internally it sends torrents to Real-Debrid (or other providers), mounts the
+# result via built-in rclone + WebDAV, and creates symlinks for the *arrs.
+#
+# Required host setup:
+#   /dev/fuse must be accessible (standard on most Linux systems)
+#   AppArmor fusermount3 profile must be unconfined (Ubuntu — see docs)
+#   /mnt must be shared with rshared propagation (handled automatically)
+#
+# After install, configure in Sonarr/Radarr:
+#   Settings → Download Clients → Add → qBittorrent
+#   Host: decypharr  Port: 8282
+
+image: cy01/blackhole
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8282
+
+volumes:
+  config: /app
+  custom:
+    # rshared propagation required so media containers can see the FUSE mount
+    - host: /mnt
+      container: /mnt
+      readonly: false
+
+# FUSE mount requirements — executor applies these to the compose fragment
+capabilities:
+  - SYS_ADMIN
+
+security_opt:
+  - apparmor:unconfined
+
+devices:
+  - /dev/fuse:/dev/fuse:rwm
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: decypharr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 120
+
+tags: [debrid, real-debrid, arr, download-client, torrent, usenet, streaming]
+links:
+  docs: https://github.com/sirrobot01/decypharr/blob/main/docs
+  github: https://github.com/sirrobot01/decypharr
+
+recommends:
+  - sonarr
+  - radarr

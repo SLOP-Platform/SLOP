@@ -1,0 +1,51 @@
+key: ombi
+display_name: Ombi
+description: TODO — add a one-line description of Ombi
+category: arr
+tier: 2
+
+image: lscr.io/linuxserver/ombi
+image_tag: latest
+
+ports:
+  web: 3579
+
+reverse_proxy:
+  enabled: true
+  subdomain: ombi
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 3579
+      expect_status: 200
+      interval: 30
+
+wiring:
+  connects_to:
+    - type: media_request
+      to: sonarr
+      optional: true
+      description: Register Ombi as media_request in sonarr
+    - type: media_request
+      to: radarr
+      optional: true
+      description: Register Ombi as media_request in radarr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+  - type: wire
+    target: sonarr
+    wire_type: media_request
+  - type: wire
+    target: radarr
+    wire_type: media_request

@@ -1,0 +1,44 @@
+key: dozzle
+display_name: Dozzle
+description: Real-time Docker container log viewer — lightweight, no storage, live streaming
+category: monitoring
+tier: 2
+icon: 🪵
+version: "1.0"
+
+image: amir20/dozzle
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8080
+
+volumes:
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: dozzle
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 20
+  - type: api_ready
+    path: /api/system/info
+    timeout: 30
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/system/info
+      expect_status: 200
+      interval: 60
+
+tags: [logs, docker, monitoring, debugging]
+links:
+  docs: https://dozzle.dev
+  github: https://github.com/amir20/dozzle

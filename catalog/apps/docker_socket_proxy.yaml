@@ -1,0 +1,99 @@
+key: docker_socket_proxy
+display_name: Docker Socket Proxy
+description: Secure Docker socket proxy — eliminates Traefik/Docker API version incompatibilities and restricts API access to read-only by default
+category: tools
+tier: 1
+icon: 🔒
+version: "1.0"
+
+# ── Why this exists ────────────────────────────────────────────────────────
+# Mounting /var/run/docker.sock directly into Traefik or other containers
+# gives those containers FULL Docker control — a major security risk.
+# It also causes API version negotiation issues (Traefik v3.3 vs Docker 29).
+#
+# Docker Socket Proxy (Tecnativa) intercepts calls and only exposes the
+# API endpoints you explicitly permit. By default, it allows read-only
+# access to containers/networks/services — enough for Traefik to work.
+#
+# ── What this fixes ───────────────────────────────────────────────────────
+# • Traefik v3.3 + Docker 29 API negotiation bug (eliminates by proxying)
+# • Raw socket exposure to all containers that need Docker access
+# • Security: containers can only LIST containers, not CREATE or DELETE
+#
+# ── How to use with Traefik ───────────────────────────────────────────────
+# After installing, update the Traefik compose fragment to use:
+#   DOCKER_HOST: tcp://docker-socket-proxy:2375
+# instead of mounting /var/run/docker.sock
+
+image: tecnativa/docker-socket-proxy
+image_tag: latest
+dashboard_icon: docker
+linuxserver: false
+
+ports:
+  # No host binding — internal only
+  internal: 2375
+
+volumes:
+  # Socket is mounted but not exposed to other containers directly
+  socket: /var/run/docker.sock
+
+env:
+  # Permissions — 1=allow, 0=deny
+  # Read-only operations needed by Traefik:
+  CONTAINERS: "1"
+  NETWORKS: "1"
+  SERVICES: "1"
+  INFO: "1"
+  EVENTS: "1"
+  # Write operations — disabled by default (Traefik doesn't need these)
+  POST: "0"
+  BUILD: "0"
+  COMMIT: "0"
+  CONFIGS: "0"
+  DISTRIBUTION: "0"
+  EXEC: "0"
+  GRPC: "0"
+  IMAGES: "0"
+  NODES: "0"
+  PLUGINS: "0"
+  SECRETS: "0"
+  SESSION: "0"
+  SWARM: "0"
+  SYSTEM: "0"
+  TASKS: "0"
+  VOLUMES: "0"
+
+# Must be on a network that Traefik can reach
+reverse_proxy:
+  enabled: false # This service doesn't need Traefik routing
+
+health:
+  checks:
+    - name: tcp_reachable
+      type: tcp
+      port: 2375
+      interval: 60
+
+tags: [security, docker, proxy, infrastructure, traefik]
+links:
+  github: https://github.com/Tecnativa/docker-socket-proxy
+  docs: https://github.com/Tecnativa/docker-socket-proxy#readme
+
+config_schema:
+  - key: containers_write
+    label: Allow container management (POST)
+    type: select
+    options: ["0", "1"]
+    required: false
+    help: "Set to 1 only if an app needs to start/stop containers (e.g. Portainer). Default: 0 (read-only)"
+  - key: images_write
+    label: Allow image operations
+    type: select
+    options: ["0", "1"]
+    required: false
+    help: "Set to 1 only if an app needs to pull/delete images. Default: 0"
+
+config_defaults:
+  containers_write: "0"
+  images_write: "0"

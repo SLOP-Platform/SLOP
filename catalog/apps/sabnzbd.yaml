@@ -1,0 +1,84 @@
+key: sabnzbd
+display_name: SABnzbd
+description: Usenet binary newsreader and download manager
+category: downloader
+tier: 2
+icon: 📥
+version: "1.0"
+
+image: lscr.io/linuxserver/sabnzbd
+image_tag: latest
+linuxserver: true
+start_grace_s: 60
+
+ports:
+  web: 8080
+
+volumes:
+  config: /config
+  media: /downloads
+
+reverse_proxy:
+  enabled: true
+  subdomain: sabnzbd
+  auth: true
+
+wiring:
+  connects_to:
+    - type: download_client
+      to: sonarr
+      optional: true
+      description: Register SABnzbd as download client in Sonarr
+    - type: download_client
+      to: radarr
+      optional: true
+      description: Register SABnzbd as download client in Radarr
+    - type: download_client
+      to: lidarr
+      optional: true
+      description: Register SABnzbd as download client in Lidarr
+    - type: download_client
+      to: readarr
+      optional: true
+      description: Register SABnzbd as download client in Readarr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api?mode=version&output=json
+    timeout: 120
+  - type: wire
+    target: sonarr
+    wire_type: download_client
+  - type: wire
+    target: radarr
+    wire_type: download_client
+  - type: wire
+    target: lidarr
+    wire_type: download_client
+  - type: wire
+    target: readarr
+    wire_type: download_client
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api?mode=version&output=json
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags:
+  - usenet
+  - downloader
+  - download
+
+links:
+  docs: https://sabnzbd.org/wiki
+  github: https://github.com/sabnzbd/sabnzbd

@@ -1,0 +1,82 @@
+key: snapraid_ui
+display_name: SnapRAID UI
+description: Web interface for managing an existing SnapRAID installation — sync, scrub, diff, and status
+category: monitoring
+tier: 2
+icon: 🗄️
+version: "1.0"
+
+# ── SAFETY NOTICE ────────────────────────────────────────────────────────────
+# This container manages SnapRAID on a live disk array. The following rules
+# are enforced to prevent data loss:
+#
+#   1. snapraid.conf is mounted READ-ONLY. The UI cannot modify your array config.
+#   2. The MergerFS pool is mounted READ-ONLY. The UI cannot write to your data.
+#   3. Parity disks are NOT mounted. The UI cannot corrupt parity data.
+#   4. SnapRAID itself must be installed on the HOST (not managed by SLOP).
+#      SLOP only deploys the web UI container.
+#   5. Never run SnapRAID CLI commands directly on the host while this UI is
+#      actively running a sync/scrub — concurrent runs corrupt parity.
+#
+# PREREQUISITES (must be done before deploying this container):
+#   - MergerFS installed and mounted on the host
+#   - SnapRAID installed (CLI) and configured on the host (snapraid.conf)
+#   - At least one successful manual `snapraid sync` completed
+# ─────────────────────────────────────────────────────────────────────────────
+
+image: ghcr.io/firsttris/snapraid-ui
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 3011
+
+volumes:
+  config: /config
+  custom:
+    # SnapRAID config — READ-ONLY. UI reads this but must never modify it.
+    - host: /etc/snapraid.conf
+      container: /etc/snapraid.conf
+      readonly: true
+    # SnapRAID binary — READ-ONLY. UI invokes it but cannot replace it.
+    - host: /usr/bin/snapraid
+      container: /usr/bin/snapraid
+      readonly: true
+    # MergerFS pool — READ-ONLY. UI shows disk stats but cannot write data.
+    # Adjust to your actual MergerFS mount point.
+    - host: /mnt/media
+      container: /mnt/media
+      readonly: true
+
+env:
+  SNAPRAID_CONFIG: /etc/snapraid.conf
+
+reverse_proxy:
+  enabled: true
+  subdomain: snapraid
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    expect_status: 200
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 120
+      # Long interval — we do NOT want health checks triggering SnapRAID commands
+  self_heal:
+    # No auto-restart on health failure — a failed restart during an active
+    # sync could leave SnapRAID in an inconsistent state.
+    # Operator must restart manually after verifying no sync is in progress.
+
+tags: [snapraid, mergerfs, storage, parity, monitoring]
+links:
+  docs: https://github.com/firsttris/snapraid-ui
+  github: https://github.com/firsttris/snapraid-ui

@@ -1,0 +1,47 @@
+key: filebrowser
+display_name: Filebrowser
+description: Web-based file manager for your server — browse, upload, share, and edit files in the browser
+category: tools
+tier: 2
+icon: 📂
+version: "1.0"
+
+image: filebrowser/filebrowser
+image_tag: s6
+linuxserver: false
+
+ports:
+  web: 80
+
+volumes:
+  config: /config
+  media: /srv
+
+env:
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  TZ: "${TZ}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: files
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /health
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /health
+      expect_status: 200
+      interval: 60
+
+tags: [files, browser, upload, manager, tools]
+links:
+  docs: https://filebrowser.org/installation
+  github: https://github.com/filebrowser/filebrowser

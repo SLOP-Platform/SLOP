@@ -1,0 +1,34 @@
+key: autobrr
+display_name: Autobrr
+description: TODO — add a one-line description of Autobrr
+category: arr
+tier: 2
+
+image: ghcr.io/autobrr/autobrr
+image_tag: latest
+
+ports:
+  web: 7474
+
+reverse_proxy:
+  enabled: true
+  subdomain: autobrr
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 7474
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

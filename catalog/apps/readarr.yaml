@@ -1,0 +1,68 @@
+key: readarr
+display_name: Readarr
+description: Automated ebook and audiobook manager — monitors releases, downloads, and organises books
+category: arr
+tier: 2
+icon: 📗
+version: "1.0"
+
+image: lscr.io/linuxserver/readarr
+start_grace_s: 90
+health_grace_s: 90
+image_tag: develop
+linuxserver: true
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+
+ports:
+  web: 8787
+
+volumes:
+  config: /config
+  media: /data
+
+reverse_proxy:
+  enabled: true
+  subdomain: readarr
+
+wiring:
+  accepts:
+    - type: indexer
+      from: prowlarr
+      description: Prowlarr pushes indexer config to Readarr via API
+    - type: download_client
+      from: sabnzbd
+      optional: true
+      description: SABnzbd registers itself as a download client in Readarr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/v1/system/status
+    timeout: 120
+  - type: wire
+    target: prowlarr
+    wire_type: indexer
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/v1/system/status
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [arr, books, ebooks, audiobooks, media-management]
+links:
+  docs: https://wiki.servarr.com/readarr
+  github: https://github.com/Readarr/Readarr
+
+requires:
+  - prowlarr

@@ -1,0 +1,396 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/)
+and the project follows [Conventional Commits 1.0](https://www.conventionalcommits.org/).
+
+Pre-policy commits (before `4e4c9cb`) are listed at the end with no
+categorization. Per strategy
+[STEP_1_3_COMMIT_DISCIPLINE_STRATEGY.md](docs/cleanup/STEP_1_3_COMMIT_DISCIPLINE_STRATEGY.md)
+the commit-msg hook (Core Rule 7.1) enforces the format from that SHA
+forward; pre-policy commits are grandfathered.
+
+
+## Unreleased
+
+## [v4.2.0] — 2026-05-12
+
+v4.2 hardening arc — bookkeeping and vocabulary discipline. See `docs/cleanup/HARDENING_V4_2_PLAN.md` for full detail.
+
+### Added
+
+- **Tier 1 — Filesystem hygiene:** generalized `.gitignore` for runtime data directories; pytest scratch redirected to a dedicated tmp directory with 7-day cleanup; repository structure linter (`tests/test_repository_structure.py`) verifying canonical paths for key docs; structural anti-pattern checker (`tools/check_structural_antipatterns.py`) with registry-driven rules, `--staged` and `--audit` modes, and pre-commit integration.
+- **Tier 2 — Multi-document atomic enforcement:** `ms-rule-contract` tool enforcing the five-companion rule-addition contract (Core Rule 5.25); `--check` mode wired into pre-commit hook; `--audit` mode wired into CI (`enforce.yml`); 17 tests in `tests/test_rule_contract.py`.
+- **Tier 3 — Vocabulary discipline:** `docs/GLOSSARY.md` (46 entries, maintenance contract); `docs/RELEASE_PROCESS.md` codifying the four pre-release gates and tag creation procedure; vocabulary sweep completed across all project docs; `docs/adr/0012-rule-addition-contract.md`.
+- **Core Rules 5.23** (Repository Structure Discipline), **5.24** (Structural Anti-Pattern Discipline), **5.25** (Rule-Addition Contract Discipline).
+- **Known-flakes register:** `docs/KNOWN_FLAKES.md` formalizing 3 pre-existing test failures; `docs/RELEASE_PROCESS.md` §3.2 cross-references register for pre-flight verification.
+- (tools) install commit-msg hook via ms-setup-tools (step 1.3.c from v4.1 arc, shipping with v4.2.0)
+
+### Fixed
+
+- CI enforcement FSM check timeout raised 90s → 600s to cover full FSM suite duration (~325s observed).
+- `ms-rule-contract` false positive on heading edits (HEADING_RE made diff-aware).
+- `ms-coverage` entries backfilled for Core Rules 5.23 and 5.24 (coverage_map.json, snapshots).
+
+### Deferred to v4.3
+
+- Test isolation bug: Docker-reaching FSM tests leave root-owned scratch files (`docs/TODO_2026_05_10_root_owned_test_files.md`).
+- 4 fix-later TODOs filed from v4.2.0 audit (F1, F4, F7, F8): ledger coverage gap, structural antipatterns CI wiring, STRUCTURAL_RULES.md rule-004 entry, HARDENING_V4_2_AUDIT_RESULTS.md staleness.
+
+## Pre-policy (commits before `4e4c9cb`)
+
+These commits predate the Conventional Commits enforcement landing at
+`4e4c9cb` (step 1.3.c). Listed chronologically (newest first); no
+categorization. Per strategy doc — Core Rule 7.1 enforces the format
+from that SHA forward; pre-cutoff commits are grandfathered.
+
+- `544f46c` feat(tools): scaffold commit_msg_hook.py + correct strategy §3.2 regex (step 1.3.b)
+- `0f25559` docs(cleanup): mark 1.3.a done; advance step pointer to 1.3
+- `9b7b417` docs(cleanup): step 1.3.a — Conventional Commits + auto-CHANGELOG strategy
+- `0a28b38` docs(cleanup): mark 1.2.i done; step 1.2 fully complete (9/9 sub-tasks)
+- `ee02fd7` docs(rules): codify Core Rule 5.20 (Type Discipline) — step 1.2.i
+- `b1d6fbf` docs(cleanup): mark 1.2.h done; reconcile RECORD with verified state
+- `8784cc1` test(mypy): add tests/test_mypy_clean.py (step 1.2.h)
+- `b0211bc` docs(cleanup): mark 1.2.g done; reconcile RECORD with verified state
+- `b94e9fe` feat(enforce): add check_mypy() to Tier 1 (step 1.2.g)
+- `9f5a1e8` docs(cleanup): mark 1.2.f done; reconcile RECORD with verified state
+- `7a1ee1d` fix(types): type-cleanup for backend/api/ — mypy strict clean (step 1.2.f)
+- `005215b` fix(quickstart): type PHASES as list[dict[str, Any]] (mypy [index]/[dict-item])
+- `1ef0fca` fix(storage): assert source.id is not None before update_source_status (mypy [arg-type])
+- `fe20989` fix(models): undefined `files` -> local_files in registry endpoint (mypy [name-defined])
+- `188241b` fix(models): float() casts on RECOMMENDED_MODELS m[size_gb] (mypy [type-var]/[assignment]/[operator])
+- `ddfc204` fix(platform): assert proc.stdout is not None before iterating (mypy [union-attr])
+- `1639788` fix(platform): r.message -> r.error in Ollama install error path (mypy [attr-defined])
+- `3d650e8` fix(platform): use direct call instead of broken cross-module reset_platform import (mypy [attr-defined])
+- `e7afef9` fix(platform): drop StateDB._conn.commit() in infra reset (mypy [union-attr], Core Rule 4.4)
+- `69c77c8` fix(platform): annotate stopped/removed/failed lists as list[str] (mypy [var-annotated])
+- `494cadf` fix(main): drop StateDB._conn.commit() in startup cleanup (mypy [union-attr], Core Rule 4.4)
+- `39d86c5` fix(main): ContainerInfo attribute access instead of .get (mypy [attr-defined])
+- `7ccbb9d` fix(health): annotate JSON-parse result as dict[str, Any] (mypy [no-any-return])
+- `9065a06` fix(health): drop StateDB.commit() in fix_history update (mypy [attr-defined], Core Rule 4.4)
+- `a3919d6` fix(health): cascade_completion -> escalate_to_cloud (mypy [attr-defined])
+- `4e1374a` fix(health): annotate updated as dict[str, Any] in health-config update (mypy [assignment])
+- `0d57133` fix(settings): None-guard on __pydantic_extra__ in model_post_init (mypy [union-attr])
+- `b8861a5` fix(settings): lowercase any -> StateDB on agent-config helpers (mypy [valid-type])
+- `2e294d1` fix(apps): rename loop var e -> entry to avoid except-handler shadow (mypy [misc])
+- `6568b47` fix(apps): remove duplicate _installing module-level definition (mypy [no-redef])
+- `338cd3f` fix(apps): lowercase any -> typing.Any in _app_with_container (mypy [valid-type])
+- `2141ed9` docs(cleanup): mark 1.2.e done; reconcile RECORD with verified state
+- `0455c51` fix(types): type-cleanup for backend/health/ and backend/platform/ — mypy strict clean (step 1.2.e)
+- `ad58229` fix(storage): None-guard on lastrowid before get_source (mypy [arg-type])
+- `966d13c` fix(source_checker): str() casts on m["hf_url"]/m["name"] (mypy [arg-type])
+- `62431d3` fix(checker): aggregator skips BaseException, not just Exception (mypy [union-attr]) [HIGH]
+- `880a6f8` fix(checker): drop status="error" kwarg from CheckResult calls (mypy [call-arg])
+- `8e50bdc` fix(checker): annotate _llm_state as dict[str, Any] (mypy [operator]/[arg-type]/[index]/[assignment])
+- `fb02c6c` docs(cleanup): mark 1.2.d done; reconcile RECORD with verified state
+- `d9fb920` fix(types): type-cleanup for backend/infra/ and backend/manifests/ — mypy strict clean (step 1.2.d)
+- `a846224` fix(executor): TYPE_CHECKING import for InfraProvider forward ref (mypy [name-defined])
+- `3367aa5` fix(executor): guard source=None in _wire (mypy [union-attr])
+- `4c9195b` fix(executor): annotate _ensure_managed_service fragment as dict[str, Any] (mypy [assignment])
+- `86944c0` fix(test): TestBug_AutheliaImageUndefined passes required deploy cfg secrets
+- `5242874` fix(auth_authelia): replace bare IMAGE with literal in upsert_app (mypy [name-defined])
+- `51985dc` fix(test): TestBug_HeadscaleImageUndefined patches both StateDB binding sites
+- `ebef142` fix(test): TestBug_HeadscaleImageUndefined uses namespace swap, not frozen-dataclass setattr
+- `bafb6c6` fix(tunnel_headscale): replace bare IMAGE with literal in upsert_app (mypy [name-defined])
+- `b404a11` fix(management_alternatives): replace bare IMAGE/CONTAINER_NAME with literals (mypy [name-defined])
+- `aed1068` fix(auth_tinyauth): add module-level log getLogger (mypy [name-defined])
+- `8abddbd` fix(tunnel_cloudflare): add module-level log getLogger (mypy [name-defined])
+- `58f1854` docs(cleanup): backfill PROJECT_CLEANUP sub-task list per strategy §2.2
+- `53e41b3` docs(protocol): add VERIFICATION_PROTOCOL.md; cross-ref from HANDOFF
+- `c11b20c` docs(cleanup): mark 1.2.c done; reconcile RECORD with verified state
+- `aa76489` docs(cleanup): backfill mypy strategy §3; log dev-deps + mypy-pin TODOs
+- `e8f0d1d` docs(cleanup): mark 1.2.b done; reconcile RECORD + scope leak
+- `47c1ecb` fix(types): type-cleanup for backend/core/ — mypy strict clean (step 1.2.c)
+- `dc40bab` fix(system_eval): type annotation fixes for docker RAM and GPU info (mypy [assignment])
+- `77ab4fe` fix(ai_safety): pass platform to _register_app_hostname in reprovision_hostname (mypy [call-arg])
+- `c4f3747` fix(ai_safety): add text=True to remount_storage subprocess.run calls (mypy [assignment])
+- `ea64a39` fix(state): drop return False from StateDB.__exit__ (mypy [return-value])
+- `107b06c` chore(deps): add mypy>=1.10 and types-PyYAML for step 1.2.b
+- `d71ab64` docs(handoff): clarify roles — AI designs, project owner executes
+- `3ca494d` docs(handoff): document SSH-alias git auth; surface in ms-status pre-flight
+- `ad10f58` fix(ms-status): color full sub-task line; derive short chapter names
+- `3854cf1` feat(ms-status): expand current-step sub-tasks; add chat-title suggestion
+- `29c9566` feat(ms-status): suggest chat title in handoff prompt
+- `8986193` docs(workflow): add HANDOFF_PROTOCOL.md and ms-status
+- `f034b34` chore(tools): add cleanup-helpers.sh library for cleanup-step scripts
+- `6744994` docs(cleanup): refresh STATUS and 1.1.5 RECORD after j/k triage
+- `353c4ca` docs(todo): defer test-hardcodes-data-path fix at ms-test.py:1669
+- `1844fc0` fix(semgrep): generated-code-no-ast-verify uses scope-based exclusion
+- `797b0e1` fix(deps): upgrade fastapi 0.115.6→0.136.1, compatible with starlette 1.0.0
+- `c8659a7` docs(cleanup): 1.1.5.n mark step 1.1.5 complete in PROJECT_CLEANUP.md
+- `6c4a9cc` refactor(cleanup): 1.1.5.i remove redundant db._c.commit() from storage.py (Core Rule 4.4)
+- `b78dfdb` refactor(cleanup): 1.1.5.h remove redundant db._c.commit() from executor.py (Core Rule 4.4)
+- `ac72f9f` refactor(cleanup): 1.1.5.g remove redundant db._c.commit() from registry.py (Core Rule 4.4)
+- `15d1ade` refactor(cleanup): 1.1.5.f remove redundant db._c.commit() from source_checker.py (Core Rule 4.4)
+- `4e93126` refactor(cleanup): 1.1.5.e remove redundant db._c.commit() from managed_services.py (Core Rule 4.4)
+- `cebe42d` refactor(cleanup): 1.1.5.d remove redundant db._c.commit() from checker.py (Core Rule 4.4)
+- `2ae0b77` refactor(cleanup): 1.1.5.c remove redundant db._c.commit() from llm_router.py (Core Rule 4.4)
+- `8a4ebb3` refactor(cleanup): 1.1.5.b remove redundant db._c.commit() from ai_safety.py (Core Rule 4.4)
+- `cac9f0e` refactor(cleanup): 1.1.5.a remove redundant db._c.commit() from quickstart.py (Core Rule 4.4)
+- `83b675d` fix(ops): TODO #1+#2+#3 — gitignore tooling files, normalize-ownership covers .git/caches, remove redundant ms-update inline .git self-heal
+- `62dd430` docs(cleanup): add step 1.1.5 (Core Rule 4.4 cleanup); session TODO file
+- `932646e` fix(semgrep): bare-db-commit rule no longer matches StateDB internals
+- `d7ce8ed` docs(cleanup): mark 1.2.a done; correct 1.1 record on Tier 0 status
+- `14e67d3` docs(cleanup): step 1.2.a — mypy strategy + drop-in config
+- `37a9a50` fix(ops): normalize project ownership; prevent root-owned drift
+- `89a0362` fix(scripts): wrap script bodies in main() — fixes test_all_backend_files_importable
+- `d6d4aa9` fix(schema): regenerate-schema-sql.py adds IF NOT EXISTS to output
+- `0ff6906` feat(migrations): step 1.1 — database migration runner
+- `dbf1070` docs: project cleanup task list with model assignments
+- `0609ce8` docs: comprehensive software engineering principles audit + improvement plan
+- `5f260ce` Core Rule 2.10: Refactoring Contract + ms-refactor tool
+- `359727f` Restore dropped self-heal + fix trigger + add text-search validity tests
+- `d18c296` ms-test I2: check main.py for cleanup (not ms-update — never had it)
+- `ac5f9a2` ms-test.py: add DIM+CYAN color vars — fixes NameError in print_summary
+- `c2bcb45` ms-update: health banner uses ok()/warn()/fail() — proven to render correctly
+- `cdef7d0` ms-test.py: restore [PASS]/[FAIL]/[SKIP] canonical style in print_summary
+- `8c3aa3b` ms-update: health check lines use ok()/warn()/fail() for consistent indent
+- `03be908` Restore health banner dropped during heredoc extraction + regression test
+- `8d5e7fc` Root-cause all 3 bugs: ShellCheck, full pipeline schema coverage, ms-postmortem
+- `8b27317` Root-cause all 3 bugs: extract heredoc, fix schema gaps, add enforcement
+- `1c85b24` Fix 3 ms-update/ms-test issues: 999d bug, failure identification, summary clarity
+- `740bec8` Core Rule 2.9: Precondition Guard — systematic context-aware test framework
+- `7fdff10` Q3: skip when platform=pending — precondition for fragment check
+- `db59396` Systematic mechanism application: write-read cycles, table constants, Semgrep scope
+- `a075151` Add behavioral write→read cycle tests (the tests that would have caught Q3)
+- `014e0a7` enforce: Core Rules oracle + Q3 fix + F821 backend bug fixed
+- `b18c129` Core Rule 3.9: test paths must match production write paths
+- `99402f6` ms-test Q3: fix false positive for infra-slot apps without compose fragments
+- `d80abb4` ms-update: eliminate delay after health banner
+- `06e2caf` Design consistency: unify all ms-*** tools to ms-update canonical style
+- `396eb6e` ms-update: fix duplicate restart line and broken progress bar
+- `95b829b` ms-check: context-aware .env warnings
+- `7075992` ms-check: fix bad substitution ${#RULES[@]:-30} → hardcoded 47
+- `dc04992` ms-check: fix missing DIM/BOLD/RESET color variable definitions
+- `b8cbf88` requirements.txt: pin tomli==2.0.1 to resolve semgrep/pip-audit conflict
+- `55550f4` ms-setup-tools: fix pip-audit check (module pip_audit vs package pip-audit)
+- `349fa5f` ms-setup-tools: suppress pip root-user warning (--root-user-action=ignore)
+- `1e1d988` Platform install comprehensive tests (86 tests) + 3 LLM integration fixes
+- `48e7192` Complete LLM AI integration: fix 3 broken links in pipeline
+- `57ad1d4` Fill 5 identified gaps: setup-tools, Playwright data contracts, Semgrep verification, Hypothesis db, pip-audit in ms-check
+- `1848d07` Tier 1+2 testing tools: unified pipeline + LLM integration + 11 new rules
+- `08d65d5` Core Rules v1.1 + 9 new architectural rules + enforcement upgrades
+- `4e56e51` Core Rules document + project principles codified
+- `68199f1` Semantic rules in ms-coverage + _save_community_manifest() consolidation
+- `214c919` Clean up test artifacts from catalog/community + gitignore
+- `c28e4ec` Non-catalog install compliance + catalog fixes + 28 new tests
+- `c126019` Health Check FSM + FakeDockerClient infrastructure
+- `d38cb1b` FSM tests + unified framework + consolidation
+- `7bcab94` Complete testing framework + topology dashboard + 8 real bugs fixed
+- `508da84` Fix all remaining issues: topology dashboard, 500s, coverage map
+- `c0cff15` Complete testing framework: ms-testgen engine, consolidation, 1335 tests
+- `3e8c97e` ms-coverage: live topology + coverage map system
+- `ce4b2df` Complete E2E behavioral test suite + 4 real bugs found and fixed
+- `15c288e` Deep testing fix: runtime tests + tooling tests + frontend contracts
+- `26df93d` Add behavioral regression tests + fix 3 more result.stderr bugs
+- `3b5ca50` Fix ms-audit: gap persistence, route count display, matching accuracy
+- `8a35a71` Add contract tests for 2 new routes flagged by ms-audit
+- `2183151` Fix sidebar: v3→v4, stale domain after reset, route-based refresh
+- `879cbab` Fix prerequisites flash: skeleton loading state
+- `8f126b6` Fix prereqs auto-fill after reset + domain browser autofill
+- `ac62e59` Make git sync bulletproof: self-healing pull + ms-check monitoring
+- `354d6a3` Fix git pull blocked by tracked runtime files
+- `f861124` Fix platform reset: containers not stopped cleanly
+- `1a48609` Fix #1-5: Ollama timeout, AI quickstack, cloud providers, verbose labels
+- `11318ac` Fix executor test: update retry semantics test
+- `cfa1fee` Fix executor test: wrap docker_client.get_container in try/except
+- `09d8484` Fix app install: retry logic, parallel installs, health polling, redesigned UI
+- `a364ba2` Fix deploy bugs: VPN secrets not passed, result NameError, redundant notices
+- `5719406` Address remaining platform setup issues #3 #10 #13-15 #18
+- `19c6f85` Add llama.cpp as LLM provider + fix Ollama URL passthrough
+- `33719eb` Fix health.trigger_health_run: add try/except
+- `b57ab78` Fix 2 remaining failures: Q cert_resolver + Q5 gate test
+- `fe4ecc3` Fix 9 test failures + ms-audit pytest missing
+- `4aaacd3` Fix reset/full 500: harden against schema drift + missing tables
+- `85b4e7d` Fix platform setup blockers: #16 Ollama timeout, #2 VPN dropdown, #11/#12 AI UX, #20 reset
+- `c611406` Fix two ms-update delays: HTTP poll and ms-check silent capture
+- `4704d39` ms-test history: lifetime counter + cap 20→50
+- `129966e` Condense ms-test check labels: concise and consistent
+- `a053d76` Fix TEST SUMMARY section P label cut off
+- `01ad7a9` Section A performance: 4 optimizations
+- `165e1af` Fix SERVICE unbound variable + up-to-date footer display
+- `af7b2ed` Fix OLD_COMMIT lost across ms-update re-exec
+- `9559101` Fix all 5 display + test issues
+- `745f0f1` Unified ms-update display: one integrated health flow
+- `30aec17` ms-audit: fix 0 tests + multi-provider --improve
+- `3be14e8` ms-audit: fix 0 tests, urllib replaces anthropic SDK, remove importlib mode
+- `4b2e137` Fix ms-update: warn/ok called before function definitions
+- `03d6c8d` Remove runtime files from git tracking
+- `0abbbd2` Fix git pull silent failure + ms-audit REPO detection
+- `e30863a` ms-audit: bulletproof REPO detection via marker-file search
+- `f0a8684` Fix ms-audit REPO path: use os.path.realpath not Path.resolve
+- `0997851` Fix ms-audit symlink: install at sudo ms-update startup, not conditionally
+- `8c75905` Fix ms-audit: symlink, path resolution, test count, gap accuracy
+- `73bc405` Hardware evaluation: 6 gaps fixed in LLM model recommendation
+- `55ded7d` ms-test: silent compose skip during setup, warn only when platform=ready
+- `e7c7567` ms-audit: self-improving full contract audit tool
+- `1f33784` Comprehensive contract audit: 72-test suite + 3 bugs fixed
+- `10970c7` Fix traefik_dashboard_port: save to DB, not pass as kwarg
+- `2ba3f76` Fix 3 bugs: dashboard_port kwarg, long lines, Traefik message
+- `9dae6ad` ms-update: --full and --tests flags for manual full runs
+- `896b9b3` Second LLM audit pass: 5 more gaps fixed + startup race condition
+- `dd7ac31` LLM AI agent: full promise audit, 15 gaps found and fixed
+- `cd08eda` Semi-auto ms-update recommendations + LLM context sources 20-22
+- `1dd2f10` ms-update: smart post-update recommendations
+- `18b0ce0` 5 deep questions: layer gaps, infra-as-catalog-apps, AWAN LLM, ms-update optimization
+- `d6b2e81` Fix P7 bcrypt 500: requirements + import pattern + datetime warning
+- `4ed734a` ms-test fixes: port 8080, section filter, NameError, table list
+- `4219424` Automate testing: pre-commit hook, CI, ms-update, Makefile
+- `3953b03` Unified testing framework: contract tests + wizard gap fixes
+- `a13f124` Setup wizard: complete end-to-end audit and gap fixes
+- `c020eaa` Stage 9: automate Ollama install + model download in wizard
+- `5c02e3c` Platform Setup: stage 8 race fix, secret fields, auto-advance, Ollama URL
+- `3caa9ca` LLM offline fix: DNS errors, provider context, ms-test improvements
+- `5894aec` Wizard option coverage: all DNS providers, Gluetun, Komodo + ms-test Section P
+- `c6f1415` Platform Setup: 6 post-deploy fixes
+- `93886da` Prereqs optimization: parallel execution, tz fast path, single cpuinfo read, cache
+- `6d3fb59` Platform Setup: 6 post-deploy fixes
+- `0a93325` ms-test: self-improving, fault injection, logic sequence, test analysis
+- `ed8436f` LLM offline fix: DNS errors, provider context, ms-test improvements
+- `3fe719a` ms-test: self-improving, fault injection, logic sequence, test analysis
+- `2c0311f` Comprehensive test suite: ms-test.py + generator tool + shell fixes
+- `e29bd76` Orphan cleanup: ms-check fix, ms-update expanded, startup auto-clean
+- `536048b` Platform Setup: 6 post-deploy fixes
+- `37bc93f` Health: fix run cycle - read response, honest toast, non-running app context
+- `c600f62` Health: remove top button, inline progress, drop footer strip
+- `b9f37fe` Health: full page redesign
+- `0da6bb4` Settings: Platform tab, 2-col Health, equal-width tabs
+- `8cf578e` UI redesign: Settings compact, Health consolidation, Catalog/Storage/Infra consistency
+- `5d92276` ms-check: commit SHA + timestamp on All checks passed line
+- `d3e684d` 5 fixes: ms-update SHA, sidebar size, Traefik visibility, model selection, Stage 9 path
+- `d54b262` Platform Setup: 6 post-deploy fixes
+- `ee6fd95` UI redesign: Settings compact, Health consolidation, Catalog/Storage/Infra consistency
+- `75c82f6` 4 fixes: GPU vendor-aware, tunnel token hint, infra_selections type, catalog multi-select
+- `5bee496` LLM context + prompt: 8 gap fixes + full prompt rewrite
+- `d79672d` System fingerprint: OS, GPU, Docker, PUID/PGID, timezone at prereqs
+- `809756e` UI: distinct icons for Settings (gear) and Setup (wrench)
+- `65d9ed0` Setup: debrid stack + deploy error fixes
+- `13c73d4` Platform Setup: 6 issue fixes (stage nav scroll, multi-tunnel, headscale, dockhand, app search, DNS skip for tunnels, per-app install status, AI providers)
+- `91c54a9` LLM provider unification: 11 providers, cascade config, test button
+- `c9f7270` ms-update: self-update at top before bash buffers script
+- `dfafcc2` v4.0.0 — Docker migration + wizard completion + architecture tools
+- `c8eb8a3` Prereqs: remove Docker Hub check — not needed at setup time
+- `24b0809` Prereqs: fix Docker Hub check — accept HTTP 401 as reachable
+- `5a33300` Architecture map, integration tests, 10-stage setup wizard
+- `c5ccc75` Platform Setup: DNS dropdown, ntfy in wizard, reset fixes
+- `54e9080` LLM context + prompt: 8 gap fixes + full prompt rewrite
+- `a8d3f74` ms-update: bar inline with restart label, clean fill
+- `8c7d934` Catalog skeleton→content width shift — scrollbar gutter fix
+- `a7d0079` Catalog: install dialog UX + Reinstall + details link
+- `8f2873d` Catalog: 100vh min-height eliminates horizontal shift on category switch
+- `a1ca4aa` Health checks, smoke test, fix history, QuickStart + LLM context updates
+- `3f25e40` ms-update: self-update at top before bash buffers script
+- `e1de232` ms-update: 5-char spacing + re-exec when script updates itself
+- `68a9ced` ms-update: bar inline with restart label, clean fill
+- `eb57dd0` Catalog: fix horizontal jump + app icons in selection bar
+- `3f01ba9` ms-update: remove brackets from progress bar
+- `b5f6901` Custom app moved to Settings, catalog full-width
+- `22ca016` ms-update: progress bar on restart wait, drop 3/3
+- `c7f3d40` ms-update: 15-char bar, fix spacing before health check
+- `41ffa45` ms-update: 20-char bar in brackets, no separator lines
+- `2e141e9` ms-update: compact static bar under commit line
+- `e9bff66` ms-update: progress bars + update OLD→NEW commit format
+- `a5fe1c9` UI polish: spacing, install dialog, timestamp fix, dependency handling
+- `e838cae` UI polish pass — instant render across all pages via prefetch cache
+- `f5092aa` Catalog: instant skeleton + session cache eliminates load delay
+- `14ffd2e` Catalog skeleton→content width shift — scrollbar gutter fix
+- `b720d7b` Frontend performance audit — all 14 issues fixed
+- `99b85d1` Eliminate all pop-in and layout-building effects
+- `dba82e8` Fix page width hitch on load — w-full + main layout fix
+- `bb3de1d` Catalog: instant skeleton + session cache eliminates load delay
+- `3ddb462` Consistent content width — all pages max-w-4xl
+- `1ae5e61` Catalog 3-col grid + consistent page width across all views
+- `fdecf07` Catalog broken — localai.yaml bad volumes + selection bar to top
+- `f032d54` Health checks, smoke test, fix history, QuickStart + LLM context updates
+- `320a239` AI fix approval system — all 4 priorities
+- `a666bf4` LLM context: 17-source assembler + runtime container diagnostics
+- `9e54bc9` Context assembler + QuickStart wizard + ms-check improvements
+- `c2816a9` ms-check: 8 smart improvements — auto-fix, cross-talk, better diagnostics
+- `76b7927` ms-update: commit shown after restart using new code, reliable sed strip
+- `525aa13` ms-update: commit line fits terminal — strip all type prefixes, cap 55 chars
+- `e65f8b5` ms-update: cleaner commit line — strip type prefix, more subject space
+- `310594a` fix: LLM Models page layout — header, download bar, spacing
+- `fb34912` feat: source availability monitoring — Tier 1 scan + Tier 2 LLM replacement
+- `291366b` fix+feat: model URLs, HF token to Settings, UI density + spacing
+- `9dcff27` fix: health checks used Docker container DNS — unreachable from host service
+- `fd0d962` feat: cloud inference providers + maintenance windows + HF-style model cards
+- `d3e4ac1` feat: intelligent multi-model LLM routing
+- `4324511` feat: LLM Models polish — compact cards, real hardware eval, 3-col recommended
+- `cd9ee54` feat: LLM Models UI overhaul — compact cards, enable buttons, provider switcher
+- `d3619d1` feat: model enable flow + routing history log
+- `113c8ad` fix: installed models now shows Ollama-managed models too
+- `d421963` fix: Ollama URL localhost + inline config + GGUF import instructions
+- `c29666a` fix: LLM agent — show ms-update commit after pull; use live Ollama ping for diagnostics
+- `ba978b9` fix: LLM agent diagnostics — clear errors, causes, and fix hints
+- `e24b8a8` feat: intelligent multi-model LLM routing
+- `0d2b2f3` fix: models HF token persists + actually used in downloads
+- `c1f8d55` fix: 9 issues — dashboard, catalog, models, health anomalies
+- `9c06cd5` feat: multi-tunnel support — Cloudflare + Tailscale + Headscale simultaneously
+- `ba58b74` feat: multi-provider tunnel — run Cloudflare + Tailscale + Headscale simultaneously
+- `69405e4` fix: infra deploy always called swap due to missing .value on showingSwap ref
+- `95de6e5` feat: UI polish pass — icons, remove feedback, catalog layout, settings cleanup
+- `281a0cf` fix: ms-update self-heal uses Python instead of sqlite3 CLI
+- `62584d6` fix: ms-update self-heals orphaned fragments + stale health records
+- `1c9e233` fix: remove_app now purges health_checks + history for uninstalled apps
+- `e291cad` fix: ms-update shows commit after pull; ms-check uses container inspect for Traefik
+- `cac8932` fix: ms-check Traefik template error — .Config.Image missing for some container configs
+- `6e944aa` fix: startup grace period — prevent health check false positives on container restart
+- `e5e74c4` feat: UI polish pass — 10 improvements across 6 views
+- `ce803dd` feat: systematic API mismatch scanner + LLM test proposal system + suite optimization
+- `7acc786` chore: remove test artifacts again (install-custom smoke test recreates them)
+- `f9cb801` fix: evaluate-hardware GET + pin HTTP verbs + fetch method alignment tests
+- `fae9322` chore: remove stale x.yaml test artifacts (git tracked them)
+- `0a243d8` test: health checks for all failure modes from dev session
+- `6347314` fix: catalog card template — template replacement had silently failed
+- `91155eb` fix: serve favicon and root icons explicitly before SPA fallback
+- `9a13e60` feat: catalog redesign — real app icons, larger cards, no descriptions, no checkboxes
+- `064bc62` fix: ms-check auto-fixes .env permissions when run as root
+- `915127d` fix: ms-update chmod .env before ms-check runs
+- `1e88930` fix: ms-check port/cert/ghost warnings + ms-check symlink self-heal
+- `039faa5` feat: orange favicon + browser tab icon
+- `c1517e5` fix: ms-check port check — replace gawk 3-arg match with grep/proc
+- `5db4f36` fix: ms-update/ms-check symlink resolution
+- `885d5bb` feat: complete outstanding items — providers, config forms, ghost UI, version pinning, post-install steps
+- `e6463fc` feat: complete outstanding items — version pinning, ghost UI, config schema, Traefik settings, GHCR
+- `36d8a00` fix: missing install-custom endpoint, install.sh ms-check symlink, SQLite Row.get()
+- `f6a2cfb` fix: 9 endpoint bugs found in systematic sweep + provider registry
+- `5972d63` fix: GET /api/apps Docker graceful, disable_app FileNotFoundError, _c.execute cleanup
+- `07f079f` fix: comprehensive review — provider registry, VPN slot, GitHub install, DB access
+- `8487b63` fix: deep review — StateDB commit bug, anomaly Row.get(), logs 503, 63 new tests
+- `68aedbf` feat: cloud LLM cascade + multi-provider + platform AI review + apply fix + cost tracking
+- `84682fa` feat: complete pending queue — RAG, anomaly detection, safety model, YAML linter, pending actions, thumbs feedback
+- `86307fc` feat: LLM hardware eval + model management + infra redesign + catalog polish
+- `4503cc3` fix: comprehensive audit — --env-file on all compose calls, Traefik fixes, ms-check, ghost detection
+- `c56a484` fix: wizard port check allows Traefik already owning 80/443
+- `c3689d2` feat: install.sh + catalog redesign + secrets UI + batch install + infra fixes
+- `7bb203d` feat: ms-update auto-install + re-run setup from Settings
+- `0ef1639` feat: Buypass CA + ms-update one-liner deploy script
+- `d83efcb` feat: setup wizard — ZeroSSL as primary CA + reset-on-failure (#1 and #2)
+- `b1911cb` fix: CI failures — node20 deprecation, session_a async tests, cf_auto_register default
+- `2e78546` feat: add ACME email and DNS provider fields to setup wizard UI
+- `5afdeca` fix: change default config_root to /srv/slop/config
+- `ed85cbc` fix: write_fragment includes networks external declaration
+- `140e9da` fix: Comprehensive audit pass — S1-S4, F1-F5, C1-C5, Q1-Q4 + fresh audit
+- `e4fe109` fix: Bugs/gaps audit pass — S1-S4, F1-F5, C1-C5, Q1-Q4
+- `f4b53e6` docker: Dockerfile, docker-compose.yml, .env.example, DOCKER_INSTALL.md
+- `1b4047b` polish: Toast system, scheduler non-overlapping guard, migration docs
+- `12f9070` fix: Critical bugs and functional gaps — all 7 items resolved
+- `3ac62d8` fix: Session D — 6 production deployment bugs fixed
+- `efa98f4` feat: Session C — multi-instance routing UI, ms CLI, v2 migration
+- `9506895` feat: Session B — install streaming, infra modals, settings view, SSE models download
+- `1af04df` feat: Session A — CF hostname auto-registration, smoke tests, health scheduler
+- `4ae12c1` feat: TLS recommendations + Steps 9–10 — registry, CI/CD, docs, all views
+- `ea81e86` feat: Step 8 — Vue 3 frontend + Dockhand/Dockge/Komodo/Portainer BE + 48 manifests
+- `234ed34` feat: Step 7 — health monitoring, LLM agent, new providers, wizard eval
+- `49be3a5` feat: multi-instance routing + full arr catalog (45 manifests)
+- `8268bd6` feat: debrid stack + external storage + FUSE capability system
+- `a9ef205` feat: catalog expansion to 36 apps + graceful disable + system eval + Step 4 foundations
+- `ce6a945` feat: catalog expansion, MariaDB managed service, GGUF model system
+- `95ff0f4` feat: Step 4 — app add/remove/replace automation + catalog additions
+- `bd8ad03` feat: add scrutiny + snapraid_ui manifests with data-safety guards
+- `686fc41` feat: add Glance dashboard to catalog
+- `a0dc78a` chore: remove Karakeep and companion manifests from catalog
+- `00a59c6` feat: add 6 new catalog manifests + companions system
+- `6041efb` feat: Step 3 — platform wizard, Docker client, compose fragments, API
+- `eed139b` feat: Step 2 — app manifest system
+- `cc291c9` feat: Step 1 — repo structure + SQLite state schema

@@ -1,0 +1,48 @@
+key: lazylibrarian
+display_name: LazyLibrarian
+description: Automated book, magazine, and comic manager — monitors and downloads publications
+category: arr
+tier: 2
+
+image: lscr.io/linuxserver/lazylibrarian
+image_tag: latest
+linuxserver: true
+
+ports:
+  web: 5299
+
+reverse_proxy:
+  enabled: true
+  subdomain: lazylibrarian
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 5299
+      expect_status: 200
+      interval: 30
+
+wiring:
+  accepts:
+    - type: indexer
+      from: prowlarr
+      description: Prowlarr pushes indexer config to LazyLibrarian
+    - type: download_client
+      from: sabnzbd
+      optional: true
+      description: SABnzbd registers as download client in LazyLibrarian
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+  - type: wire
+    target: prowlarr
+    wire_type: indexer

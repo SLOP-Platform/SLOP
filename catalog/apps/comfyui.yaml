@@ -1,0 +1,50 @@
+key: comfyui
+display_name: ComfyUI
+description: Node-based stable diffusion GUI — visual workflow editor for AI image generation
+category: ai
+tier: 2
+
+image: ghcr.io/ai-dock/comfyui
+image_tag: latest-cuda
+start_grace_s: 120
+
+ports:
+  web: 8188
+
+volumes:
+  config: /workspace
+
+reverse_proxy:
+  enabled: true
+  subdomain: comfyui
+
+gpu:
+  optional: false
+  warn_if_absent: true
+  nvidia: true
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 8188
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /
+    timeout: 180
+
+tags: [ai, stable-diffusion, image-generation, gpu]
+links:
+  github: https://github.com/comfyanonymous/ComfyUI
+  docs: https://docs.comfy.org

@@ -1,0 +1,89 @@
+key: opencode
+display_name: OpenCode
+description: >-
+  Browser-accessible AI coding assistant. Connect your own LLM API keys
+  (OpenAI, Anthropic, Groq, LiteLLM, and 20+ others) — no local GPU required.
+  Mount a server-side code folder as the workspace; open OpenCode in any browser
+  and edit files with AI assistance.
+  NOTE: Uses node:24-trixie base image — npm installs opencode-ai@latest at first
+  start (joostme/opencode-docker image does not exist on Docker Hub).
+category: ai
+tier: 2
+icon: 💻
+version: "1.0"
+linuxserver: false
+
+image: node
+image_tag: "24-trixie"
+
+# npm install runs at container start — allow extra time before health checks
+start_grace_s: 60
+
+# command override: install opencode-ai at startup then launch web server
+extra_config:
+  command:
+    - sh
+    - -c
+    - "npm install -g opencode-ai@latest && opencode web --hostname 0.0.0.0 --port 4040"
+
+ports:
+  web: 4040
+
+volumes:
+  config: /root/.config/opencode
+  custom:
+    - host: "<prompt:workspace_path>"
+      container: /workspace
+    - host: "{config_root}/opencode/share"
+      container: /root/.local/share/opencode
+    - host: "{config_root}/opencode/state"
+      container: /root/.local/state/opencode
+    - host: "{config_root}/opencode/cache"
+      container: /root/.cache/opencode
+
+env:
+  OPENCODE_SERVER_PASSWORD: "${OPENCODE_SERVER_PASSWORD:-}"
+
+auto_secrets:
+  - key: OPENCODE_SERVER_PASSWORD
+    length: 24
+
+install_prompts:
+  - key: workspace_path
+    label: "Code workspace folder"
+    description: >-
+      Path on this server to mount as the OpenCode workspace
+      (e.g. /home/user/projects). Leave blank to skip — you can add it later
+      via docker-compose.
+    type: path
+    required: false
+    default: ""
+
+reverse_proxy:
+  enabled: true
+  subdomain: opencode
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 180
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+post_install:
+  - "Set OPENCODE_SERVER_PASSWORD in your .env file — access is unprotected without it."
+  - "Configure your LLM provider in OpenCode's settings. Point to LiteLLM (http://litellm:4000/v1) to use all your local and cloud models through one endpoint."
+  - "The workspace folder you specified at install is mounted at /workspace inside the container. Files you edit there are saved to your server."
+
+tags: [ai, llm, coding, assistant, openai-compatible]
+links:
+  github: https://github.com/anomalyco/opencode
+  docs: https://opencode.ai/docs/web/

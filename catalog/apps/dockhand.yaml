@@ -1,0 +1,55 @@
+key: dockhand
+display_name: Dockhand
+description: Modern Docker management — containers, Compose stacks, Git deployments, vulnerability scanning, and update tracking in one lightweight container
+category: tools
+tier: 2
+icon: 🐋
+version: "1.0"
+
+# Dockhand (fnsys/dockhand) — the recommended Portainer alternative.
+# Built-from-scratch OS layer (Wolfi), zero telemetry, free forever for homelabs.
+# Optional PostgreSQL for persistence; SQLite default works for single-host setups.
+# Enterprise: same image unlocked with a license key (OIDC, RBAC, LDAP, audit logs).
+
+image: fnsys/dockhand
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 3000
+
+volumes:
+  config: /app/data
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: false
+
+env:
+  TZ: "${TZ}"
+  # Optional PostgreSQL — leave blank to use SQLite (recommended for single host)
+  # DATABASE_URL: "postgresql://dockhand:${DOCKHAND_DB_PASSWORD}@postgres:5432/dockhand"
+
+reverse_proxy:
+  enabled: true
+  subdomain: dockhand
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [docker, management, containers, stacks, git, tools]
+links:
+  docs: https://dockhand.pro/manual/
+  github: https://github.com/Finsys/dockhand

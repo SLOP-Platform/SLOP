@@ -1,0 +1,63 @@
+key: affine
+display_name: AFFiNE
+description: Open-source Notion alternative — block-based docs, whiteboards, and databases in one workspace
+category: productivity
+tier: 2
+icon: 🎨
+version: "1.0"
+
+image: ghcr.io/toeverything/affine-graphql
+start_grace_s: 90
+health_grace_s: 90
+image_tag: stable
+linuxserver: false
+
+ports:
+  web: 3015
+  extra:
+    - name: sync
+      internal: 3011
+      protocol: tcp
+
+volumes:
+  config: /root/.affine
+
+env:
+  NODE_ENV: production
+  AFFINE_ENV: selfhosted
+  AFFINE_SERVER_HTTPS: "true"
+  DATABASE_URL: "postgresql://slop:${POSTGRES_PASSWORD}@postgres:5432/affine"
+  REDIS_SERVER_HOST: "redis"
+
+dependencies:
+  postgres: true
+  redis: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: affine
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [notes, wiki, whiteboard, productivity, collaboration, notion-alternative]
+links:
+  docs: https://docs.affine.pro/docs/self-host-affine
+  github: https://github.com/toeverything/AFFiNE

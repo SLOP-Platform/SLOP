@@ -1,0 +1,1 @@
+"""SLOP CLI — ms command."""

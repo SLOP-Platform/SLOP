@@ -1,0 +1,60 @@
+key: dockge
+display_name: Dockge
+description: Reactive Docker Compose stack manager — edit, deploy, and monitor compose.yaml files through a clean web UI
+category: tools
+tier: 2
+icon: 🎩
+version: "1.0"
+
+# Dockge by Louis Lam (creator of Uptime Kuma).
+# Compose-first philosophy — every action writes back to the compose.yaml file.
+# The stacks directory MUST be the same path inside and outside the container.
+# Existing stacks can be adopted by moving compose files into the stacks dir.
+
+image: louislam/dockge
+image_tag: "1"
+linuxserver: false
+
+ports:
+  web: 5001
+
+volumes:
+  config: /app/data
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: false
+    # IMPORTANT: stacks path must match inside and outside container.
+    # Use ${CONFIG_ROOT} (docker-compose .env interpolation) so the SAME literal
+    # path is substituted on BOTH sides + in DOCKGE_STACKS_DIR — non-root,
+    # under the wizard-configured config_root (was root-required /opt/stacks).
+    - host: "${CONFIG_ROOT}/dockge/stacks"
+      container: "${CONFIG_ROOT}/dockge/stacks"
+
+env:
+  TZ: "${TZ}"
+  DOCKGE_STACKS_DIR: "${CONFIG_ROOT}/dockge/stacks"
+
+reverse_proxy:
+  enabled: true
+  subdomain: dockge
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [docker, compose, stacks, management, tools]
+links:
+  docs: https://github.com/louislam/dockge/wiki
+  github: https://github.com/louislam/dockge

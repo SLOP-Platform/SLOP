@@ -1,0 +1,103 @@
+key: plex
+display_name: Plex Media Server
+description: The gold standard media server — Plex Pass optional, clients on every platform, hardware transcoding support
+category: media
+tier: 1
+icon: 🎬
+version: "1.0"
+
+# ── Access routing ─────────────────────────────────────────────────────────
+# service_type: media — Plex uses DIRECT port 443 (not Cloudflare Tunnel).
+# Cloudflare's ToS prohibits routing video through their CDN/proxy.
+# Traefik presents the wildcard cert (*.domain.com) for this subdomain.
+# DNS record for plex.domain.com must be set to "DNS only" (gray cloud).
+#
+# Plex also supports its own plex.direct certificate infrastructure for
+# the Plex relay server — no DNS config needed if using that instead.
+#
+# Hardware transcoding: add /dev/dri device in extra_env if Plex Pass active.
+
+service_type: media
+
+image: plexinc/pms-docker
+start_grace_s: 120
+health_grace_s: 120
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 32400
+  extra:
+    - name: dlna-udp
+      internal: 1900
+      protocol: udp
+    - name: plex-companion
+      internal: 3005
+      protocol: tcp
+    - name: gdm1
+      internal: 32410
+      protocol: udp
+    - name: gdm2
+      internal: 32412
+      protocol: udp
+    - name: gdm3
+      internal: 32413
+      protocol: udp
+    - name: gdm4
+      internal: 32414
+      protocol: udp
+    - name: bonjour
+      internal: 5353
+      protocol: udp
+
+volumes:
+  config: /config
+  custom:
+    - host: "{media_root}/movies"
+      container: /movies
+    - host: "{media_root}/tv"
+      container: /tv
+    - host: "{media_root}/music"
+      container: /music
+    - host: "{config_root}/plex/transcode"
+      container: /transcode
+
+env:
+  TZ: "${TZ}"
+  PLEX_CLAIM: "${PLEX_CLAIM:-}" # optional — get from plex.tv/claim (expires 4min); blank = start unclaimed
+  ADVERTISE_IP: "https://plex.${DOMAIN}:443"
+
+gpu:
+  optional: true
+  warn_if_absent: true
+  nvidia: true
+  amd: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: plex
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /web/index.html
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /identity
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+tags: [media, plex, streaming, movies, tv, music]
+links:
+  docs: https://support.plex.tv/articles/200288586-installation/
+  claim: https://plex.tv/claim

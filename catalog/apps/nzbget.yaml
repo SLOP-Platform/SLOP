@@ -1,0 +1,65 @@
+key: nzbget
+display_name: NZBGet
+description: TODO — add a one-line description of NZBGet
+category: downloader
+tier: 2
+
+image: lscr.io/linuxserver/nzbget
+image_tag: latest
+
+ports:
+  web: 6789
+
+reverse_proxy:
+  enabled: true
+  subdomain: nzbget
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 6789
+      expect_status: 200
+      interval: 30
+
+wiring:
+  connects_to:
+    - type: download_client
+      to: sonarr
+      optional: true
+      description: Register NZBGet as download_client in sonarr
+    - type: download_client
+      to: radarr
+      optional: true
+      description: Register NZBGet as download_client in radarr
+    - type: download_client
+      to: lidarr
+      optional: true
+      description: Register NZBGet as download_client in lidarr
+    - type: download_client
+      to: readarr
+      optional: true
+      description: Register NZBGet as download_client in readarr
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+  - type: wire
+    target: sonarr
+    wire_type: download_client
+  - type: wire
+    target: radarr
+    wire_type: download_client
+  - type: wire
+    target: lidarr
+    wire_type: download_client
+  - type: wire
+    target: readarr
+    wire_type: download_client

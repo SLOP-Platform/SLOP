@@ -1,0 +1,54 @@
+key: mylar3
+display_name: Mylar3
+description: Automated comic book manager — monitors ComicVine releases, downloads, and organises issues
+category: arr
+tier: 2
+icon: 🦸
+version: "1.0"
+
+image: lscr.io/linuxserver/mylar3
+image_tag: latest
+linuxserver: true
+
+ports:
+  web: 8091
+
+volumes:
+  config: /config
+  media: /data
+
+reverse_proxy:
+  enabled: true
+  subdomain: mylar3
+
+wiring:
+  accepts:
+    - type: indexer
+      from: prowlarr
+      description: Prowlarr pushes indexer config to Mylar3 via API
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 90
+  - type: wire
+    target: prowlarr
+    wire_type: indexer
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [arr, comics, manga, media-management]
+links:
+  docs: https://github.com/mylar3/mylar3/wiki
+  github: https://github.com/mylar3/mylar3
+
+requires:
+  - prowlarr

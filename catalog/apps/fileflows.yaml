@@ -1,0 +1,55 @@
+key: fileflows
+display_name: FileFlows
+description: File processing automation — watch folders, apply flows, rename/transcode/move files
+category: tools
+tier: 2
+icon: 🔄
+version: "1.0"
+
+image: revenz/fileflows
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 19200
+
+volumes:
+  config: /app/Data
+  media: /media
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: true
+    - host: "{config_root}/fileflows/temp"
+      container: /temp
+
+env:
+  TZ: "${TZ}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: fileflows
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/system/info
+    timeout: 90
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/system/info
+      expect_status: 200
+      interval: 60
+
+tags: [files, automation, transcoding, processing, workflow]
+links:
+  docs: https://fileflows.io/docs
+  github: https://github.com/revenz/FileFlows
+
+recommends:
+  - sonarr
+  - radarr

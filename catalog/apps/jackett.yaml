@@ -1,0 +1,36 @@
+key: jackett
+display_name: Jackett
+# Jackett uses Torznab — not compatible with Prowlarr Applications API wire handler.
+# Manual Torznab configuration required. A Jackett-specific wire handler is planned but not yet implemented.
+description: Torznab proxy — bridges torrent indexers to Sonarr/Radarr/etc via Torznab API
+category: arr
+tier: 2
+
+image: lscr.io/linuxserver/jackett
+image_tag: latest
+
+ports:
+  web: 9117
+
+reverse_proxy:
+  enabled: true
+  subdomain: jackett
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 9117
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

@@ -1,0 +1,66 @@
+key: midarr
+display_name: Midarr
+description: Minimal movie and TV streaming server — clean, fast media front-end for Radarr/Sonarr
+category: media
+tier: 2
+
+image: ghcr.io/midarrlabs/midarr-server
+image_tag: latest
+start_grace_s: 60
+
+ports:
+  web: 4000
+
+reverse_proxy:
+  enabled: true
+  subdomain: midarr
+
+companions:
+  - key: midarr-db
+    image: postgres
+    image_tag: "15"
+    container_name: midarr-db
+    environment:
+      POSTGRES_USER: midarr
+      POSTGRES_PASSWORD: midarr
+      POSTGRES_DB: midarr_db
+    volumes:
+      # Postgres data under the wizard-configured config_root (was root-required
+      # /var/lib/slop/midarr/postgres, which the executor — running as the service
+      # user — cannot create under /var/lib). {config_root} is expanded by _expand_path
+      # and the dir is created by _build_companion_volumes; container path
+      # (/var/lib/postgresql/data) is distinct, so no same-path constraint. The
+      # postgres:15 entrypoint runs as root and chowns PGDATA to its own user, so the
+      # 0o777 host dir (no run_as_uid set, matching the hermes_agent sibling) is fine.
+      - host: "{config_root}/midarr/postgres"
+        container: /var/lib/postgresql/data
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 4000
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120
+
+tags: [media, streaming, sonarr, radarr]
+links:
+  github: https://github.com/midarrlabs/midarr-server
+  docs: https://github.com/midarrlabs/midarr-server/wiki
+
+recommends:
+  - sonarr
+  - radarr

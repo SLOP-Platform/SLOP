@@ -1,0 +1,71 @@
+key: glance
+display_name: Glance
+description: Feed-centric dashboard — RSS, Reddit, YouTube, weather, Docker stats and more in one page
+category: monitoring
+tier: 2
+icon: 👀
+version: "1.0"
+
+# Glance (32k+ stars) is a lightweight YAML-configured dashboard.
+# Config lives in glance.yml — mount it at /app/config/glance.yml.
+# No env vars needed for core operation; API keys go in glance.yml.
+# Optionally mount the Docker socket to enable the Docker containers widget.
+
+image: glanceapp/glance
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8080
+
+volumes:
+  # glance.yml is the primary config — SLOP writes a starter config on deploy
+  config: /app/config
+  custom:
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: true
+
+# F6b: Glance crash-loops on first start without a glance.yml. Seed a minimal
+# valid starter config into config_path (/app/config) before deploy. Users can
+# edit it freely afterwards — a reinstall never overwrites an existing file.
+seed_config:
+  - dest: glance.yml
+    content: |
+      pages:
+        - name: Home
+          columns:
+            - size: full
+              widgets:
+                - type: clock
+                - type: calendar
+
+reverse_proxy:
+  enabled: true
+  subdomain: glance
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    expect_status: 200
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [dashboard, rss, feeds, monitoring, widgets]
+links:
+  docs: https://github.com/glanceapp/glance/blob/main/docs/configuration.md
+  github: https://github.com/glanceapp/glance

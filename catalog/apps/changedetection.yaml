@@ -1,0 +1,47 @@
+key: changedetection
+display_name: Changedetection.io
+description: Monitor any website for changes — price tracking, page updates, content alerts
+category: monitoring
+tier: 2
+icon: 👁️
+version: "1.0"
+
+image: ghcr.io/dgtlmoon/changedetection.io
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 5000
+
+volumes:
+  config: /datastore
+
+env:
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  TZ: "${TZ}"
+  BASE_URL: "https://changedetection.${DOMAIN}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: changedetection
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [monitoring, alerts, tracking, websites, automation]
+links:
+  docs: https://changedetection.io/docs
+  github: https://github.com/dgtlmoon/changedetection.io

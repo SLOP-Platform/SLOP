@@ -1,0 +1,28 @@
+[Unit]
+Description=SLOP scheduled backup (config volumes + platform DB) with restore-verify
+Documentation=https://github.com/Nnyan/SLOP
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=slop
+Group=slop
+WorkingDirectory={{ install_dir }}
+Environment=MS_DATA_DIR={{ data_dir }}
+# `python3 -m cli.ms_backup` already finds `cli` via WorkingDirectory (the -m flag prepends cwd
+# to sys.path — the same mechanism the `ms-backup` wrapper's `cd $ROOT` relies on). PYTHONPATH is
+# belt-and-suspenders: it keeps the import robust if the venv python is ever run under -P /
+# PYTHONSAFEPATH (which disables the cwd prepend). Explicit > implicit for a deployed unit.
+Environment=PYTHONPATH={{ install_dir }}
+# --all = every backup_supported app + the SLOP platform DB; each tar is restore-verified
+# immediately (writes the GROUND .verify-*.json sidecar the recovery agent reads). A DRIFT
+# verdict exits non-zero so a failed restore-verify surfaces in `systemctl status ms-backup`
+# and the journal — recoverability is advisory, so the timer never blocks SLOP itself.
+# --keep 14 couples the SCHEDULED run to the §3 retention prune (default keep=0 prunes nothing →
+# unbounded growth). --due-only (#1284) makes the cadence a settings write, not a unit re-render:
+# the timer fires hourly but each app backs up only when its newest backup is older than its
+# cadence (backup_cadence_hours setting, default 24h; per-app overrides in backup_cadence_overrides).
+ExecStart={{ install_dir }}/.venv/bin/python3 -m cli.ms_backup --all --keep 14 --due-only
+StandardOutput=journal
+StandardError=journal

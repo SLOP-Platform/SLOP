@@ -1,0 +1,34 @@
+key: unmanic
+display_name: Unmanic
+description: TODO — add a one-line description of Unmanic
+category: media
+tier: 2
+
+image: josh5/unmanic
+image_tag: latest
+
+ports:
+  web: 8888
+
+reverse_proxy:
+  enabled: true
+  subdomain: unmanic
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 8888
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

@@ -1,0 +1,434 @@
+# installer/readiness_manifest.yaml
+# Step 3.3 evidence manifest: declares the verification predicates that
+# constitute a passing v5.0 install on a target distro. Read by
+# tools/check-readiness.py; consumed by Step 4.5 audit gate.
+#
+# Refreshed 2026-05-17 per ADR 0016 (Shape B):
+#   v5.0.0 supported set: ubuntu_24_04, debian_13, debian_12.
+#   ubuntu_22_04 archived; pointer in archived_distros section.
+#   ubuntu_26_04 NOT added at v5.0.0; five Class D sub-predictions
+#   in predicted_classes_v501_deferred for forward-looking visibility.
+
+schema_version: 1
+adr_reference: "docs/adr/0015-first-run-readiness-contract.md"
+audit_gate_invariants: ["INV-7", "INV-8", "INV-9", "INV-10", "INV-11"]
+
+# The five core predicates apply to every distro in the matrix.
+# Distro-specific evidence captures supplement these without replacing them.
+core_predicates:
+
+  - id: installer_exit_0
+    description: "The install invocation exits with status 0."
+    evidence_paths: ["install.stdout.log", "install.stderr.log", "install.exit_code"]
+    check:
+      type: file_contents_equal
+      path: "install.exit_code"
+      expected: "0"
+
+  - id: smoke_test_invoked
+    description: "smoke_test stdout banner appears in installer stdout (success path only)."
+    evidence_paths: ["install.stdout.log", "smoke_invocation.evidence"]
+    check:
+      type: stdout_banner_position
+      path: "install.stdout.log"
+      banner_substring: "Install complete."
+      position: "any"
+      # position "any" verifies the banner exists — it is only emitted on the
+      # install success path (post_install.py:write_post_install_file), so
+      # presence implies success.  "final_third" was too strict in practice
+      # because POST_INSTALL.txt content (echoed after the banner) makes up
+      # ~34% of the stdout log on a minimal apt install, pushing the banner
+      # to the ~66% position — right at the 2/3 boundary.  Corrected at
+      # Commit 2 after observing the first real install run.
+
+  - id: post_install_inv8
+    description: "POST_INSTALL.txt exists, mode 0644, owner slop:slop, no unfilled placeholders."
+    evidence_paths: ["post_install.txt", "post_install.stat", "post_install.placeholders"]
+    check:
+      type: composite
+      checks:
+        - type: file_exists
+          path: "post_install.txt"
+        - type: stat_match
+          path: "post_install.stat"
+          mode: "644"
+          owner: "slop:slop"
+        - type: regex_no_match
+          path: "post_install.txt"
+          pattern: "<[a-z_]+>"
+
+  - id: state_file_inv9
+    description: ".installer-state.json has phase=installed AND smoke_test_passed=true."
+    evidence_paths: ["state.json"]
+    check:
+      type: json_fields_match
+      path: "state.json"
+      fields:
+        phase: "installed"
+        smoke_test_passed: true
+
+  - id: smoke_rerun_all_pass
+    description: "Independent invocation of smoke_test() against the installed VM returns predicate='all', passed=true."
+    evidence_paths: ["smoke_rerun.json"]
+    check:
+      type: json_fields_match
+      path: "smoke_rerun.json"
+      fields:
+        predicate: "all"
+        passed: true
+
+# ─── comment_block_1: scope of this refresh ────────────────────────────────
+# v5.0.0 supported set (per ADR 0016 §3): ubuntu_24_04, debian_13, debian_12.
+# Ubuntu 22.04 archived; pointer below.
+# Ubuntu 26.04 NOT added to distro_evidence at v5.0.0; entry deferred to v5.0.1
+# per ADR 0016 §3 (Shape B: entry at 26.04.1, August 6, 2026). The
+# predicted_classes section names five Class D sub-predictions for 26.04 as
+# forward-looking deferred entries — explicit so they're not inherited
+# unexamined when the row lands at v5.0.1.
+
+# Distro-specific evidence captures per Section 5 of the design doc.
+distro_evidence:
+
+  # ── ubuntu_24_04 ─────────────────────────────────────────────────────────
+  # UNCHANGED from feature/step-3-3-vm-matrix HEAD. Baseline distro; no
+  # additional captures beyond core_predicates. Existing evidence at
+  # <evidence-archive> is reusable for revalidation
+  # against the current (post-Corrections-A/B) manifest schema.
+  ubuntu_24_04:
+    captures: []
+
+  # ── debian_13 ────────────────────────────────────────────────────────────
+  # NEW row at v5.0.0 per ADR 0016. Evidence is net-new; provision VM per
+  # Step 3.3.0 pattern (see INSTALL.md for VM provisioning and evidence capture
+  # updating DISTRO_MAP per ADR 0016 §5.5).
+  #
+  # the python3_resolution regex is constrained against
+  # verified evidence: Debian 13 trixie defaults to python3 → python3.13.
+  # The 3\.(11|12|13) range allows for backport scenarios; tighten to
+  # 3\.13 only if a future evidence capture confirms 3.13 is the only
+  # version reachable through apt main + apt security.
+  debian_13:
+    captures:
+      - id: distro_version_check
+        evidence_path: distro.os-release
+        check:
+          type: substring_match
+          expected: "Debian GNU/Linux 13"
+      - id: python3_resolution
+        evidence_path: python3.resolution
+        check:
+          type: regex_match
+          pattern: "Python 3\\.(11|12|13)"
+      - id: data_dir_ownership
+        evidence_path: data_dir.ls
+        check:
+          type: substring_match
+          expected: "slop slop"
+      - id: apt_python_package
+        evidence_path: apt.python.dpkg
+        check:
+          type: substring_match
+          expected: "ii  python3-venv"
+      # Defense-in-depth: verify SQLite ships unixepoch() support.
+      # Debian 13 ships sqlite3 3.46.1; the regex matches 3.46.x through
+      # any 3.4N (N>=6) or any 3.[5-9]N or higher. This makes any future
+      # downgrade visible during evidence capture.
+      # Added per ADR 0016 §2.2 (SQLite unixepoch() finding on Ubuntu 22.04).
+      - id: sqlite_unixepoch_available
+        evidence_path: sqlite.version
+        check:
+          type: regex_match
+          pattern: "3\\.(4[6-9]|[5-9][0-9])"
+
+  # ── debian_12 ────────────────────────────────────────────────────────────
+  # UNCHANGED from feature/step-3-3-vm-matrix HEAD. Existing evidence at
+  # <evidence-archive> is reusable per the Step 3.3
+  # design refresh §4 revalidation procedure.
+  debian_12:
+    captures:
+      - id: distro_version_check
+        evidence_path: "distro.os-release"
+        check:
+          type: substring_match
+          expected: "Debian GNU/Linux 12"
+      - id: python3_resolution
+        evidence_path: "python3.resolution"
+        check:
+          type: regex_match
+          pattern: "Python 3\\.(11|12|13)"
+      - id: data_dir_ownership
+        evidence_path: "data_dir.ls"
+        check:
+          type: substring_match
+          expected: "slop slop"
+      - id: apt_python_package
+        evidence_path: "apt.python.dpkg"
+        check:
+          type: substring_match
+          expected: "ii  python3-venv"
+
+
+# ─── comment_block_2: archived_distros ──────────────────────────────────────
+# Distros removed from the supported set keep their captures here for
+# operator-side reference. Archival is visible-in-manifest (not silent removal)
+# so future operators can trace the deprecation rationale. Evidence directories
+# are preserved in place at <evidence-archive><distro>/ rather than
+# deleted; the archive is a record of the deprecation, not a current target.
+
+archived_distros:
+
+  # ── ubuntu_22_04 ─────────────────────────────────────────────────────────
+  # ARCHIVED 2026-05-17 per ADR 0016 §3. Removal reason: SQLite 3.37.2 lacks
+  # unixepoch() (added in SQLite 3.38.0); the slop backend uses
+  # unixepoch() at 40+ sites and fails at lifespan startup with
+  # sqlite3.OperationalError: no such function: unixepoch.
+  #
+  # Secondary issue (fixed at commit 2e59460, see Step 3.3 design refresh §6):
+  # deadsnakes PPA Python 3.11 + update-alternatives broke Ubuntu's APT
+  # Post-Invoke-Success hook because apt_pkg is compiled for python3.10 only
+  # on Ubuntu 22.04. Fix removes the update-alternatives call.
+  #
+  # Evidence preserved at <evidence-archive> as archival
+  # reference. Captures preserved below for operator-side traceability;
+  # they are NOT exercised by tools/check-readiness.py for the v5.0.0 audit
+  # gate.
+  ubuntu_22_04:
+    archived_at: "2026-05-17"
+    archived_reason: |
+      Removed from supported set per ADR 0016. Two production-blocking findings
+      surfaced on the Step 3.3 matrix row: (1) SQLite 3.37.2 lacks unixepoch()
+      which the backend uses at 40+ sites; (2) deadsnakes Python 3.11 +
+      update-alternatives breaks APT's apt_pkg hook (mitigation at commit
+      2e59460 works but the underlying environment mismatch does not).
+      See ADR 0016 §2.2 for full failure-mode detail.
+    adr_reference: "docs/adr/0016-supported-distro-set.md"
+    evidence_archive: "<evidence-archive>"
+    captures:
+      - id: distro_version_check
+        evidence_path: distro.os-release
+        check:
+          type: substring_match
+          expected: "Ubuntu 22.04"
+      - id: deadsnakes_ppa_added
+        evidence_path: apt.sources.deadsnakes
+        check:
+          type: file_nonempty
+      - id: python3_resolution
+        evidence_path: python3.resolution
+        check:
+          type: regex_match
+          pattern: "python3\\.11"
+      - id: apt_python311_package
+        evidence_path: apt.python311.dpkg
+        check:
+          type: substring_match
+          expected: "ii  python3.11-venv"
+      - id: data_dir_ownership
+        evidence_path: data_dir.ls
+        check:
+          type: substring_match
+          expected: "slop slop"
+      - id: systemd_python_path
+        evidence_path: systemd.unit
+        check:
+          type: regex_match
+          # Preserves the Correction-B pattern from the active manifest:
+          # ExecStart targets uvicorn directly, not python3. See Step 3.3
+          # design refresh §6 for the deferred-reading-blind-spot lesson
+          # this correction records.
+          pattern: "ExecStart=.*\\.venv/bin/uvicorn"
+
+
+# ─── comment_block_3: predicted_classes update ──────────────────────────────
+# monitored_distros lists reflect the v5.0.0 set: ubuntu_24_04, debian_13,
+# debian_12. Class F's ubuntu_22_04 entry is removed (archived). New entries
+# under predicted_classes_v501_deferred name the Ubuntu 26.04 Class D
+# sub-predictions in forward-looking form — they don't fire at v5.0.0 because
+# the row isn't in the supported set yet; they exist here so the v5.0.1 work
+# inherits the predictions rather than re-deriving them.
+
+# Section 1 failure-class predictions, audited at Step 3.4 close per design
+# Section 8.  The audit gate reads predicted_classes.json (operator-maintained
+# during Step 3.3 execution) and reconciles against this list.
+predicted_classes:
+  - class_id: F
+    description: "Subprocess/runtime constraint failures (Class-A audit F-findings)"
+    expected_to_fire: false
+    monitored_distros: ["ubuntu_24_04", "debian_13", "debian_12"]
+    catch_predicate: ["installer_exit_0", "smoke_rerun_all_pass"]
+    notes: |
+      F1-F11 fixed at HEAD per CLASS_A_AUDIT_2026_05_15.md Tier 1 + Tier 2
+      commits. Debian 13 is net-new to the matrix; verify the C1 wrapper
+      (installer/_run.py) catches all FileNotFoundError surfaces during the
+      Debian 13 matrix row before declaring expected_to_fire=false stable.
+
+  - class_id: F16
+    description: "Missing pipeline-step / directory creation (data_dir, install_dir)"
+    expected_to_fire: false
+    monitored_distros: ["ubuntu_24_04", "debian_13", "debian_12"]
+    catch_predicate: ["data_dir_ownership", "smoke_rerun_all_pass"]
+    notes: |
+      ensure_data_dir wired into run_install_pipeline since commit 6b60350
+      (Step 2.8 retest close). Pipeline-existence test in test_main.py
+      verifies wiring.
+
+  - class_id: I
+    description: "install.sh invocation chain (sudo / PYTHONPATH / PATH / module-form exec)"
+    expected_to_fire: false
+    monitored_distros: ["ubuntu_24_04", "debian_13", "debian_12"]
+    catch_predicate: ["installer_exit_0"]
+    notes: |
+      Module-form exec landed at ed054a0 (Class-A audit F1). install.sh
+      distro guard updated per ADR 0016 §5.1 — Debian 13 branch is net-new
+      and is the primary "I" risk for v5.0.0 Step 3.3.
+
+  - class_id: D
+    description: "Distro-specific apt/package divergence"
+    expected_to_fire: false
+    monitored_distros: ["ubuntu_24_04", "debian_13", "debian_12"]
+    catch_predicate: ["apt_python_package", "python3_resolution"]
+    notes: |
+      v5.0.0 supported distros all ship Python >=3.11 and SQLite >=3.40 in
+      main archive — no deadsnakes, no update-alternatives, no apt_pkg
+      breakage. The ubuntu_22_04 entry that fired Class D (unixepoch +
+      apt_pkg) is no longer in scope. Debian 13's apt 3.x main version
+      should not affect deps_debian.py's stderr classification — verify
+      during matrix execution and re-classify if a divergence surfaces.
+
+  - class_id: S
+    description: "Smoke fixture / temporal semantics under real-VM load"
+    expected_to_fire: false
+    monitored_distros: ["ubuntu_24_04", "debian_13", "debian_12"]
+    catch_predicate: ["smoke_rerun_all_pass"]
+    notes: |
+      _MAX_RETRY_ITERS guard (commit 90f1c78) + pytest-timeout at runner
+      level (commit f166ee6) make temporal-mock OOM structurally impossible.
+      Per the 2026-05-16 LESSONS_LEARNED temporal-mock entry, the side-effect
+      sequence pattern is the contract-aware mocking shape that prevents the
+      original Step 3.2 hang. Real-VM smoke retains the same guards.
+
+
+# ─── comment_block_4: v5.0.1 deferred — Ubuntu 26.04 forward-looking ────────
+# Ubuntu 26.04 LTS Resolute Raccoon (released April 23, 2026) enters the
+# supported set at 26.04.1 (scheduled August 6, 2026) per ADR 0016 §3 (Shape
+# B). The five Class D sub-predictions below are named explicitly here per
+# so the v5.0.1
+# work inherits them rather than re-deriving.
+#
+# When v5.0.1 work begins (post-26.04.1 release), Sonnet:
+#   1. Adds ubuntu_26_04 to distro_evidence per ADR 0016 §5.4.
+#   2. Adds ubuntu_26_04 to monitored_distros in each predicted_classes entry.
+#   3. Moves these five entries from predicted_classes_v501_deferred to
+#      predicted_classes (or absorbs into the matching class_id with
+#      ubuntu_26_04 added to monitored_distros).
+#   4. Provisions the 26.04 VM per Step 3.3.0 pattern.
+#   5. Runs the matrix row per Step 3.3.a; surfaces any predicted_to_fire=true
+#      sub-prediction with a fix-now disposition before v5.0.1 ships.
+
+predicted_classes_v501_deferred:
+  # Each entry is a forward-looking Class D sub-prediction for Ubuntu 26.04.
+  # All expected_to_fire=false today (assumption pending empirical verification
+  # on a provisioned 26.04 VM). these are NOT verified facts
+  # — they are predictions with named evidence basis that the v5.0.1 matrix
+  # execution will confirm or refute.
+
+  - sub_class_id: D-26.04-crypt
+    description: "Python 3.13 removed the `crypt` standard library module"
+    expected_to_fire: false
+    evidence_basis: |
+      Ubuntu 26.04 defaults to Python 3.13 (some sources cite 3.14 default with
+      3.13.9 baseline). Python 3.13 release notes explicitly remove the crypt
+      stdlib module. If anything in backend/, installer/, or tools/ imports
+      crypt, it breaks at startup or first-use on 26.04.
+    verification_step: |
+      Before declaring the 26.04 row clean, Sonnet greps the repository for
+      `^import crypt` and `^from crypt` patterns. Zero matches confirms the
+      prediction; non-zero matches require migration to passlib or removal of
+      the import path before v5.0.1 ships.
+
+  - sub_class_id: D-26.04-docker-29
+    description: "Docker 29 makes containerd the default image store for fresh installs"
+    expected_to_fire: false
+    evidence_basis: |
+      Ubuntu 26.04 ships Docker 29 (per the release notes). Docker 29 changes
+      the default image store to containerd for fresh installs; `docker info`
+      and `docker image ls` output formats change. installer/docker.py's
+      _verify_docker_post_install reads `docker compose version --short`
+      (unlikely affected) but if Docker 29 ships convenience-script changes
+      via get.docker.com, the install path's stderr classification may need
+      updates.
+    verification_step: |
+      Provision the 26.04 VM; run `curl -fsSL https://get.docker.com | sh`
+      manually; confirm `docker compose version --short` returns a parseable
+      version string. If the install path's stderr keywords have changed,
+      update installer/docker.py error-keyword matching before v5.0.1.
+
+  - sub_class_id: D-26.04-cgroup-v2
+    description: "systemd 259 in Ubuntu 26.04 requires mandatory cgroup v2"
+    expected_to_fire: false
+    evidence_basis: |
+      Ubuntu 26.04's systemd 259 removes cgroup v1 support. The slop
+      service unit uses Type=simple with no explicit cgroup controller
+      assumptions; the unit should be cgroup-v2-compatible by default. Risk
+      is hidden v1 expectations in Docker bridge networking or the backend's
+      process supervision.
+    verification_step: |
+      On the 26.04 VM after install: confirm `systemd-cgls` shows slop
+      under a v2 hierarchy; confirm `systemctl status slop` reports
+      active (running); confirm port 8080 binds under the service's cgroup.
+
+  - sub_class_id: D-26.04-apt-3
+    description: "APT 3.x output format changes may affect stderr classification"
+    expected_to_fire: false
+    evidence_basis: |
+      Ubuntu 26.04 ships APT 3.x (per the release notes). Major-version APT
+      changes typically include stderr message format updates.
+      installer/deps_debian.py's _run_apt_install classifies failures by
+      stderr keyword matching (AptLockError, PackageNotFoundError); if APT
+      3.x changes the canonical strings, the classification regresses to
+      generic AptInstallError.
+    verification_step: |
+      During the 26.04 matrix row, simulate the three apt-failure modes
+      (lock held, package not found, network failure) and confirm
+      installer/deps_debian.py classifies each correctly. If a
+      classification regresses, update the stderr keyword set before v5.0.1.
+
+  - sub_class_id: D-26.04-firmware-split
+    description: "linux-firmware package split into per-vendor components"
+    expected_to_fire: false
+    evidence_basis: |
+      Ubuntu 26.04 splits the monolithic linux-firmware package into
+      per-vendor sub-packages (linux-firmware-intel-wireless,
+      linux-firmware-nvidia-graphics, etc.). SLOP does not depend on
+      kernel firmware; the split should not affect any installer surface.
+      Listed here for explicitness — naming the prediction is the point;
+      "no interaction expected" is the prediction's content.
+    verification_step: |
+      No active verification needed. If the 26.04 matrix row surfaces a
+      kernel-firmware-related failure during install, this sub-prediction
+      is wrong and needs revision.
+
+
+# ─── comment_block_5: how this refresh was applied ───────────────────────────
+# Applied 2026-05-17 per ADR 0016 (Shape B) and the companion refresh artifact
+# at docs/agent-context/design-docs/readiness_manifest_refresh.yaml.
+#
+# Changes applied in a single commit:
+#   chore(installer): refresh readiness manifest per ADR 0016 + capture sqlite version
+#
+# Checker update landed in same commit (tools/check-readiness.py):
+#   - archived_distros: skip with message when --distro references an archived distro.
+#   - predicted_classes_v501_deferred: loaded by yaml.safe_load; not evaluated
+#     (section is unknown to the checker's distro_evidence lookup by design).
+#
+# Capture script update landed in same commit (tools/capture-step33-evidence.py):
+#   - debian_13 branch added with sqlite.version capture (required by
+#     sqlite_unixepoch_available predicate in distro_evidence.debian_13).
+#
+# Pre-commit verification outcome:
+#   - yaml.safe_load parses this file without error.
+#   - distro_evidence keys: ubuntu_24_04, debian_13, debian_12.
+#   - archived_distros keys: ubuntu_22_04.
+#   - predicted_classes_v501_deferred entries: 5 (D-26.04-crypt, D-26.04-docker-29,
+#     D-26.04-cgroup-v2, D-26.04-apt-3, D-26.04-firmware-split).
+#   - tools/check-readiness.py --help exits 0 cleanly.

@@ -1,0 +1,56 @@
+key: ntfy
+display_name: ntfy
+description: Self-hosted push notification service — send notifications to phone and desktop
+category: tools
+tier: 2
+icon: 🔔
+version: "1.0"
+
+image: binwiederhier/ntfy
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 80
+
+volumes:
+  config: /etc/ntfy
+  custom:
+    - host: "{config_root}/ntfy/cache"
+      container: /var/cache/ntfy
+
+env:
+  NTFY_BASE_URL: "https://ntfy.${DOMAIN}"
+  NTFY_BEHIND_PROXY: "true"
+  NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+  NTFY_AUTH_FILE: /etc/ntfy/auth.db
+  NTFY_AUTH_DEFAULT_ACCESS: deny-all
+
+reverse_proxy:
+  enabled: true
+  subdomain: ntfy
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /v1/health
+    timeout: 60
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /v1/health
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [notifications, push, alerts, tools]
+links:
+  docs: https://docs.ntfy.sh
+  github: https://github.com/binwiederhier/ntfy

@@ -1,0 +1,44 @@
+key: silverbullet
+display_name: SilverBullet
+description: Offline-first personal knowledge base — linked markdown notes, full-text search, no external dependencies
+category: productivity
+tier: 2
+icon: 🔫
+version: "1.0"
+
+image: ghcr.io/silverbulletmd/silverbullet
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 3010
+
+volumes:
+  config: /space
+
+env:
+  SB_SHELL_BACKEND: deno
+
+reverse_proxy:
+  enabled: true
+  subdomain: silverbullet
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [notes, wiki, markdown, knowledge-base, offline-first, lightweight]
+links:
+  docs: https://silverbullet.md
+  github: https://github.com/silverbulletmd/silverbullet

@@ -1,0 +1,74 @@
+key: paperless_ngx
+display_name: Paperless-ngx
+description: Document management system — scan, index, and archive physical documents
+category: productivity
+tier: 2
+icon: 📁
+version: "1.0"
+
+image: ghcr.io/paperless-ngx/paperless-ngx
+start_grace_s: 90
+health_grace_s: 90
+image_tag: latest
+linuxserver: false
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+
+ports:
+  web: 8000
+
+volumes:
+  config: /usr/src/paperless/data
+  custom:
+    - host: "{config_root}/paperless_ngx/media"
+      container: /usr/src/paperless/media
+    - host: "{config_root}/paperless_ngx/export"
+      container: /usr/src/paperless/export
+    - host: "{config_root}/paperless_ngx/consume"
+      container: /usr/src/paperless/consume
+
+env:
+  PAPERLESS_REDIS: "redis://redis:6379"
+  PAPERLESS_TIKA_ENABLED: "1"
+  PAPERLESS_TIKA_GOTENBERG_ENDPOINT: "http://gotenberg:3000"
+  PAPERLESS_TIKA_ENDPOINT: "http://tika:9998"
+  PAPERLESS_TIME_ZONE: "${TZ}"
+  PAPERLESS_OCR_LANGUAGE: "eng"
+
+dependencies:
+  postgres: true
+  redis: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: paperless
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/
+    timeout: 120
+
+health:
+  start_period: 60s
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [documents, ocr, productivity, scan]
+links:
+  docs: https://docs.paperless-ngx.com
+  github: https://github.com/paperless-ngx/paperless-ngx
+
+recommends:
+  - syncthing

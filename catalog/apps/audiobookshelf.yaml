@@ -1,0 +1,58 @@
+key: audiobookshelf
+display_name: Audiobookshelf
+description: Self-hosted audiobook and podcast server with iOS/Android apps and e-reader support
+category: media
+tier: 2
+icon: 🎧
+version: "1.0"
+
+# Note: Audiobookshelf is a media SERVER, not an arr app.
+# It does not automate downloads — pair with Readarr for automated acquisition.
+
+service_type: media
+
+image: ghcr.io/advplyr/audiobookshelf
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 13378
+
+volumes:
+  config: /config
+  custom:
+    - host: "{media_root}/audiobooks"
+      container: /audiobooks
+    - host: "{media_root}/podcasts"
+      container: /podcasts
+    - host: "{config_root}/audiobookshelf/metadata"
+      container: /metadata
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: abs
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /ping
+    timeout: 60
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /ping
+      expect_status: 200
+      interval: 60
+
+tags: [audiobooks, podcasts, media-server, mobile]
+links:
+  docs: https://www.audiobookshelf.org/docs
+  github: https://github.com/advplyr/audiobookshelf

@@ -1,0 +1,104 @@
+key: komodo
+display_name: Komodo
+description: Multi-server Docker and Compose management with Git-driven deployments, build automation, and procedures — 100% open source, no editions
+category: tools
+tier: 2
+icon: 🦎
+version: "1.0"
+
+# Komodo (moghtech/komodo) — build + deploy system for multi-server environments.
+# No "business edition" — all features free forever (GPL-3).
+# Architecture: Core (API + UI) + Periphery (lightweight agent per server).
+# For single-server setups, Periphery is a companion deployed alongside Core.
+# Uses MongoDB Community Edition 7 for storage (migrated from FerretDB v1.x).
+#
+# After deploy:
+#   1. Open http://komodo:9120
+#   2. Click "Sign Up" (not "Log In") for the initial admin account
+#   3. Komodo auto-registers the local server via the periphery companion
+
+image: ghcr.io/moghtech/komodo-core
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 9120
+
+volumes:
+  config: /config
+  custom:
+    - host: "{config_root}/komodo/backups"
+      container: /backups
+
+companions:
+  - key: komodo-periphery
+    image: ghcr.io/moghtech/komodo-periphery
+    image_tag: latest
+    container_name: komodo-periphery
+    run_as_uid: 0 # periphery runs as root
+    run_as_gid: 0
+    volumes:
+      - host: /var/run/docker.sock
+        container: /var/run/docker.sock
+        readonly: false
+      - host: /etc/komodo
+        container: /etc/komodo
+    env:
+      PERIPHERY_ROOT_DIRECTORY: /etc/komodo
+      PERIPHERY_PASSKEY: "${KOMODO_PASSKEY}"
+
+  - key: komodo-mongo
+    image: mongo
+    image_tag: "7"
+    container_name: komodo-mongo
+    run_as_uid: 999 # mongodb user in official mongo image
+    run_as_gid: 999
+    volumes:
+      - host: "{config_root}/komodo/mongodb"
+        container: /data/db
+    env:
+      MONGO_INITDB_ROOT_USERNAME: komodo
+      MONGO_INITDB_ROOT_PASSWORD: "${KOMODO_DB_PASSWORD}"
+
+env:
+  TZ: "${TZ}"
+  KOMODO_HOST: "https://komodo.${DOMAIN}"
+  KOMODO_TITLE: Komodo
+  KOMODO_FIRST_SERVER: "https://komodo-periphery:8120"
+  KOMODO_DATABASE_ADDRESS: "komodo-mongo:27017"
+  KOMODO_DATABASE_USERNAME: komodo
+  KOMODO_DATABASE_PASSWORD: "${KOMODO_DB_PASSWORD}"
+  KOMODO_JWT_SECRET: "${KOMODO_JWT_SECRET}"
+  KOMODO_PASSKEY: "${KOMODO_PASSKEY}"
+
+auto_secrets:
+  - key: KOMODO_JWT_SECRET
+    length: 32
+  - key: KOMODO_PASSKEY
+    length: 32
+  - key: KOMODO_DB_PASSWORD
+    length: 32
+
+reverse_proxy:
+  enabled: true
+  subdomain: komodo
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [docker, management, multi-server, git, deploy, automation, tools]
+links:
+  docs: https://komo.do/docs
+  github: https://github.com/moghtech/komodo

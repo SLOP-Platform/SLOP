@@ -1,0 +1,58 @@
+key: immich
+display_name: Immich
+description: High-performance, self-hosted photo and video management
+category: productivity
+tier: 2
+icon: 📷
+version: "1.0"
+
+image: ghcr.io/immich-app/immich-server
+start_grace_s: 120
+health_grace_s: 120
+image_tag: release
+linuxserver: false
+# Opt into the recoverability backup machinery: ms-backup can archive this
+# app's config volume, and the agent tracks its backup freshness.
+backup_supported: true
+
+ports:
+  web: 2283
+
+volumes:
+  config: /config
+  custom:
+    - host: "{media_root}/photos"
+      container: /usr/src/app/upload
+
+dependencies:
+  postgres: true
+  redis: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: immich
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 120
+  - type: api_ready
+    path: /api/server/ping
+    timeout: 180
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/server/ping
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [photos, media, self-hosted]
+links:
+  docs: https://immich.app/docs
+  github: https://github.com/immich-app/immich

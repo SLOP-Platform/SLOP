@@ -1,0 +1,51 @@
+key: resilio_sync
+display_name: Resilio Sync
+description: Peer-to-peer file synchronisation — fast distributed file sync using BitTorrent protocol
+category: tools
+tier: 2
+
+image: lscr.io/linuxserver/resilio-sync
+image_tag: latest
+linuxserver: true
+start_grace_s: 30
+
+ports:
+  web: 8889
+
+volumes:
+  config: /config
+  sync: /sync
+
+reverse_proxy:
+  enabled: true
+  subdomain: resilio
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /gui/
+      port: 8889
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /gui/
+    timeout: 120
+
+tags: [sync, p2p, file-sharing, bittorrent]
+links:
+  docs: https://help.resilio.com
+  github: https://github.com/linuxserver/docker-resilio-sync
+
+notes: >
+  Host port 8889 is mapped to container port 8888 to avoid conflicts with other
+  services using port 8888 (e.g. Unmanic, ComfyUI).

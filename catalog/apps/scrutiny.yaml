@@ -1,0 +1,79 @@
+key: scrutiny
+display_name: Scrutiny
+description: SMART disk health monitoring with a clean web UI — tracks drive health, temperature, and pre-failure symptoms
+hardware_note: "Requires physical HDDs or SSDs with SMART support. Does not report meaningful data in virtual machines (VMware, Hyper-V, VirtualBox, WSL). The collector mounts /dev/disk read-only and needs SYS_RAWIO capability."
+category: monitoring
+tier: 2
+icon: 💿
+version: "1.0"
+
+# Scrutiny runs as a hub+spoke: one web/API container (this manifest) and
+# one collector container per host that has drives to monitor.
+# The collector runs on the host and reports SMART data to the hub via API.
+# For single-host setups, both can run as services in the same compose file.
+
+image: ghcr.io/analogj/scrutiny
+image_tag: master-omnibus
+# 'omnibus' image bundles both the web UI and the collector in one container.
+# For multi-host, use the split hub/collector images instead.
+linuxserver: false
+
+ports:
+  web: 8080
+
+volumes:
+  config: /opt/scrutiny/config
+  custom:
+    # Docker socket — read-only, used to enumerate host drives
+    - host: /var/run/docker.sock
+      container: /var/run/docker.sock
+      readonly: true
+    # /dev/disk — read-only, used to read SMART data directly
+    - host: /dev/disk
+      container: /dev/disk
+      readonly: true
+
+env:
+  SCRUTINY_WEB: "true"
+  SCRUTINY_COLLECTOR: "true"
+
+# Requires elevated privileges to read SMART data from raw disk devices.
+# This is narrower than full --privileged and is the minimum required.
+# SLOP will add cap_add: [SYS_RAWIO] to the compose fragment.
+extra_config:
+  cap_add:
+    - SYS_RAWIO
+  devices:
+    - /dev/sda
+    - /dev/sdb
+    # Additional drives are configured at deploy time based on detected disks
+
+reverse_proxy:
+  enabled: true
+  subdomain: scrutiny
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/health
+    timeout: 90
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/health
+      expect_status: 200
+      interval: 300
+      # 5-minute interval — SMART polling is slow and expensive
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+tags: [smart, disk-health, monitoring, storage, hardware]
+links:
+  docs: https://github.com/AnalogJ/scrutiny
+  github: https://github.com/AnalogJ/scrutiny

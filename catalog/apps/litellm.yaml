@@ -1,0 +1,69 @@
+key: litellm
+display_name: LiteLLM Proxy
+description: >
+  OpenAI-compatible LLM API proxy and router. Unify all your LLM backends —
+  Ollama, llama.cpp, OpenAI, Anthropic, Groq, and 100+ others — behind a single
+  endpoint with key management, usage tracking, rate limiting, and automatic
+  fallback. Configure apps once; swap backends without touching them.
+category: ai
+tier: 2
+
+image: ghcr.io/berriai/litellm
+image_tag: main-latest
+start_grace_s: 30
+
+ports:
+  web: 4001
+
+volumes:
+  config: /app/config
+
+env:
+  LITELLM_MASTER_KEY: ""
+  DATABASE_URL: ""
+  STORE_MODEL_IN_DB: "True"
+  PORT: "4001"
+
+auto_secrets:
+  - LITELLM_MASTER_KEY
+
+reverse_proxy:
+  enabled: true
+  subdomain: litellm
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /health
+    timeout: 120
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /health
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+post_install:
+  - title: Add your first model
+    description: >
+      Add your first model via the LiteLLM UI at /ui. To use your local Ollama,
+      add model: ollama/llama3 with api_base: http://ollama:11434.
+    required: false
+  - title: Point your LLM apps to LiteLLM
+    description: >
+      Point your LLM apps (SillyTavern, Open WebUI, AnythingLLM) to
+      http://litellm:4000/v1 with your LITELLM_MASTER_KEY as the API key.
+    required: false
+
+tags: [ai, llm, proxy, router, api, openai-compatible]
+links:
+  github: https://github.com/BerriAI/litellm
+  docs: https://docs.litellm.ai

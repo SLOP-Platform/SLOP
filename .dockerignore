@@ -1,0 +1,13 @@
+.git
+.github
+*.md
+.env*
+!.env.example
+frontend/node_modules
+backend/__pycache__
+**/__pycache__
+**/*.pyc
+.venv
+data/
+tests/
+*.test.ts

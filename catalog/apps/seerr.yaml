@@ -1,0 +1,88 @@
+key: seerr
+display_name: Seerr
+description: Media request management platform — the merged successor to Overseerr and Jellyseerr
+category: arr
+tier: 2
+icon: 🎯
+version: "1.0"
+service_type: management
+
+image: ghcr.io/fallenbagel/jellyseerr
+image_tag: latest
+linuxserver: false
+start_grace_s: 30
+
+ports:
+  web: 5055
+
+volumes:
+  config: /app/config
+
+reverse_proxy:
+  enabled: true
+  subdomain: seerr
+
+wiring:
+  connects_to:
+    - type: media_request
+      to: sonarr
+      optional: true
+      description: Seerr routes TV show requests to Sonarr (handler pending)
+    - type: media_request
+      to: radarr
+      optional: true
+      description: Seerr routes movie requests to Radarr (handler pending)
+    - type: media_server_auth
+      to: jellyfin
+      optional: true
+      description: Seerr authenticates users via Jellyfin
+    - type: media_server_auth
+      to: plex
+      optional: true
+      description: Seerr authenticates users via Plex
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/v1/settings/main
+    timeout: 90
+  # wire steps: media_request handler pending
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/v1/settings/main
+      expect_status: 200
+      interval: 30
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags:
+  - requests
+  - plex
+  - jellyfin
+  - automation
+  - discovery
+
+links:
+  github: https://github.com/fallenbagel/jellyseerr
+  docs: https://docs.jellyseerr.dev
+
+notes: >
+  Seerr (previously Jellyseerr) is the active maintained successor to Overseerr.
+  Configure it to connect to your Plex or Jellyfin server, then link Sonarr and
+  Radarr so users can request media and have it automatically downloaded.
+  Requires Sonarr and Radarr to be installed and configured first.
+
+requires:
+  - sonarr
+  - radarr
+
+recommends:
+  - plex
+  - jellyfin

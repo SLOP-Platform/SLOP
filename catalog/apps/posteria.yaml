@@ -1,0 +1,34 @@
+key: posteria
+display_name: Posteria
+description: TODO — add a one-line description of Posteria
+category: media
+tier: 2
+
+image: bozodev/posteria
+image_tag: latest
+
+ports:
+  web: 1818
+
+reverse_proxy:
+  enabled: true
+  subdomain: posteria
+
+volumes:
+  config: /config
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /
+      port: 1818
+      expect_status: 200
+      interval: 30
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 120

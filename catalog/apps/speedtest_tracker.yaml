@@ -1,0 +1,47 @@
+key: speedtest_tracker
+display_name: Speedtest Tracker
+description: Track ISP performance over time — scheduled speed tests with charts and alerts
+category: monitoring
+tier: 2
+icon: ⚡
+version: "1.0"
+
+image: ghcr.io/alexjustesen/speedtest-tracker
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 80
+
+volumes:
+  config: /config
+
+env:
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  TZ: "${TZ}"
+  DB_CONNECTION: sqlite
+
+reverse_proxy:
+  enabled: true
+  subdomain: speedtest
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [monitoring, network, speed, isp, performance]
+links:
+  docs: https://docs.speedtest-tracker.dev
+  github: https://github.com/alexjustesen/speedtest-tracker

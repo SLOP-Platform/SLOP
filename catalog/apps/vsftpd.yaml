@@ -1,0 +1,25 @@
+key: vsftpd
+display_name: vsftpd
+description: FTP server — no web UI. Configure via environment vars. Very Secure FTP Daemon.
+category: tools
+tier: 2
+
+image: fauria/vsftpd
+image_tag: latest
+
+ports:
+  ftp: 21
+
+volumes:
+  config: /home/vsftpd
+
+health:
+  checks:
+    - name: ftp_reachable
+      type: tcp
+      port: 21
+      interval: 60
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60

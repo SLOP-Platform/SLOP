@@ -1,0 +1,75 @@
+key: tdarr
+display_name: Tdarr
+description: Distributed audio/video transcoding automation with plugins and health checks
+category: arr
+tier: 2
+icon: 🎞️
+version: "1.0"
+
+image: ghcr.io/haveagitgat/tdarr
+start_grace_s: 90
+health_grace_s: 90
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8265
+  extra:
+    - name: server
+      internal: 8266
+      protocol: tcp
+
+volumes:
+  config: /app/configs
+  media: /media
+  custom:
+    - host: "{config_root}/tdarr/server"
+      container: /app/server
+    - host: "{config_root}/tdarr/logs"
+      container: /app/logs
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  serverIP: "0.0.0.0"
+  serverPort: "8266"
+  webUIPort: "8265"
+  internalNode: "true"
+  inContainer: "true"
+  ffmpegVersion: "6"
+  nodeName: "MyInternalNode"
+
+reverse_proxy:
+  enabled: true
+  subdomain: tdarr
+
+gpu:
+  optional: true
+  warn_if_absent: false
+  nvidia: true
+  amd: true
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 90
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [transcoding, media, automation, video, arr]
+links:
+  docs: https://docs.tdarr.io
+  github: https://github.com/HaveAGitGat/Tdarr
+
+recommends:
+  - plex
+  - jellyfin

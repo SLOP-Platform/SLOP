@@ -1,0 +1,68 @@
+key: gluetun
+display_name: Gluetun
+slot: vpn
+description: VPN client container — route all downloaders through a VPN provider with killswitch
+category: infra
+tier: 1
+icon: 🛡️
+version: "1.0"
+
+# Gluetun wraps a VPN connection and exposes it as a Docker network.
+# Containers that need VPN routing use: network_mode: service:gluetun
+# This is handled automatically by the installer for VPN-scoped apps.
+#
+# Supported providers: Mullvad, NordVPN, ExpressVPN, Surfshark, ProtonVPN,
+# PIA, AirVPN, Windscribe, IVPN, and many more.
+# See: https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+
+image: qmcgaw/gluetun
+image_tag: latest
+linuxserver: false
+
+ports:
+  # Gluetun exposes download client ports on behalf of routed containers
+  extra:
+    - name: qbt-web
+      internal: 8085
+      protocol: tcp
+    - name: qbt-bt
+      internal: 6881
+      protocol: tcp
+    - name: qbt-bt-udp
+      internal: 6881
+      protocol: udp
+
+volumes:
+  config: /gluetun
+
+env:
+  VPN_SERVICE_PROVIDER: "${GLUETUN_VPN_PROVIDER}"
+  VPN_TYPE: "wireguard"
+  WIREGUARD_PRIVATE_KEY: "${GLUETUN_WIREGUARD_PRIVATE_KEY}"
+  WIREGUARD_ADDRESSES: "${GLUETUN_WIREGUARD_ADDRESSES}"
+  SERVER_COUNTRIES: "${GLUETUN_SERVER_COUNTRIES}"
+  TZ: "${TZ}"
+  UPDATER_PERIOD: "24h"
+
+# Gluetun needs NET_ADMIN — handled as a special capability in the executor
+capabilities:
+  - NET_ADMIN
+
+# Gluetun has no web UI by default — Traefik routes downloader UIs instead
+traefik:
+  enabled: false
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+
+health:
+  checks:
+    - name: vpn_connected
+      type: custom
+      interval: 120
+
+tags: [vpn, privacy, wireguard, killswitch, infra]
+links:
+  docs: https://github.com/qdm12/gluetun-wiki
+  github: https://github.com/qdm12/gluetun

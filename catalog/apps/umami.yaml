@@ -1,0 +1,55 @@
+key: umami
+display_name: Umami
+description: Privacy-focused, cookie-free web analytics — simple, fast alternative to Google Analytics
+category: monitoring
+tier: 2
+icon: 📊
+version: "1.0"
+
+image: ghcr.io/umami-software/umami
+image_tag: postgresql-latest
+linuxserver: false
+
+ports:
+  web: 3012
+
+env:
+  DATABASE_TYPE: postgresql
+  DATABASE_URL: "postgresql://slop:${POSTGRES_PASSWORD}@postgres:5432/umami"
+  APP_SECRET: "${UMAMI_APP_SECRET}"
+
+auto_secrets:
+  - key: UMAMI_APP_SECRET
+    length: 32
+
+dependencies:
+  postgres: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: analytics
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/heartbeat
+    timeout: 90
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/heartbeat
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [analytics, privacy, gdpr, monitoring, web-analytics]
+links:
+  docs: https://umami.is/docs
+  github: https://github.com/umami-software/umami

@@ -1,0 +1,56 @@
+key: kavita
+display_name: Kavita
+description: Fast, feature-rich digital library for manga, comics, and books — OPDS, reading progress, collections
+category: media
+tier: 2
+icon: 📖
+version: "1.0"
+
+image: jvmilazz0/kavita
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 5000
+
+volumes:
+  config: /kavita/config
+  custom:
+    - host: "{media_root}/manga"
+      container: /manga
+    - host: "{media_root}/comics"
+      container: /comics
+    - host: "{media_root}/books"
+      container: /books
+
+env:
+  TZ: "${TZ}"
+
+reverse_proxy:
+  enabled: true
+  subdomain: kavita
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /api/health
+    timeout: 90
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /api/health
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [manga, comics, books, reader, library, opds]
+links:
+  docs: https://wiki.kavitareader.com
+  github: https://github.com/Kareadita/Kavita

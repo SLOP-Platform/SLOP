@@ -1,0 +1,57 @@
+key: stirling_pdf
+display_name: Stirling-PDF
+description: Server-side PDF toolkit — 50+ tools including merge, split, OCR, compress, and convert
+category: tools
+tier: 2
+icon: 📄
+version: "1.0"
+
+# Stirling-PDF complements BentoPDF — server-side processing means no HTTPS
+# requirement, and OCR/conversion work on any browser over plain HTTP.
+
+image: frooodle/s-pdf
+start_grace_s: 90
+health_grace_s: 90
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8080
+
+volumes:
+  config: /configs
+  custom:
+    - host: "{config_root}/stirling_pdf/logs"
+      container: /logs
+    - host: "{config_root}/stirling_pdf/customFiles"
+      container: /customFiles
+
+env:
+  DOCKER_ENABLE_SECURITY: "false"
+  INSTALL_BOOK_AND_ADVANCED_HTML_OPS: "false"
+  LANGS: "en_GB"
+
+reverse_proxy:
+  enabled: true
+  subdomain: stirling
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 60
+  - type: api_ready
+    path: /
+    timeout: 90
+
+health:
+  start_period: 60s
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [pdf, tools, ocr, documents, server-side]
+links:
+  docs: https://docs.stirlingpdf.com
+  github: https://github.com/Stirling-Tools/Stirling-PDF

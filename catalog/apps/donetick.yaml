@@ -1,0 +1,44 @@
+key: donetick
+display_name: Donetick
+description: Household task and chore tracker with scheduling, reminders, and shared lists
+category: productivity
+tier: 2
+icon: ✅
+version: "1.0"
+
+image: ghcr.io/donetick/donetick
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8107
+
+volumes:
+  config: /data
+
+env:
+  DT_ENV: selfhosted
+
+reverse_proxy:
+  enabled: true
+  subdomain: donetick
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+
+tags: [tasks, chores, productivity, household]
+links:
+  docs: https://donetick.com/docs
+  github: https://github.com/donetick/donetick

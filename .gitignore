@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Backend build output — the Vite SPA is compiled into backend/static/ at
+# Docker/install build time from frontend/, never committed as source.
+backend/static/
+
+# Runtime / secrets — a real .env is created from .env.example at install time.
+*.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.log
+
+# Runtime data — generated at deploy time (compose fragments, state, per-app
+# config rendered by providers). Not a source directory.
+data/*/
+config/
+
+# User-installed community apps (not tracked)
+catalog/community/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+*:Zone.Identifier

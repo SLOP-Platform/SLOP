@@ -1,0 +1,66 @@
+key: booklore
+display_name: Booklore
+description: Jellyfin for ebooks — EPUB, PDF, and comics with Kobo sync, smart shelves, and auto metadata
+category: media
+tier: 2
+icon: 📚
+version: "1.0"
+
+image: ghcr.io/booklore-app/booklore
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 6060
+
+volumes:
+  config: /app/data
+  custom:
+    - host: "{media_root}/books"
+      container: /books
+    - host: "{config_root}/booklore/bookdrop"
+      container: /bookdrop
+
+env:
+  # Connects to the SLOP-managed mariadb service (#1203). Host = the managed
+  # container_name `mariadb`; credentials match _ensure_managed_service's env
+  # (MARIADB_PASSWORD is auto-generated on first provision; USER/DATABASE default
+  # to `booklore` via the same ${..:-booklore} defaults the managed fragment uses).
+  DATABASE_URL: "jdbc:mariadb://mariadb:3306/${MARIADB_DATABASE:-booklore}"
+  DATABASE_USERNAME: "${MARIADB_USER:-booklore}"
+  DATABASE_PASSWORD: "${MARIADB_PASSWORD}"
+  USER_ID: "${PUID}"
+  GROUP_ID: "${PGID}"
+  SWAGGER_ENABLED: "false"
+
+dependencies:
+  mariadb: true
+
+reverse_proxy:
+  enabled: true
+  subdomain: booklore
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 90
+  - type: api_ready
+    path: /
+    timeout: 120
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: reachable
+      action: restart
+      max_attempts: 3
+      cooldown: 60
+
+tags: [ebooks, books, library, epub, pdf, comics, kobo]
+links:
+  docs: https://github.com/booklore-app/booklore/wiki
+  github: https://github.com/booklore-app/booklore

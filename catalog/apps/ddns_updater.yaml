@@ -1,0 +1,94 @@
+key: ddns_updater
+display_name: DDNS Updater
+description: Dynamic DNS client — keeps your DNS records pointed at your home IP when it changes, required for direct media server access on residential connections
+category: tools
+tier: 2
+icon: 🌐
+version: "1.0"
+
+# ── Why this exists ────────────────────────────────────────────────────────
+# Residential ISPs assign dynamic IP addresses that change periodically.
+# For Plex, Jellyfin, and Emby to be accessible externally via direct
+# connection (not Cloudflare Tunnel), their DNS records must always point
+# to your current home IP.
+#
+# DDNS Updater runs a lightweight checker (every 5 minutes by default) that
+# detects IP changes and updates the DNS record automatically via API.
+#
+# Supported providers: Cloudflare, Namecheap, DuckDNS, Dynu, Porkbun,
+# GoDaddy, Google Domains, Route53, Hetzner, Linode, Njalla, and 30+ more.
+#
+# ── Cloudflare DNS setup ───────────────────────────────────────────────────
+# 1. Create an A record for plex.domain.com → your current IP
+# 2. Set Proxy status to "DNS only" (gray cloud, NOT orange)
+# 3. Configure DDNS Updater with your CF Zone ID and API token
+# 4. DDNS Updater keeps the A record updated as your IP changes
+#
+# The "DNS only" setting is REQUIRED for media streaming.
+# Orange cloud (proxied) routes traffic through CF CDN — ToS violation.
+
+image: qmcgaw/ddns-updater
+image_tag: latest
+linuxserver: false
+
+ports:
+  web: 8085
+
+volumes:
+  config: /updater/data
+
+env:
+  TZ: "${TZ}"
+  PUID: "${PUID}"
+  PGID: "${PGID}"
+  # Backup period in case the HTTP endpoint fails
+  PERIOD: 5m
+  UPDATE_COOLDOWN_PERIOD: 5m
+  # Log level
+  LOG_LEVEL: info
+
+reverse_proxy:
+  enabled: true
+  subdomain: ddns
+
+post_deploy:
+  - type: wait_healthy
+    timeout: 30
+  - type: api_ready
+    path: /
+    timeout: 60
+
+health:
+  checks:
+    - name: reachable
+      type: http
+      path: /
+      expect_status: 200
+      interval: 300 # check every 5min matches update period
+
+tags: [ddns, dns, dynamic-ip, tools, networking, residential]
+links:
+  docs: https://github.com/qdm12/ddns-updater/blob/master/docs/README.md
+  github: https://github.com/qdm12/ddns-updater
+config_schema:
+  - key: providers
+    label: DNS Providers
+    type: providers_list
+    help: "Add one or more DNS providers to keep updated."
+  - key: period
+    label: Update interval
+    type: text
+    placeholder: "5m"
+    required: false
+    help: "How often to check your IP. Default: 5m (5 minutes)."
+  - key: ip_version
+    label: IP version
+    type: select
+    options: ["ipv4", "ipv6", "ipv4 or ipv6"]
+    required: false
+    help: "Which IP version to track. Default: ipv4."
+
+config_defaults:
+  period: "5m"
+  ip_version: "ipv4"
+  providers: []

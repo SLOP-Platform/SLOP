@@ -1,0 +1,65 @@
+key: localai
+display_name: LocalAI
+description: >
+  Local OpenAI-compatible inference server. Runs LLMs, image generation,
+  speech, and embeddings. Drop-in replacement for the OpenAI API —
+  36+ backends including llama.cpp, vLLM, Whisper, and Stable Diffusion.
+  GPU acceleration for NVIDIA (CUDA), AMD (ROCm), Intel (SYCL), and
+  Apple Silicon (Metal). Use as an inference provider for the SLOP
+  Health Agent.
+category: ai
+tier: 2
+icon: 🧠
+version: "1.0"
+linuxserver: false
+
+image: localai/localai
+image_tag: latest-aio-cpu
+start_grace_s: 120
+health_grace_s: 120
+
+ports:
+  web: 8080
+
+volumes:
+  config: /build/models
+
+reverse_proxy:
+  enabled: true
+  subdomain: localai
+
+health:
+  checks:
+    - name: api_reachable
+      type: http
+      path: /readyz
+      expect_status: 200
+      interval: 60
+  self_heal:
+    - condition: api_reachable
+      action: restart
+      max_attempts: 2
+      cooldown: 120
+
+post_install:
+  - title: Set as inference provider
+    description: >
+      Go to LLM Models → Inference provider → select LocalAI →
+      set URL to http://localai:8080 (internal Docker network).
+      Access the LocalAI web UI via the Traefik subdomain configured for your domain.
+    required: false
+  - title: GPU version (NVIDIA)
+    description: >
+      For GPU acceleration, change image tag to latest-gpu-nvidia-cuda-12
+      and add runtime: nvidia to the container config.
+    required: false
+
+tags:
+  - ai
+  - llm
+  - inference
+  - local
+
+links:
+  github: https://github.com/mudler/LocalAI
+  docs: https://localai.io/docs
