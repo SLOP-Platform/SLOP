@@ -1,0 +1,48 @@
+name: Build Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+  pull_request:
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Check bundle size
+        run: |
+          du -sh backend/static/
+          # Fail if bundle exceeds 2MB
+          SIZE=$(du -sb backend/static/ | cut -f1)
+          if [ "$SIZE" -gt "2097152" ]; then
+            echo "Bundle too large: ${SIZE} bytes (max 2MB)"
+            exit 1
+          fi
+          echo "Bundle size OK: ${SIZE} bytes"
