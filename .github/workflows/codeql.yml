@@ -40,7 +40,10 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: python
-          queries: +security-and-quality
+          # security-extended: full security rule set (incl. medium-confidence
+          # taint) WITHOUT the quality/maintainability rules — those duplicate
+          # ruff/mypy and were pure alert noise on the first scan.
+          queries: security-extended
           config: |
             paths:
               - backend/
