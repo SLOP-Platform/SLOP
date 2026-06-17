@@ -10,6 +10,7 @@ Verifies that installer/readiness_manifest.yaml:
 
 Does NOT require real VMs or a real archive; tests the manifest structure only.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -144,8 +145,7 @@ def test_distro_capture_check_types_known(manifest: dict) -> None:
             check = capture.get("check", {})
             for ct in _collect_check_types(check):
                 assert ct in KNOWN_CHECK_TYPES, (
-                    f"distro {distro!r} capture {capture.get('id')!r} "
-                    f"has unknown check type {ct!r}"
+                    f"distro {distro!r} capture {capture.get('id')!r} has unknown check type {ct!r}"
                 )
 
 
@@ -156,7 +156,12 @@ def test_ubuntu_24_04_has_no_captures(manifest: dict) -> None:
 
 def test_debian_12_has_required_captures(manifest: dict) -> None:
     ids = {c["id"] for c in manifest["distro_evidence"]["debian_12"].get("captures", [])}
-    for required in ("distro_version_check", "python3_resolution", "data_dir_ownership", "apt_python_package"):
+    for required in (
+        "distro_version_check",
+        "python3_resolution",
+        "data_dir_ownership",
+        "apt_python_package",
+    ):
         assert required in ids, f"debian_12 missing capture {required!r}"
 
 
@@ -171,10 +176,19 @@ def test_ubuntu_22_04_is_archived(manifest: dict) -> None:
     )
     entry = manifest["archived_distros"]["ubuntu_22_04"]
     for required_field in ("archived_at", "archived_reason", "adr_reference"):
-        assert required_field in entry, f"ubuntu_22_04 archived entry missing field {required_field!r}"
+        assert required_field in entry, (
+            f"ubuntu_22_04 archived entry missing field {required_field!r}"
+        )
     ids = {c["id"] for c in entry.get("captures", [])}
-    for required_capture in ("deadsnakes_ppa_added", "python3_resolution", "apt_python311_package", "systemd_python_path"):
-        assert required_capture in ids, f"ubuntu_22_04 archived captures missing {required_capture!r}"
+    for required_capture in (
+        "deadsnakes_ppa_added",
+        "python3_resolution",
+        "apt_python311_package",
+        "systemd_python_path",
+    ):
+        assert required_capture in ids, (
+            f"ubuntu_22_04 archived captures missing {required_capture!r}"
+        )
 
 
 # ── predicted_classes ─────────────────────────────────────────────────────────

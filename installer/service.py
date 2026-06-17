@@ -18,10 +18,11 @@ Entry-point correction vs. V5_INSTALLER_PLAN.md Step 2.7.a placeholder:
   {{ install_dir }}/.venv/bin/uvicorn backend.api.main:app --host 0.0.0.0 --port 8080
   The plan's Step 2.7.a checkbox is marked DONE with this correction noted.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from installer._run import run_required
 
@@ -55,10 +56,8 @@ def _render_template(template_text: str, install_dir: str, data_dir: str) -> str
     Python dependency.  The .j2 extension signals the template syntax so a
     future upgrade to real Jinja2 is a one-line change here.
     """
-    return (
-        template_text
-        .replace("{{ install_dir }}", install_dir)
-        .replace("{{ data_dir }}", data_dir)
+    return template_text.replace("{{ install_dir }}", install_dir).replace(
+        "{{ data_dir }}", data_dir
     )
 
 
@@ -79,9 +78,7 @@ def _write_unit_file(path: Path, content: str) -> None:
     try:
         path.write_text(content, encoding="utf-8")
     except OSError as exc:
-        raise ServiceInstallError(
-            f"Could not write systemd unit to {path}: {exc}"
-        ) from exc
+        raise ServiceInstallError(f"Could not write systemd unit to {path}: {exc}") from exc
 
 
 def _run_systemctl(subcommand: str, unit: str) -> None:

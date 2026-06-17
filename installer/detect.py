@@ -65,10 +65,7 @@ def _raise_unsupported(distro_id=None, version_id=None):
     else:
         detected = f"{distro_id} (unknown version)"
 
-    supported_lines = "\n".join(
-        f"  - {e['version_label']}"
-        for e in SUPPORTED_DISTROS
-    )
+    supported_lines = "\n".join(f"  - {e['version_label']}" for e in SUPPORTED_DISTROS)
 
     raise UnsupportedDistroError(
         f"slop does not officially support\n"

@@ -12,18 +12,18 @@ is touched.
 All subprocess calls use installer._run.run_required (Core Rule 5.27).
 All HTTP calls use urllib.request (stdlib); no external dependencies.
 """
+
 from __future__ import annotations
 
 import http.client
 import json
 import re
-import socket
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from installer._run import MissingBinaryError, run_required
 from installer.state import STATE_FILE_NAME, read_state_file
@@ -54,10 +54,10 @@ _MAX_RETRY_ITERS = 100
 class SmokeTestResult:
     """Result of smoke_test() or an individual predicate check."""
 
-    predicate: str           # "P1" .. "P5", or "all" on overall success
+    predicate: str  # "P1" .. "P5", or "all" on overall success
     passed: bool
-    failure_shape: str       # short code, e.g. "P1_FAILED"; empty on pass
-    operator_message: str    # human-readable message per ADR 0015 §4
+    failure_shape: str  # short code, e.g. "P1_FAILED"; empty on pass
+    operator_message: str  # human-readable message per ADR 0015 §4
     diagnostic_command: str  # suggested command for operator; empty on pass
 
 
@@ -79,7 +79,7 @@ def _http_get(
     Raises urllib.error.URLError, http.client.HTTPException, socket.timeout,
     or OSError on connection-level failures.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "slop-smoke/5"})
+    req = urllib.request.Request(url, headers={"User-Agent": "slop-smoke/5"})  # noqa: S310 — installer fetch of a known/operator-configured URL over urllib; single-trusted-operator threat model
     with urlopen(req, timeout=timeout_s) as resp:
         return resp.status, resp.read()
 
@@ -121,16 +121,19 @@ def _check_systemd_active(
 
         if status_str == "active":
             return SmokeTestResult(
-                predicate="P1", passed=True,
-                failure_shape="", operator_message="", diagnostic_command="",
+                predicate="P1",
+                passed=True,
+                failure_shape="",
+                operator_message="",
+                diagnostic_command="",
             )
         if status_str == "failed":
             return SmokeTestResult(
-                predicate="P1", passed=False,
+                predicate="P1",
+                passed=False,
                 failure_shape="P1_FAILED",
                 operator_message=(
-                    "The slop service failed to start. "
-                    "Recent backend logs may show why."
+                    "The slop service failed to start. Recent backend logs may show why."
                 ),
                 diagnostic_command="journalctl -u slop.service -n 50 --no-pager",
             )
@@ -140,7 +143,8 @@ def _check_systemd_active(
             sleep(min(0.5, remaining))
 
     return SmokeTestResult(
-        predicate="P1", passed=False,
+        predicate="P1",
+        passed=False,
         failure_shape="P1_TIMEOUT",
         operator_message=(
             "The slop service did not reach `active` state within 10 seconds. "
@@ -153,7 +157,7 @@ def _check_systemd_active(
 # ── P2: port bound by slop process ─────────────────────────────────────
 
 
-def _parse_ss_port_pid(ss_output: str, port: int) -> Optional[str]:
+def _parse_ss_port_pid(ss_output: str, port: int) -> str | None:
     """Return PID string bound to *port* in ss -ltnp output, or None.
 
     Returns "" (empty string) if port is found but no PID is visible.
@@ -206,12 +210,16 @@ def _check_port_bound(
             # Port is bound — check PID ownership.
             if main_pid and main_pid != "0" and bound_pid == main_pid:
                 return SmokeTestResult(
-                    predicate="P2", passed=True,
-                    failure_shape="", operator_message="", diagnostic_command="",
+                    predicate="P2",
+                    passed=True,
+                    failure_shape="",
+                    operator_message="",
+                    diagnostic_command="",
                 )
             if bound_pid != main_pid:
                 return SmokeTestResult(
-                    predicate="P2", passed=False,
+                    predicate="P2",
+                    passed=False,
                     failure_shape="P2_WRONG_PID",
                     operator_message=(
                         f"Port {port} is bound, but not by the slop process. "
@@ -225,14 +233,15 @@ def _check_port_bound(
             sleep(min(0.5, remaining))
 
     return SmokeTestResult(
-        predicate="P2", passed=False,
+        predicate="P2",
+        passed=False,
         failure_shape="P2_NOT_BOUND",
         operator_message=(
             f"The slop service is active but did not bind to port {port} "
             "within 5 seconds. The process may be initializing or another service "
             "may have the port."
         ),
-        diagnostic_command=f"ss -ltnp && systemctl status slop.service",
+        diagnostic_command="ss -ltnp && systemctl status slop.service",
     )
 
 
@@ -254,7 +263,8 @@ def _check_healthz(
     """
     url = f"http://127.0.0.1:{port}/healthz"
     fail_result = SmokeTestResult(
-        predicate="P3", passed=False,
+        predicate="P3",
+        passed=False,
         failure_shape="P3_FAILED",
         operator_message=(
             "The slop backend is running but `/healthz` did not respond "
@@ -266,7 +276,7 @@ def _check_healthz(
     p3_budget = min(10.0, _remaining(start, budget_s, monotonic))
     retry_deadline = monotonic() + max(0.0, p3_budget)
 
-    for _n, delay in enumerate([0.0] + list(_BACKOFF_DELAYS)):
+    for _n, delay in enumerate([0.0, *list(_BACKOFF_DELAYS)]):
         if _n >= _MAX_RETRY_ITERS:
             return fail_result
         if monotonic() >= retry_deadline:
@@ -279,7 +289,7 @@ def _check_healthz(
 
         try:
             status, body = _http_get(url, 3.0, urlopen)
-        except (urllib.error.URLError, http.client.HTTPException, socket.timeout, OSError):
+        except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError):
             continue
 
         if status != 200:
@@ -297,8 +307,11 @@ def _check_healthz(
             return fail_result
 
         return SmokeTestResult(
-            predicate="P3", passed=True,
-            failure_shape="", operator_message="", diagnostic_command="",
+            predicate="P3",
+            passed=True,
+            failure_shape="",
+            operator_message="",
+            diagnostic_command="",
         )
 
     return fail_result
@@ -327,7 +340,7 @@ def _check_startupz_and_readyz(
     p4_budget = min(10.0, _remaining(start, budget_s, monotonic))
     retry_deadline = monotonic() + max(0.0, p4_budget)
 
-    for _n, delay in enumerate([0.0] + list(_BACKOFF_DELAYS)):
+    for _n, delay in enumerate([0.0, *list(_BACKOFF_DELAYS)]):
         if _n >= _MAX_RETRY_ITERS:
             break
         if monotonic() >= retry_deadline:
@@ -340,8 +353,8 @@ def _check_startupz_and_readyz(
 
         # Check /startupz
         try:
-            sz_status, sz_body = _http_get(startupz_url, 3.0, urlopen)
-        except (urllib.error.URLError, http.client.HTTPException, socket.timeout, OSError):
+            _sz_status, sz_body = _http_get(startupz_url, 3.0, urlopen)
+        except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError):
             continue
 
         try:
@@ -357,8 +370,8 @@ def _check_startupz_and_readyz(
 
         # /startupz passed — check /readyz
         try:
-            rz_status, rz_body = _http_get(readyz_url, 3.0, urlopen)
-        except (urllib.error.URLError, http.client.HTTPException, socket.timeout, OSError):
+            _rz_status, rz_body = _http_get(readyz_url, 3.0, urlopen)
+        except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError):
             continue
 
         try:
@@ -371,14 +384,18 @@ def _check_startupz_and_readyz(
 
         if db_ping == "ok":
             return SmokeTestResult(
-                predicate="P4", passed=True,
-                failure_shape="", operator_message="", diagnostic_command="",
+                predicate="P4",
+                passed=True,
+                failure_shape="",
+                operator_message="",
+                diagnostic_command="",
             )
 
         if db_ping != "ok":
             # db_ping failed — return immediately (structural failure)
             return SmokeTestResult(
-                predicate="P4", passed=False,
+                predicate="P4",
+                passed=False,
                 failure_shape="P4_DB_PING",
                 operator_message=(
                     f"The slop backend cannot reach its database at "
@@ -386,14 +403,14 @@ def _check_startupz_and_readyz(
                     "ownership or permissions."
                 ),
                 diagnostic_command=(
-                    f"ls -la {data_dir}/ && "
-                    "journalctl -u slop.service -n 50 --no-pager"
+                    f"ls -la {data_dir}/ && journalctl -u slop.service -n 50 --no-pager"
                 ),
             )
 
     # Retry budget exhausted — startup did not complete
     return SmokeTestResult(
-        predicate="P4", passed=False,
+        predicate="P4",
+        passed=False,
         failure_shape="P4_STARTUP_TIMEOUT",
         operator_message=(
             "The slop backend's startup did not complete within 10 seconds. "
@@ -425,20 +442,20 @@ def _check_spa_and_quickstart(
     # Check remaining budget before P5.
     if _remaining(start, budget_s, monotonic) <= 0.0:
         return SmokeTestResult(
-            predicate="P5", passed=False,
+            predicate="P5",
+            passed=False,
             failure_shape="P5_BUDGET_EXHAUSTED",
-            operator_message=(
-                "The smoke test budget was exhausted before P5 could run."
-            ),
+            operator_message=("The smoke test budget was exhausted before P5 could run."),
             diagnostic_command=f"curl -s -i http://127.0.0.1:{port}/",
         )
 
     # 1. Check / (SPA)
     try:
         spa_status, spa_body = _http_get(f"{base}/", 3.0, urlopen)
-    except (urllib.error.URLError, http.client.HTTPException, socket.timeout, OSError):
+    except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError):
         return SmokeTestResult(
-            predicate="P5", passed=False,
+            predicate="P5",
+            passed=False,
             failure_shape="P5_SPA_UNREACHABLE",
             operator_message=(
                 "The frontend is serving but does not match the expected "
@@ -453,7 +470,8 @@ def _check_spa_and_quickstart(
             detail = json.loads(spa_body).get("detail", "")
             if "Frontend not built" in str(detail):
                 return SmokeTestResult(
-                    predicate="P5", passed=False,
+                    predicate="P5",
+                    passed=False,
                     failure_shape="P5_FRONTEND_NOT_BUILT",
                     operator_message=(
                         "The frontend was not built during install. "
@@ -465,7 +483,8 @@ def _check_spa_and_quickstart(
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass
         return SmokeTestResult(
-            predicate="P5", passed=False,
+            predicate="P5",
+            passed=False,
             failure_shape="P5_SPA_503",
             operator_message=(
                 "The frontend is serving but does not match the expected "
@@ -477,7 +496,8 @@ def _check_spa_and_quickstart(
 
     if spa_status != 200:
         return SmokeTestResult(
-            predicate="P5", passed=False,
+            predicate="P5",
+            passed=False,
             failure_shape="P5_SPA_NON200",
             operator_message=(
                 "The frontend is serving but does not match the expected "
@@ -495,7 +515,8 @@ def _check_spa_and_quickstart(
         or not _SPA_RE_TITLE.search(body_text)
     ):
         return SmokeTestResult(
-            predicate="P5", passed=False,
+            predicate="P5",
+            passed=False,
             failure_shape="P5_SPA_WRONG_SIGNATURE",
             operator_message=(
                 "The frontend is serving but does not match the expected "
@@ -507,20 +528,19 @@ def _check_spa_and_quickstart(
 
     # 2. Check QuickStart endpoint.
     qs_fail = SmokeTestResult(
-        predicate="P5", passed=False,
+        predicate="P5",
+        passed=False,
         failure_shape="P5_QUICKSTART_FAILED",
         operator_message=(
             "The QuickStart API endpoint did not respond as expected. "
             "The QuickStart router may not be mounted."
         ),
-        diagnostic_command=(
-            f"curl -s -i http://127.0.0.1:{port}{_QUICKSTART_PATH}"
-        ),
+        diagnostic_command=(f"curl -s -i http://127.0.0.1:{port}{_QUICKSTART_PATH}"),
     )
 
     try:
         qs_status, qs_body = _http_get(f"{base}{_QUICKSTART_PATH}", 3.0, urlopen)
-    except (urllib.error.URLError, http.client.HTTPException, socket.timeout, OSError):
+    except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError):
         return qs_fail
 
     if qs_status != 200:
@@ -532,8 +552,11 @@ def _check_spa_and_quickstart(
         return qs_fail
 
     return SmokeTestResult(
-        predicate="P5", passed=True,
-        failure_shape="", operator_message="", diagnostic_command="",
+        predicate="P5",
+        passed=True,
+        failure_shape="",
+        operator_message="",
+        diagnostic_command="",
     )
 
 
@@ -541,9 +564,9 @@ def _check_spa_and_quickstart(
 
 
 def smoke_test(
-    install_dir: Union[str, Path],
+    install_dir: str | Path,
     *,
-    data_dir: Optional[str] = None,
+    data_dir: str | None = None,
     timeout_budget_s: float = 30.0,
     run: Callable = run_required,
     urlopen: Callable = urllib.request.urlopen,
@@ -577,41 +600,64 @@ def smoke_test(
     start = monotonic()
 
     r = _check_systemd_active(
-        start, timeout_budget_s,
-        run=run, sleep=sleep, monotonic=monotonic,
+        start,
+        timeout_budget_s,
+        run=run,
+        sleep=sleep,
+        monotonic=monotonic,
     )
     if not r.passed:
         return r
 
     r = _check_port_bound(
-        port, start, timeout_budget_s,
-        run=run, sleep=sleep, monotonic=monotonic,
+        port,
+        start,
+        timeout_budget_s,
+        run=run,
+        sleep=sleep,
+        monotonic=monotonic,
     )
     if not r.passed:
         return r
 
     r = _check_healthz(
-        port, start, timeout_budget_s,
-        urlopen=urlopen, sleep=sleep, monotonic=monotonic,
+        port,
+        start,
+        timeout_budget_s,
+        urlopen=urlopen,
+        sleep=sleep,
+        monotonic=monotonic,
     )
     if not r.passed:
         return r
 
     r = _check_startupz_and_readyz(
-        port, _data_dir, start, timeout_budget_s,
-        urlopen=urlopen, sleep=sleep, monotonic=monotonic,
+        port,
+        _data_dir,
+        start,
+        timeout_budget_s,
+        urlopen=urlopen,
+        sleep=sleep,
+        monotonic=monotonic,
     )
     if not r.passed:
         return r
 
     r = _check_spa_and_quickstart(
-        port, str(install_dir_path), start, timeout_budget_s,
-        urlopen=urlopen, monotonic=monotonic,
+        port,
+        str(install_dir_path),
+        start,
+        timeout_budget_s,
+        urlopen=urlopen,
+        monotonic=monotonic,
     )
     if not r.passed:
         return r
 
     return SmokeTestResult(
-        predicate="all", passed=True,
-        failure_shape="", operator_message="", diagnostic_command="",
+        predicate="all",
+        passed=True,
+        failure_shape="",
+        operator_message="",
+        diagnostic_command="",
     )

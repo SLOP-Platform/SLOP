@@ -11,6 +11,7 @@ Two test groups:
    pipeline ordering, state-file lifecycle, and consent resolution.
    All use the inject-kwargs pattern — no real modules are called.
 """
+
 import argparse
 import types
 from pathlib import Path
@@ -46,9 +47,7 @@ class TestInstallHandoffF1:
         assert args.data_dir == "/var/y"
 
     def test_custom_paths_parsed(self):
-        args = build_parser().parse_args(
-            ["install", "--install-dir=/tmp/x", "--data-dir=/tmp/y"]
-        )
+        args = build_parser().parse_args(["install", "--install-dir=/tmp/x", "--data-dir=/tmp/y"])
         assert args.install_dir == "/tmp/x"
         assert args.data_dir == "/tmp/y"
 
@@ -66,13 +65,15 @@ class TestInstallHandoffF1:
 
     def test_full_handoff_set(self):
         """Simulate the complete _PY_ARGS array install.sh builds after F1."""
-        args = build_parser().parse_args([
-            "install",
-            "--install-dir=/opt/slop",
-            "--data-dir=/var/lib/slop",
-            "--install-docker=yes",
-            "--force",
-        ])
+        args = build_parser().parse_args(
+            [
+                "install",
+                "--install-dir=/opt/slop",
+                "--data-dir=/var/lib/slop",
+                "--install-docker=yes",
+                "--force",
+            ]
+        )
         assert args.install_dir == "/opt/slop"
         assert args.data_dir == "/var/lib/slop"
         assert args.install_docker == "yes"
@@ -99,31 +100,31 @@ _FAKE_DISTRO = types.SimpleNamespace(distro="debian", version="12")
 
 
 def _make_args(**kw) -> argparse.Namespace:
-    defaults = dict(
-        install_dir="/opt/test-ms",
-        data_dir="/var/test-ms",
-        install_docker="yes",
-        force=False,
-    )
+    defaults = {
+        "install_dir": "/opt/test-ms",
+        "data_dir": "/var/test-ms",
+        "install_docker": "yes",
+        "force": False,
+    }
     defaults.update(kw)
     return argparse.Namespace(**defaults)
 
 
 def _make_state(phase: str = "installed", **kw) -> StateFile:
-    defaults = dict(
-        schema_version=1,
-        slop_version="5.0.0",
-        phase=phase,
-        started_at="2026-01-01T00:00:00Z",
-        completed_at="2026-01-01T00:01:00Z" if phase == "installed" else None,
-        install_dir="/opt/test-ms",
-        data_dir="/var/test-ms",
-        install_user="slop",
-        distro="debian",
-        distro_version="12",
-        port=8080,
-        smoke_test_passed=(phase == "installed"),
-    )
+    defaults = {
+        "schema_version": 1,
+        "slop_version": "5.0.0",
+        "phase": phase,
+        "started_at": "2026-01-01T00:00:00Z",
+        "completed_at": "2026-01-01T00:01:00Z" if phase == "installed" else None,
+        "install_dir": "/opt/test-ms",
+        "data_dir": "/var/test-ms",
+        "install_user": "slop",
+        "distro": "debian",
+        "distro_version": "12",
+        "port": 8080,
+        "smoke_test_passed": (phase == "installed"),
+    }
     defaults.update(kw)
     return StateFile(**defaults)
 
@@ -154,16 +155,19 @@ def _mocks(**overrides) -> dict:
         "frontend_build": lambda d: None,
         "service_install": lambda d, dd: None,
         "smoke_test": lambda p, **kw: SmokeTestResult(
-            predicate="all", passed=True,
-            failure_shape="", operator_message="", diagnostic_command="",
+            predicate="all",
+            passed=True,
+            failure_shape="",
+            operator_message="",
+            diagnostic_command="",
         ),
         "resolve_hostname": lambda: "localhost",
         "post_install_write": lambda content, install_dir, **kw: None,
         "write_wrapper": lambda install_dir: None,
         "stdin_is_tty": lambda: True,
         "install_dir_exists": lambda p: False,  # S1 clean by default
-        "remove_install_dir": lambda p: None,   # no-op; real shutil.rmtree for prod
-        "stop_service": lambda: None,           # no-op; real systemctl stop for prod
+        "remove_install_dir": lambda p: None,  # no-op; real shutil.rmtree for prod
+        "stop_service": lambda: None,  # no-op; real systemctl stop for prod
     }
     base.update(overrides)
     return base
@@ -171,11 +175,13 @@ def _mocks(**overrides) -> dict:
 
 def _call_logger(log: list, name: str, return_val=None, raises=None):
     """Return a mock callable that appends *name* to *log* on each call."""
+
     def fn(*args, **kwargs):
         log.append(name)
         if raises is not None:
             raise raises
         return return_val
+
     return fn
 
 
@@ -209,8 +215,10 @@ class TestStateMachineS1:
 
     def test_s1_state_write_called_three_times(self):
         writes = []
+
         def record_write(s, p):
             writes.append(s.phase)
+
         result = run_install_pipeline(_make_args(), **_mocks(state_write=record_write))
         assert result == 0
         assert writes == ["installing", "installed", "installed"]
@@ -297,6 +305,7 @@ class TestStateMachineS4:
     def _corrupt_read(self, exc_type):
         def fn(p):
             raise exc_type("bad state")
+
         return fn
 
     def test_s4_corrupted_refuses(self, capsys):
@@ -523,8 +532,10 @@ class TestIdempotentInstall:
     def test_force_preflight_fail_does_not_remove_install_dir(self):
         # F-05-A: if pre-flight fails, the old install dir must be preserved.
         removed: list = []
+
         def failing_prereqs(path, port):
             return [PrereqFinding("port 8080 (backend)", False, "port in use")]
+
         run_install_pipeline(
             _make_args(force=True),
             **_mocks(
@@ -587,9 +598,7 @@ class TestPrereqFailure:
         def failing_prereqs(path, port):
             return [PrereqFinding("root", False, "must be root")]
 
-        result = run_install_pipeline(
-            _make_args(), **_mocks(prereq_check=failing_prereqs)
-        )
+        result = run_install_pipeline(_make_args(), **_mocks(prereq_check=failing_prereqs))
         assert result == 1
 
     def test_prereq_fail_no_module_called(self):
@@ -642,9 +651,7 @@ class TestDistroDetectionFailure:
         raise UnsupportedDistroError("fedora not supported")
 
     def test_unsupported_distro_returns_nonzero(self):
-        result = run_install_pipeline(
-            _make_args(), **_mocks(detect_os=self._unsupported)
-        )
+        result = run_install_pipeline(_make_args(), **_mocks(detect_os=self._unsupported))
         assert result == 1
 
     def test_unsupported_distro_no_pipeline_call(self):
@@ -680,9 +687,7 @@ class TestUserAttrsPreflight:
         raise InstallUserMismatchError("user `slop` has wrong shell '/bin/bash'")
 
     def test_mismatch_returns_nonzero(self):
-        result = run_install_pipeline(
-            _make_args(), **_mocks(check_user_attrs=self._mismatch)
-        )
+        result = run_install_pipeline(_make_args(), **_mocks(check_user_attrs=self._mismatch))
         assert result == 1
 
     def test_mismatch_no_state_write(self):
@@ -708,9 +713,7 @@ class TestUserAttrsPreflight:
         assert log == []
 
     def test_correct_attrs_proceeds(self):
-        result = run_install_pipeline(
-            _make_args(), **_mocks(check_user_attrs=lambda: None)
-        )
+        result = run_install_pipeline(_make_args(), **_mocks(check_user_attrs=lambda: None))
         assert result == 0
 
 
@@ -742,18 +745,21 @@ class TestPipelineOrder:
         assert set(log[4:6]) == {"backend", "frontend"}
         assert log[6:] == ["service"]
 
-    @pytest.mark.parametrize("fail_at,expected_called,not_called", [
-        ("deps",     [],                      ["docker", "user", "fetch", "backend", "frontend", "service"]),
-        ("docker",   ["deps"],                ["user", "fetch", "backend", "frontend", "service"]),
-        ("user",     ["deps", "docker"],      ["fetch", "backend", "frontend", "service"]),
-        ("fetch",    ["deps", "docker", "user"], ["backend", "frontend", "service"]),
-        # backend and frontend run in parallel: when backend fails, frontend still
-        # runs to completion (both threads are joined before the error propagates).
-        # The critical invariant is that "service" is NOT called — not that
-        # "frontend" is skipped.
-        ("backend",  ["deps", "docker", "user", "fetch"], ["service"]),
-        ("frontend", ["deps", "docker", "user", "fetch", "backend"], ["service"]),
-    ])
+    @pytest.mark.parametrize(
+        "fail_at,expected_called,not_called",
+        [
+            ("deps", [], ["docker", "user", "fetch", "backend", "frontend", "service"]),
+            ("docker", ["deps"], ["user", "fetch", "backend", "frontend", "service"]),
+            ("user", ["deps", "docker"], ["fetch", "backend", "frontend", "service"]),
+            ("fetch", ["deps", "docker", "user"], ["backend", "frontend", "service"]),
+            # backend and frontend run in parallel: when backend fails, frontend still
+            # runs to completion (both threads are joined before the error propagates).
+            # The critical invariant is that "service" is NOT called — not that
+            # "frontend" is skipped.
+            ("backend", ["deps", "docker", "user", "fetch"], ["service"]),
+            ("frontend", ["deps", "docker", "user", "fetch", "backend"], ["service"]),
+        ],
+    )
     def test_pipeline_halts_at_failing_module(self, fail_at, expected_called, not_called):
         log = []
 
@@ -830,9 +836,7 @@ class TestStateFileLifecycle:
         )
         assert result == 0
         service_idx = next(i for i, x in enumerate(log) if x[0] == "service")
-        post_write_entries = [
-            i for i, x in enumerate(log) if x == ("write", "installed")
-        ]
+        post_write_entries = [i for i, x in enumerate(log) if x == ("write", "installed")]
         assert post_write_entries, "post-write (installed) never happened"
         assert post_write_entries[0] > service_idx
 
@@ -880,8 +884,10 @@ class TestConsentResolution:
 
     def _capture_consent(self):
         captured = []
+
         def mock_docker(cm):
             captured.append(cm)
+
         return mock_docker, captured
 
     def test_install_docker_yes_gives_yes(self):

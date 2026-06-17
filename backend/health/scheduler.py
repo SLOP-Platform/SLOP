@@ -24,6 +24,7 @@ from backend.health.swallow_counter import record_swallow
 
 import asyncio
 import json
+import subprocess
 import time
 
 log = get_logger(__name__)
@@ -155,21 +156,17 @@ async def _execute_cycle(cfg: dict[str, Any]) -> None:
         record_swallow("scheduler.cycle_summary_persist")
 
 
-async def _check_docker_daemon_health() -> None:
+def _check_docker_daemon_health() -> None:
     """Probe `docker ps` latency; persist a daemon-slow indicator when slow."""
     import time as _t
 
     _docker_start = _t.monotonic()
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "ps",
-            "--format",
-            "{{.Names}}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            timeout=5,
         )
-        await asyncio.wait_for(proc.communicate(), timeout=5)
     except Exception as _de:
         log.error("Docker daemon unreachable: %s — skipping health checks", _de)
         return
@@ -181,7 +178,7 @@ async def _check_docker_daemon_health() -> None:
         _set_setting_silently("docker_daemon_slow_ms", "0")
 
 
-async def _check_and_restart_traefik() -> None:
+def _check_and_restart_traefik() -> None:
     """If Traefik is not running, attempt one compose-up restart."""
     try:
         from backend.core import docker_client as _dc
@@ -197,22 +194,15 @@ async def _check_and_restart_traefik() -> None:
         _frag = _tc.compose_dir / "traefik.yaml"
         if not _frag.exists():
             return
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "compose",
-            "-f",
-            str(_frag),
-            "up",
-            "-d",
-            "--quiet-pull",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = subprocess.run(
+            ["docker", "compose", "-f", str(_frag), "up", "-d", "--quiet-pull"],
+            capture_output=True,
+            timeout=30,
         )
-        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        if proc.returncode == 0:
+        if result.returncode == 0:
             log.info("Traefik restarted successfully by health scheduler")
         else:
-            log.error("Traefik restart failed: %s", stderr.decode()[:200])
+            log.error("Traefik restart failed: %s", result.stderr.decode()[:200])
     except Exception as _te:
         log.debug("Traefik health check failed: %s", _te)
 
@@ -551,8 +541,8 @@ async def _scheduler_loop() -> None:
         # Ambient post-cycle checks — run all probes concurrently; one failure
         # never cancels others (return_exceptions=True).
         _probe_results = await asyncio.gather(
-            _check_docker_daemon_health(),  # now async (A1)
-            _check_and_restart_traefik(),  # now async (A1)
+            asyncio.to_thread(_check_docker_daemon_health),
+            asyncio.to_thread(_check_and_restart_traefik),
             asyncio.to_thread(_check_managed_services_health),
             asyncio.to_thread(_check_disk_space),
             asyncio.to_thread(_maybe_start_source_scan),

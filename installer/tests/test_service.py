@@ -12,6 +12,7 @@ Coverage:
   TestInstallServiceSystemctl     — daemon-reload, enable, start called in order
   TestInstallServiceFailureModes  — write failure; systemctl failure propagation
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -46,12 +47,12 @@ def _noop(*_args, **_kwargs):
 
 def _passing_kwargs(template: str = _TMPL) -> dict:
     """Return install_service injectable kwargs for a default-success scenario."""
-    return dict(
-        read_template=lambda: template,
-        write_unit_file=_noop,
-        run_systemctl=_noop,
-        setup_env_file=_noop,
-    )
+    return {
+        "read_template": lambda: template,
+        "write_unit_file": _noop,
+        "run_systemctl": _noop,
+        "setup_env_file": _noop,
+    }
 
 
 # ── TestRenderTemplate ────────────────────────────────────────────────────────
@@ -63,7 +64,9 @@ class TestRenderTemplate:
         assert result == "WorkingDirectory=/opt/ms"
 
     def test_substitutes_data_dir(self):
-        result = _render_template("Environment=MS_DATA_DIR={{ data_dir }}", "/opt/ms", "/var/lib/ms")
+        result = _render_template(
+            "Environment=MS_DATA_DIR={{ data_dir }}", "/opt/ms", "/var/lib/ms"
+        )
         assert result == "Environment=MS_DATA_DIR=/var/lib/ms"
 
     def test_substitutes_all_occurrences_of_install_dir(self):
@@ -278,14 +281,14 @@ class TestServiceBoundaryProbe:
 
     def test_run_systemctl_raises_on_systemctl_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("systemctl")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("systemctl")):
             with pytest.raises(MissingBinaryError, match="systemctl"):
                 _run_systemctl("daemon-reload", "")
 
     def test_read_template_raises_service_install_error_on_missing_file(self):
         from unittest.mock import patch
-        with patch("installer.service._TEMPLATE_FILE",
-                   new=Path("/nonexistent/slop.service.j2")):
+
+        with patch("installer.service._TEMPLATE_FILE", new=Path("/nonexistent/slop.service.j2")):
             with pytest.raises(ServiceInstallError, match="template"):
                 _read_template()

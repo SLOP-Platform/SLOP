@@ -10,6 +10,7 @@ Coverage:
   TestSetupBackendChown        — chown ordering, user, venv_dir target
   TestSetupBackendOrdering     — full call sequence: create_venv → pip → chown
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +19,6 @@ import pytest
 
 from installer._run import MissingBinaryError
 from installer.backend import (
-    BackendError,
     PipInstallError,
     RequirementsNotFoundError,
     VenvCreationError,
@@ -41,13 +41,13 @@ def _passing_kwargs(
     req_present: bool = True,
 ) -> dict:
     """Return setup_backend injectable kwargs for a default-success scenario."""
-    return dict(
-        venv_exists=lambda venv_dir: venv_present,
-        create_venv=_noop,
-        requirements_exists=lambda req_path: req_present,
-        run_pip_install=_noop,
-        run_chown=_noop,
-    )
+    return {
+        "venv_exists": lambda venv_dir: venv_present,
+        "create_venv": _noop,
+        "requirements_exists": lambda req_path: req_present,
+        "run_pip_install": _noop,
+        "run_chown": _noop,
+    }
 
 
 # ── TestSetupBackendVenvCreation ──────────────────────────────────────────────
@@ -109,7 +109,7 @@ class TestSetupBackendRequirements:
 
     def test_missing_requirements_message_names_path(self):
         kwargs = _passing_kwargs(req_present=False)
-        with pytest.raises(RequirementsNotFoundError, match="requirements.txt"):
+        with pytest.raises(RequirementsNotFoundError, match=r"requirements.txt"):
             setup_backend("/some/dir", **kwargs)
 
     def test_missing_requirements_skips_pip(self):
@@ -270,29 +270,31 @@ class TestBackendBoundaryProbe:
 
     def test_create_venv_raises_on_python3_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("python3")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("python3")):
             with pytest.raises(MissingBinaryError, match="python3"):
                 _create_venv(Path("/some/dir/.venv"))
 
     def test_run_pip_install_raises_on_pip_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("pip")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("pip")):
             with pytest.raises(MissingBinaryError, match="pip"):
                 _run_pip_install(Path("/some/.venv/bin/pip"), Path("/some/requirements.txt"))
 
     def test_run_chown_raises_on_chown_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("chown")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("chown")):
             with pytest.raises(MissingBinaryError, match="chown"):
                 _run_chown("slop", Path("/some/.venv"))
 
     def test_create_venv_ensurepip_error_mentions_python3_venv(self):
         from unittest.mock import patch, MagicMock
-        fake = MagicMock(returncode=1, stdout="",
-                         stderr="Error: Command '[...] -m ensurepip --upgrade' failed")
+
+        fake = MagicMock(
+            returncode=1, stdout="", stderr="Error: Command '[...] -m ensurepip --upgrade' failed"
+        )
         with patch("installer._run.subprocess.run", return_value=fake):
             with pytest.raises(VenvCreationError, match="python3-venv"):
                 _create_venv(Path("/some/dir/.venv"))

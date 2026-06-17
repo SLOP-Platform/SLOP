@@ -17,6 +17,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ── Docker CLI source image ───────────────────────────────────────────────────
+# Pinned to a concrete version tag (tracking id=846).
+# TODO: upgrade to digest-pinned form once registry access is confirmed:
+#   docker:28.0.1-cli@sha256:<digest>
+FROM docker:28.0.1-cli AS docker-cli
+
 # ── Runtime image ────────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
@@ -31,8 +37,8 @@ WORKDIR /app
 # The Python SDK socket connection only covers reads/events, not management, so
 # without these binaries the wizard and all app installs fail. Both are static
 # Go binaries from the official docker:cli image, so they run on debian-slim.
-COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 
 # trivy — SLOP's runtime CVE probe (backend/agent/cve_audit.py) shells out to
 # `trivy image` to scan managed app images + SLOP's own image for HIGH/CRITICAL

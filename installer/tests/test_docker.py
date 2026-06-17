@@ -8,13 +8,13 @@ Coverage per DEPENDENCIES.md §Docker Handling consent resolution table:
   TestParseDockerVersion     — version-string parsing edge cases
   TestEnsureDockerD2Present  — D2 (present, >= 24.0) — no-op for all consent modes
   TestEnsureDockerD4Daemon   — D4 (daemon unreachable) — always DockerDaemonError
-  TestEnsureDockerD1Absent   — D1 (absent) × consent yes/no/interactive
-  TestEnsureDockerD3TooOld   — D3 (present, < 24.0) × consent yes/no/interactive
+  TestEnsureDockerD1Absent   — D1 (absent) x consent yes/no/interactive
+  TestEnsureDockerD3TooOld   — D3 (present, < 24.0) x consent yes/no/interactive
   TestEnsureDockerPostInstall — post-install verification failure paths
 """
+
 from __future__ import annotations
 
-from typing import Optional
 
 import pytest
 
@@ -44,19 +44,19 @@ def _noop_verify():
 
 def _passing_kwargs(
     has_cmd: bool = True,
-    version: Optional[str] = "27.0.3",
+    version: str | None = "27.0.3",
     install_fn=_noop_install,
     verify_fn=_noop_verify,
     prompt_answer: bool = True,
 ) -> dict:
     """Return ensure_docker kwargs for a host where Docker is present and ok (D2)."""
-    return dict(
-        has_docker_cmd=lambda: has_cmd,
-        get_docker_version=lambda: version,
-        run_docker_install=install_fn,
-        verify_post_install=verify_fn,
-        prompt_user=lambda q: prompt_answer,
-    )
+    return {
+        "has_docker_cmd": lambda: has_cmd,
+        "get_docker_version": lambda: version,
+        "run_docker_install": install_fn,
+        "verify_post_install": verify_fn,
+        "prompt_user": lambda q: prompt_answer,
+    }
 
 
 def _d1_kwargs(**overrides) -> dict:
@@ -72,7 +72,9 @@ def _d3_kwargs(version: str = "23.0.1", **overrides) -> dict:
     """D3: Docker present, version < 24.0."""
     install_fn = overrides.pop("install_fn", _noop_install)
     verify_fn = overrides.pop("verify_fn", _noop_verify)
-    base = _passing_kwargs(has_cmd=True, version=version, install_fn=install_fn, verify_fn=verify_fn)
+    base = _passing_kwargs(
+        has_cmd=True, version=version, install_fn=install_fn, verify_fn=verify_fn
+    )
     base.update(overrides)
     return base
 
@@ -166,6 +168,7 @@ class TestEnsureDockerD4Daemon:
         with pytest.raises(DockerDaemonError, match="systemctl start docker"):
             ensure_docker("yes", **_d4_kwargs())
 
+
 # ── TestEnsureDockerD1Absent ──────────────────────────────────────────────────
 
 
@@ -222,7 +225,7 @@ class TestEnsureDockerD1Absent:
         assert "not installed" in prompts[0].lower() or "Install" in prompts[0]
 
     def test_missing_error_message_has_remediation(self):
-        with pytest.raises(DockerMissingError, match="get.docker.com"):
+        with pytest.raises(DockerMissingError, match=r"get.docker.com"):
             ensure_docker("no", **_d1_kwargs())
 
 
@@ -255,7 +258,7 @@ class TestEnsureDockerD3TooOld:
         assert len(installs) == 0
 
     def test_too_old_error_names_version(self):
-        with pytest.raises(DockerTooOldError, match="23.0.1"):
+        with pytest.raises(DockerTooOldError, match=r"23.0.1"):
             ensure_docker("no", **_d3_kwargs(version="23.0.1"))
 
     def test_interactive_yes_upgrades(self):
@@ -333,6 +336,7 @@ class TestGetDockerVersionProbe:
     def test_returns_none_on_file_not_found(self):
         from unittest.mock import patch
         from installer.docker import _get_docker_version
+
         # Patch at installer._run (docker.py no longer imports subprocess directly).
         with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("docker")):
             assert _get_docker_version() is None
@@ -347,15 +351,16 @@ class TestVerifyDockerPostInstallProbe:
     def test_compose_filenotfound_raises_install_failed(self):
         # Patch _get_docker_version to return valid version (bypass its subprocess call),
         # then let the compose run_required raise MissingBinaryError → DockerInstallFailedError.
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
+
         with patch("installer.docker._get_docker_version", return_value="27.0.3"):
-            with patch("installer._run.subprocess.run",
-                       side_effect=FileNotFoundError("docker")):
+            with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("docker")):
                 with pytest.raises(DockerInstallFailedError, match="compose plugin"):
                     _verify_docker_post_install()
 
     def test_compose_nonzero_returncode_raises_install_failed(self):
         from unittest.mock import patch, MagicMock
+
         fake_result = MagicMock(returncode=1, stdout="", stderr="error")
         with patch("installer.docker._get_docker_version", return_value="27.0.3"):
             with patch("installer._run.subprocess.run", return_value=fake_result):
@@ -364,6 +369,7 @@ class TestVerifyDockerPostInstallProbe:
 
     def test_compose_success_does_not_raise(self):
         from unittest.mock import patch, MagicMock
+
         fake_result = MagicMock(returncode=0, stdout="v2.27.0", stderr="")
         with patch("installer.docker._get_docker_version", return_value="27.0.3"):
             with patch("installer._run.subprocess.run", return_value=fake_result):
@@ -378,20 +384,22 @@ class TestRunDockerInstallProbe:
 
     def test_raises_when_curl_absent(self):
         from unittest.mock import patch
+
         with patch("installer.docker.shutil.which", return_value=None):
             with pytest.raises(DockerInstallFailedError, match="curl is required"):
                 _run_docker_install()
 
     def test_bash_filenotfound_raises_missing_binary_error(self):
         from unittest.mock import patch
+
         with patch("installer.docker.shutil.which", return_value="/usr/bin/curl"):
-            with patch("installer._run.subprocess.run",
-                       side_effect=FileNotFoundError("bash")):
+            with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("bash")):
                 with pytest.raises(MissingBinaryError, match="bash"):
                     _run_docker_install()
 
     def test_nonzero_returncode_raises_install_failed(self):
         from unittest.mock import patch, MagicMock
+
         fake = MagicMock(returncode=1, stdout="", stderr="installation failed")
         with patch("installer.docker.shutil.which", return_value="/usr/bin/curl"):
             with patch("installer._run.subprocess.run", return_value=fake):

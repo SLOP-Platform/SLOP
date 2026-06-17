@@ -3,10 +3,11 @@
 Installs curl, netcat-openbsd, and nodejs per installer/DEPENDENCIES.md.
 Docker is not handled here; see installer/docker.py::ensure_docker().
 """
+
 from __future__ import annotations
 
 import shutil
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from installer._run import MissingBinaryError, run_required
 
@@ -78,7 +79,7 @@ def _is_pkg_installed(pkg: str) -> bool:
     return result.returncode == 0 and "install ok installed" in result.stdout
 
 
-def _get_node_version_str() -> Optional[str]:
+def _get_node_version_str() -> str | None:
     try:
         result = run_required(["node", "--version"])
     except MissingBinaryError:
@@ -92,15 +93,15 @@ def _run_apt_update() -> None:
     result = run_required(["apt-get", "update", "-qq"])
     if result.returncode != 0:
         stderr = result.stderr
-        if any(kw in stderr for kw in ("Failed to fetch", "Could not resolve", "Connection timed out")):
+        if any(
+            kw in stderr for kw in ("Failed to fetch", "Could not resolve", "Connection timed out")
+        ):
             raise AptUpdateNetworkError(
                 "apt-get update failed: network unreachable or apt mirror unavailable. "
                 "The installer requires internet access to install packages. "
                 "Check connectivity (try: ping deb.debian.org) and re-run."
             )
-        raise DependencyError(
-            f"apt-get update failed (exit {result.returncode}): {stderr.strip()}"
-        )
+        raise DependencyError(f"apt-get update failed (exit {result.returncode}): {stderr.strip()}")
 
 
 def _run_nodesource_setup(distro: str) -> None:
@@ -125,9 +126,7 @@ def _run_nodesource_setup(distro: str) -> None:
 
 
 def _run_apt_install(packages: list) -> None:
-    result = run_required(
-        ["apt-get", "install", "-y", "-qq", "--no-install-recommends"] + packages
-    )
+    result = run_required(["apt-get", "install", "-y", "-qq", "--no-install-recommends", *packages])
     if result.returncode != 0:
         stderr = result.stderr
         if "Could not get lock" in stderr:
@@ -158,12 +157,12 @@ def _parse_node_version(raw: str) -> tuple[int, int]:
     parts = stripped.split(".")
     try:
         return (int(parts[0]), int(parts[1]))
-    except (IndexError, ValueError):
+    except (IndexError, ValueError) as e:
         raise DependencyVersionUnparseableError(
             f"Could not parse nodejs version from output: {raw!r}. "
             "This is unusual; please file a bug at "
             "https://github.com/Nnyan/SLOP/issues with the full installer log."
-        )
+        ) from e
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -173,7 +172,7 @@ def ensure_dependencies(
     distro: str = "unknown",
     *,
     is_pkg_installed: Callable[[str], bool] = _is_pkg_installed,
-    get_node_version_str: Callable[[], Optional[str]] = _get_node_version_str,
+    get_node_version_str: Callable[[], str | None] = _get_node_version_str,
     run_apt_update: Callable[[], None] = _run_apt_update,
     run_nodesource_setup: Callable[[str], None] = _run_nodesource_setup,
     run_apt_install: Callable[[list], None] = _run_apt_install,
@@ -237,5 +236,5 @@ def ensure_dependencies(
 
     # Return the full install list including curl even when pre-installed separately.
     if curl_preinstalled:
-        return ["curl"] + to_install
+        return ["curl", *to_install]
     return to_install

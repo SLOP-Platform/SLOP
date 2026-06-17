@@ -6,12 +6,12 @@ Every infrastructure provider (Tinyauth, Authelia, Cloudflare Tunnel, etc.)
 implements this interface. The swap system uses it to migrate from one
 provider to another without the executor caring which provider is active.
 
-Providers are grouped into slots:
-  auth        — authentication gateway (Tinyauth / Authelia / Authentik)
-  tunnel      — external access (Cloudflare Tunnel / Tailscale / Headscale)
-  vpn         — VPN routing (Gluetun)
-  management  — container management UI (Portainer / Dockhand)
-  dashboard   — app dashboard (Homepage / Dashy / Homarr / Glance)
+Providers are grouped into slots. The canonical slot set and the per-slot
+contract (slot_kind, wiring_kind, required_methods, migration_pair, health_probe,
+cardinality) are declared as data in `backend/infra/slots.py:SLOT_CONTRACTS` —
+the single slot SSOT. This docstring no longer maintains its own slot list;
+the authoritative set is (auth / tunnel / vpn / management / dashboard) — see
+that module for what each slot's contract requires.
 
 Each slot can have zero or one active provider. The swap system:
   1. Deploys the new provider alongside the old one

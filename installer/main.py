@@ -5,6 +5,7 @@ Parses the top-level subcommand and delegates to the appropriate handler.
 Tier 1 stubs land in Tier 2+; _cmd_install is fully wired as of Step 2.7.5.
 Step 3.2.b extends run_install_pipeline with smoke test and post_install.
 """
+
 import argparse
 import dataclasses
 import datetime
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 from installer import (
     _run as _run_mod,
@@ -57,7 +58,7 @@ def _run_parallel(fn_a: Callable, fn_b: Callable) -> None:
     write from multiple threads.  subprocess.run inside each callable is also
     thread-safe (each call creates its own child process with its own fds).
     """
-    _errors: List[BaseException] = []
+    _errors: list[BaseException] = []
 
     def _wrap(fn: Callable) -> None:
         try:
@@ -82,7 +83,7 @@ def _run_parallel(fn_a: Callable, fn_b: Callable) -> None:
 def _resolve_consent_mode(
     args: argparse.Namespace,
     stdin_is_tty: Callable[[], bool],
-) -> Optional[str]:
+) -> str | None:
     """Map --install-docker flag + TTY state to consent_mode for ensure_docker().
 
     Returns "yes", "no", or None (interactive).  Raises RuntimeError for the
@@ -118,9 +119,7 @@ def _default_setup_community_dir(install_dir_path: Path) -> None:
         ["chown", "slop:slop", str(community_dir)],
     )
     if chown_result.returncode != 0:
-        raise Exception(
-            f"chown slop:slop {community_dir} failed: {chown_result.stderr.strip()}"
-        )
+        raise Exception(f"chown slop:slop {community_dir} failed: {chown_result.stderr.strip()}")
 
 
 def run_install_pipeline(
@@ -148,7 +147,9 @@ def run_install_pipeline(
     stdin_is_tty: Callable = sys.stdin.isatty,
     install_dir_exists: Callable[[Path], bool] = lambda p: p.exists(),
     remove_install_dir: Callable[[Path], None] = lambda p: shutil.rmtree(p, ignore_errors=True),
-    stop_service: Callable[[], None] = lambda: _run_mod.run_required(["systemctl", "stop", "slop.service"]),
+    stop_service: Callable[[], None] = lambda: _run_mod.run_required(
+        ["systemctl", "stop", "slop.service"]
+    ),
 ) -> int:
     """Orchestrate the Tier 2 install modules per ADR 0013 §3 and §4.
 
@@ -242,7 +243,7 @@ def run_install_pipeline(
     # ── Pre-write state file (ADR 0013 §2, phase=installing) ─────────────
     # write_state_file creates install_dir if absent — this is the §2 "first
     # filesystem write" point.  All steps above are read-only.
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     pre_state = state.StateFile(
         schema_version=1,
         slop_version=_INSTALLER_VERSION,
@@ -321,9 +322,7 @@ def run_install_pipeline(
         return 1
 
     # ── Post-write state file (ADR 0013 §2, phase=installed) ─────────────
-    completed_at = datetime.datetime.now(datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    completed_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     post_state = state.StateFile(
         schema_version=1,
         slop_version=resolved_version or _INSTALLER_VERSION,
@@ -380,8 +379,7 @@ def run_install_pipeline(
     print(
         f"\n{banner_line}\n"
         f"Install complete. See {install_dir_path / 'POST_INSTALL.txt'}\n"
-        f"{banner_line}\n\n"
-        + rendered
+        f"{banner_line}\n\n" + rendered
     )
     return 0
 
@@ -404,9 +402,7 @@ def _cmd_clean(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
-        return subprocess.run(
-            ["systemctl", "status", "slop.service"], timeout=10
-        ).returncode
+        return subprocess.run(["systemctl", "status", "slop.service"], timeout=10).returncode
     except FileNotFoundError:
         print("not available")
         return 1
@@ -463,9 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove slop code, service, and user (preserves data directory)",
     )
     _add_path_args(p_uninstall)
-    p_uninstall.add_argument(
-        "--yes", action="store_true", help="Skip confirmation prompt"
-    )
+    p_uninstall.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     p_uninstall.set_defaults(func=_cmd_uninstall)
 
     # purge
@@ -474,9 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove everything: code, service, user, data, and managed containers",
     )
     _add_path_args(p_purge)
-    p_purge.add_argument(
-        "--yes", action="store_true", help="Skip confirmation prompt"
-    )
+    p_purge.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     p_purge.set_defaults(func=_cmd_purge)
 
     # clean
@@ -485,9 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove managed containers and their data; leave slop itself running",
     )
     _add_path_args(p_clean)
-    p_clean.add_argument(
-        "--yes", action="store_true", help="Skip confirmation prompt"
-    )
+    p_clean.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     p_clean.set_defaults(func=_cmd_clean)
 
     # status

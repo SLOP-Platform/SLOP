@@ -13,6 +13,7 @@ Coverage:
   TestEnsureDataDirIdempotency  — all ops run on repeated calls (exist_ok semantics)
   TestEnsureDataDirBoundaryProbe — MissingBinaryError from missing chown/chmod binary
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,11 +40,11 @@ def _noop(*args, **kwargs):
 
 def _passing_kwargs(**overrides) -> dict:
     """Return ensure_data_dir kwargs for a successful call path."""
-    base = dict(
-        make_dir=_noop,
-        run_chown=_noop,
-        run_chmod=_noop,
-    )
+    base = {
+        "make_dir": _noop,
+        "run_chown": _noop,
+        "run_chmod": _noop,
+    }
     base.update(overrides)
     return base
 
@@ -203,11 +204,11 @@ class TestEnsureDataDirIdempotency:
         def inc(key):
             counts[key] += 1
 
-        kwargs = dict(
-            make_dir=lambda p: inc("mkdir"),
-            run_chown=lambda u, g, p: inc("chown"),
-            run_chmod=lambda m, p: inc("chmod"),
-        )
+        kwargs = {
+            "make_dir": lambda p: inc("mkdir"),
+            "run_chown": lambda u, g, p: inc("chown"),
+            "run_chmod": lambda m, p: inc("chmod"),
+        }
         ensure_data_dir(_DATA_DIR, **kwargs)
         ensure_data_dir(_DATA_DIR, **kwargs)
         assert counts == {"mkdir": 2, "chown": 2, "chmod": 2}

@@ -4,6 +4,7 @@ Implements ADR 0017: docs/adr/0017-uninstall-semantics.md
 Entry points: run_uninstall(), run_purge(), run_clean(), verify_removed().
 All public functions use inject-kwargs for testability (Core Rule 5.27).
 """
+
 from __future__ import annotations
 
 import json
@@ -13,13 +14,14 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from installer import post_install as _post_install_mod
 from installer import state as _state_mod
 from installer._defaults import DEFAULT_INSTALL_DIR as _DEFAULT_INSTALL_DIR
 from installer._run import run_required
 from installer.state import StateFile, StateFileCorruptedError, StateFileNewerSchemaError
+
 _SYSTEMD_UNIT = "/etc/systemd/system/slop.service"
 _MS_USER = "slop"
 _SYSTEM_UID_CEILING = 1000
@@ -77,7 +79,7 @@ def _read_state(
     *,
     state_read: Callable,
     err_fn: Callable,
-) -> Optional[StateFile]:
+) -> StateFile | None:
     """Read state file; emit refusal message and return None on error.
 
     Caller must return 1 when this returns None.
@@ -149,7 +151,7 @@ def _prompt_confirm(
 # ── §A.6 / §A.6.5 user and group attribute checks ────────────────────────────
 
 
-def _passwd_attrs(run: Callable, username: str) -> Optional[dict]:
+def _passwd_attrs(run: Callable, username: str) -> dict | None:
     """Return user attributes from getent passwd, or None if absent."""
     result = run(["getent", "passwd", username])
     if result.returncode != 0:
@@ -164,17 +166,13 @@ def _passwd_attrs(run: Callable, username: str) -> Optional[dict]:
     return {"uid": uid, "home": parts[5], "shell": parts[6]}
 
 
-def _group_members(run: Callable, group_name: str) -> Optional[list]:
+def _group_members(run: Callable, group_name: str) -> list | None:
     """Return member list from getent group, or None if group absent."""
     result = run(["getent", "group", group_name])
     if result.returncode != 0:
         return None
     parts = result.stdout.strip().split(":")
     return [m for m in parts[3].split(",") if m] if len(parts) > 3 else []
-
-
-
-
 
 
 # ── §B pipeline: shared uninstall/purge steps ────────────────────────────────
@@ -330,16 +328,17 @@ def _run_removal_pipeline(
     # Step 10: docker rm managed containers (U6)
     print_fn("Removing managed Docker containers...")
     container_ids = _enumerate_docker_objects(
-        run, ["docker", "ps", "-a", "--filter", "label=slop.managed=true",
-              "--format", "{{.ID}}"],
-        err_fn, "U6",
+        run,
+        ["docker", "ps", "-a", "--filter", "label=slop.managed=true", "--format", "{{.ID}}"],
+        err_fn,
+        "U6",
         "The Docker daemon is not accessible. Without daemon access, managed\n"
         "containers cannot be enumerated or removed.\n"
         "Diagnostic: `systemctl status docker` and `docker info`",
         late_failures,
     )
     if container_ids is not None and container_ids:
-        result = run(["docker", "rm", "-f"] + container_ids)
+        result = run(["docker", "rm", "-f", *container_ids])
         if result.returncode != 0:
             err_fn(
                 "Managed containers could not all be removed. Some may have failed\n"
@@ -352,15 +351,16 @@ def _run_removal_pipeline(
     # Step 11: docker volume rm managed volumes (U7)
     print_fn("Removing managed Docker volumes...")
     volume_names = _enumerate_docker_objects(
-        run, ["docker", "volume", "ls", "--filter", "label=slop.managed=true",
-              "--format", "{{.Name}}"],
-        err_fn, "U7",
+        run,
+        ["docker", "volume", "ls", "--filter", "label=slop.managed=true", "--format", "{{.Name}}"],
+        err_fn,
+        "U7",
         "The Docker daemon is not accessible for volume enumeration.\n"
         "Diagnostic: `systemctl status docker` and `docker info`",
         late_failures,
     )
     if volume_names is not None and volume_names:
-        result = run(["docker", "volume", "rm"] + volume_names)
+        result = run(["docker", "volume", "rm", *volume_names])
         if result.returncode != 0:
             err_fn(
                 "Managed volumes could not all be removed. Some may have failed\n"
@@ -382,7 +382,7 @@ def _enumerate_docker_objects(
     predicate: str,
     daemon_error_msg: str,
     late_failures: list,
-) -> Optional[list]:
+) -> list | None:
     """Run a docker enumeration command; return items or None on daemon error."""
     result = run(cmd)
     if result.returncode != 0:
@@ -432,7 +432,7 @@ def verify_removed(
     mode: str,
     *,
     run: Callable = run_required,
-    pre_data_dir_stat: Optional[os.stat_result] = None,
+    pre_data_dir_stat: os.stat_result | None = None,
 ) -> RemovalVerification:
     """Check U-predicates against post-action filesystem state.
 
@@ -476,10 +476,9 @@ def verify_removed(
         uid = int(parts[2]) if len(parts) > 2 else 9999
         shell = parts[6] if len(parts) > 6 else ""
         home = parts[5] if len(parts) > 5 else ""
-        if (mode in ("uninstall", "purge")
-                and (uid >= _SYSTEM_UID_CEILING
-                     or shell != _EXPECTED_SHELL
-                     or home != _EXPECTED_HOME)):
+        if mode in ("uninstall", "purge") and (
+            uid >= _SYSTEM_UID_CEILING or shell != _EXPECTED_SHELL or home != _EXPECTED_HOME
+        ):
             skipped.append("U4")  # §A.6 carve-out: installer wouldn't have removed
         else:
             predicates["U4"] = False  # User still present
@@ -518,20 +517,32 @@ def verify_removed(
 
     # U6: no managed containers (purge and clean)
     if mode in ("purge", "clean"):
-        result = run([
-            "docker", "ps", "-a",
-            "--filter", "label=slop.managed=true",
-            "--format", "{{.Names}}",
-        ])
+        result = run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                "label=slop.managed=true",
+                "--format",
+                "{{.Names}}",
+            ]
+        )
         predicates["U6"] = result.returncode == 0 and not result.stdout.strip()
 
     # U7: no managed volumes (purge and clean)
     if mode in ("purge", "clean"):
-        result = run([
-            "docker", "volume", "ls",
-            "--filter", "label=slop.managed=true",
-            "--format", "{{.Name}}",
-        ])
+        result = run(
+            [
+                "docker",
+                "volume",
+                "ls",
+                "--filter",
+                "label=slop.managed=true",
+                "--format",
+                "{{.Name}}",
+            ]
+        )
         predicates["U7"] = result.returncode == 0 and not result.stdout.strip()
 
     return RemovalVerification(
@@ -547,16 +558,22 @@ def verify_removed(
 
 def _enumerate_managed_apps(
     run: Callable,
-) -> Optional[tuple[list[str], list[str]]]:
+) -> tuple[list[str], list[str]] | None:
     """Enumerate managed containers; return (app_keys, orphan_names) or None on error.
 
     Returns None when the Docker daemon is unreachable (§C.2 fail-fast).
     """
-    result = run([
-        "docker", "ps", "-a",
-        "--filter", "label=slop.managed=true",
-        "--format", "{{.Names}}\t{{.Label \"slop.app-key\"}}",
-    ])
+    result = run(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            "label=slop.managed=true",
+            "--format",
+            '{{.Names}}\t{{.Label "slop.app-key"}}',
+        ]
+    )
     if result.returncode != 0:
         return None
 
@@ -584,20 +601,26 @@ def _api_remove_app(key: str, port: int) -> dict:
     """Call DELETE /api/apps/{key} with delete_config=true. Returns JSON response dict."""
     url = f"http://127.0.0.1:{port}/api/apps/{key}"
     body = json.dumps({"delete_config": True}).encode()
-    req = urllib.request.Request(url, data=body, method="DELETE")
+    req = urllib.request.Request(url, data=body, method="DELETE")  # noqa: S310 — installer fetch of a known/operator-configured URL over urllib; single-trusted-operator threat model
     req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — installer fetch of a known/operator-configured URL over urllib; single-trusted-operator threat model
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         return {
-            "ok": False, "app_key": key, "operation": "remove",
-            "steps": [], "error": f"HTTP {exc.code}: {exc.reason}",
+            "ok": False,
+            "app_key": key,
+            "operation": "remove",
+            "steps": [],
+            "error": f"HTTP {exc.code}: {exc.reason}",
         }
     except Exception as exc:
         return {
-            "ok": False, "app_key": key, "operation": "remove",
-            "steps": [], "error": str(exc),
+            "ok": False,
+            "app_key": key,
+            "operation": "remove",
+            "steps": [],
+            "error": str(exc),
         }
 
 
@@ -709,7 +732,7 @@ def run_uninstall(
     resolve_hostname: Callable = _post_install_mod._resolve_hostname,
     run: Callable = run_required,
     print_fn: Callable = print,
-    err_fn: Optional[Callable] = None,
+    err_fn: Callable | None = None,
 ) -> int:
     """Implement the 'uninstall' subcommand per ADR 0017 §B."""
     if err_fn is None:
@@ -737,8 +760,13 @@ def run_uninstall(
 
     # Steps 3-8: pipeline (first side effect)
     return _run_removal_pipeline(
-        "uninstall", install_dir, data_dir, sf,
-        run=run, print_fn=print_fn, err_fn=err_fn,
+        "uninstall",
+        install_dir,
+        data_dir,
+        sf,
+        run=run,
+        print_fn=print_fn,
+        err_fn=err_fn,
     )
 
 
@@ -751,7 +779,7 @@ def run_purge(
     resolve_hostname: Callable = _post_install_mod._resolve_hostname,
     run: Callable = run_required,
     print_fn: Callable = print,
-    err_fn: Optional[Callable] = None,
+    err_fn: Callable | None = None,
 ) -> int:
     """Implement the 'purge' subcommand per ADR 0017 §B."""
     if err_fn is None:
@@ -775,8 +803,13 @@ def run_purge(
         return 0
 
     return _run_removal_pipeline(
-        "purge", install_dir, data_dir, sf,
-        run=run, print_fn=print_fn, err_fn=err_fn,
+        "purge",
+        install_dir,
+        data_dir,
+        sf,
+        run=run,
+        print_fn=print_fn,
+        err_fn=err_fn,
     )
 
 
@@ -790,7 +823,7 @@ def run_clean(
     run: Callable = run_required,
     api_remove: Callable = _api_remove_app,
     print_fn: Callable = print,
-    err_fn: Optional[Callable] = None,
+    err_fn: Callable | None = None,
 ) -> int:
     """Implement the 'clean' subcommand per ADR 0017 §C."""
     if err_fn is None:

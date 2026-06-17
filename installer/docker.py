@@ -3,10 +3,11 @@
 Implements the 4-state detection and consent-aligned install/upgrade logic
 from installer/DEPENDENCIES.md §Docker Handling.
 """
+
 from __future__ import annotations
 
 import shutil
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from installer._run import MissingBinaryError, run_required
 
@@ -47,12 +48,10 @@ def _has_docker_cmd() -> bool:
     return shutil.which("docker") is not None
 
 
-def _get_docker_version() -> Optional[str]:
+def _get_docker_version() -> str | None:
     """Return raw version string from docker daemon, or None if daemon unreachable (D4)."""
     try:
-        result = run_required(
-            ["docker", "version", "--format", "{{.Server.Version}}"]
-        )
+        result = run_required(["docker", "version", "--format", "{{.Server.Version}}"])
     except MissingBinaryError:
         return None
     if result.returncode != 0:
@@ -68,9 +67,7 @@ def _run_docker_install() -> None:
             "curl is required for get.docker.com but not on PATH. "
             "Install curl first: apt-get install -y curl"
         )
-    result = run_required(
-        ["bash", "-c", "set -o pipefail; curl -fsSL https://get.docker.com | sh"]
-    )
+    result = run_required(["bash", "-c", "set -o pipefail; curl -fsSL https://get.docker.com | sh"])
     if result.returncode != 0:
         raise DockerInstallFailedError(
             "Docker installation via get.docker.com failed. "
@@ -95,16 +92,14 @@ def _verify_docker_post_install() -> None:
         )
     # F3 fix: already present (FileNotFoundError handler); migrate to run_required.
     try:
-        compose_result = run_required(
-            ["docker", "compose", "version", "--short"]
-        )
-    except MissingBinaryError:
+        compose_result = run_required(["docker", "compose", "version", "--short"])
+    except MissingBinaryError as e:
         raise DockerInstallFailedError(
             "Post-install check failed: docker compose plugin not available. "
             "The docker binary was present a moment ago but the compose subcommand "
             "is missing — this typically means docker-compose-plugin was not installed "
             "by the convenience script. Manual fix: apt-get install -y docker-compose-plugin"
-        )
+        ) from e
     if compose_result.returncode != 0:
         raise DockerInstallFailedError(
             "Post-install check failed: docker compose plugin not found. "
@@ -131,12 +126,12 @@ def _parse_docker_version(raw: str) -> tuple[int, int]:
     parts = clean.split(".")
     try:
         return (int(parts[0]), int(parts[1]))
-    except (IndexError, ValueError):
+    except (IndexError, ValueError) as e:
         raise DockerVersionUnparseableError(
             f"Could not parse docker engine version from output: {raw!r}. "
             "This is unusual; please file a bug at "
             "https://github.com/Nnyan/SLOP/issues with the full installer log."
-        )
+        ) from e
 
 
 # ── Install/upgrade helpers ───────────────────────────────────────────────────
@@ -144,8 +139,8 @@ def _parse_docker_version(raw: str) -> tuple[int, int]:
 
 def _do_install_or_upgrade(
     is_upgrade: bool,
-    current_version: Optional[str],
-    consent_mode: Optional[str],
+    current_version: str | None,
+    consent_mode: str | None,
     run_docker_install: Callable[[], None],
     verify_post_install: Callable[[], None],
     prompt_user: Callable[[str], bool],
@@ -163,8 +158,7 @@ def _do_install_or_upgrade(
     else:
         prompt_msg = "Docker is not installed. Install via get.docker.com?"
         decline_err = DockerMissingError(
-            "Docker is not installed. "
-            "Install it with: curl -fsSL https://get.docker.com | sh"
+            "Docker is not installed. Install it with: curl -fsSL https://get.docker.com | sh"
         )
 
     if consent_mode == "yes":
@@ -185,10 +179,10 @@ def _do_install_or_upgrade(
 
 
 def ensure_docker(
-    consent_mode: Optional[str] = None,
+    consent_mode: str | None = None,
     *,
     has_docker_cmd: Callable[[], bool] = _has_docker_cmd,
-    get_docker_version: Callable[[], Optional[str]] = _get_docker_version,
+    get_docker_version: Callable[[], str | None] = _get_docker_version,
     run_docker_install: Callable[[], None] = _run_docker_install,
     verify_post_install: Callable[[], None] = _verify_docker_post_install,
     prompt_user: Callable[[str], bool] = _prompt_user,

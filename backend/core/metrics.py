@@ -1,10 +1,10 @@
 """backend/core/metrics.py — Prometheus metrics (step 4.1).
 
 Defines the SLOP-specific custom metrics that supplement the
-auto-generated request-level metrics produced by
-`prometheus-fastapi-instrumentator`. The instrumentator covers the
-generic dimensions (HTTP method, path, status code, duration) — this
-module adds the domain-specific signal:
+auto-generated request-level metrics produced by the in-tree HTTP
+metrics middleware (`backend/api/http_metrics.py`). That middleware
+covers the generic dimensions (HTTP method, route template, status
+code, duration) — this module adds the domain-specific signal:
 
   - install_duration_seconds:    end-to-end install pipeline duration
   - health_check_duration_seconds: per-app health check duration

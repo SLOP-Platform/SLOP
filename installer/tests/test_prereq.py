@@ -15,12 +15,11 @@ Coverage per V5_INSTALLER_PLAN.md Step 1.4.b:
   TestDockerCheck         — docker engine present/absent/old-version, message anatomy
   TestComposeCheck        — docker compose plugin present/absent
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
-import pytest
 
 from installer.prereq import (
     PrereqFinding,
@@ -39,17 +38,17 @@ _PASS_DOCKER_VERSION: str = "27.0.3"
 
 def _passing_kwargs(install_path: str = "/tmp/install", port: int = 8080) -> dict:
     """Return check_prereqs kwargs where every single check passes."""
-    return dict(
-        install_path=install_path,
-        port=port,
-        read_kernel_release=lambda: _PASS_KERNEL,
-        get_disk_free_bytes=lambda p: _PASS_DISK_BYTES,
-        is_port_free=lambda port: True,
-        get_effective_uid=lambda: _PASS_UID,
-        read_init_comm=lambda: _PASS_INIT,
-        get_docker_version=lambda: _PASS_DOCKER_VERSION,
-        has_compose_plugin=lambda: True,
-    )
+    return {
+        "install_path": install_path,
+        "port": port,
+        "read_kernel_release": lambda: _PASS_KERNEL,
+        "get_disk_free_bytes": lambda p: _PASS_DISK_BYTES,
+        "is_port_free": lambda port: True,
+        "get_effective_uid": lambda: _PASS_UID,
+        "read_init_comm": lambda: _PASS_INIT,
+        "get_docker_version": lambda: _PASS_DOCKER_VERSION,
+        "has_compose_plugin": lambda: True,
+    }
 
 
 # ── TestParseKernelVersion ────────────────────────────────────────────────────
@@ -128,7 +127,10 @@ class TestDiskCheck:
 
     def _disk_finding(self, free_bytes: int, install_path: str = "/tmp/install") -> PrereqFinding:
         findings = check_prereqs(
-            **{**_passing_kwargs(install_path=install_path), "get_disk_free_bytes": lambda p: free_bytes}
+            **{
+                **_passing_kwargs(install_path=install_path),
+                "get_disk_free_bytes": lambda p: free_bytes,
+            }
         )
         return next(f for f in findings if f.name == "disk space")
 
@@ -168,7 +170,9 @@ class TestDiskCheck:
             seen_paths.append(p)
             return 20 * 1024**3
 
-        check_prereqs(**{**_passing_kwargs(install_path=str(tmp_path)), "get_disk_free_bytes": record_path})
+        check_prereqs(
+            **{**_passing_kwargs(install_path=str(tmp_path)), "get_disk_free_bytes": record_path}
+        )
         assert seen_paths == [tmp_path]
 
     def test_ancestor_walk_when_path_absent(self, tmp_path):
@@ -180,7 +184,9 @@ class TestDiskCheck:
             seen_paths.append(p)
             return 20 * 1024**3
 
-        check_prereqs(**{**_passing_kwargs(install_path=str(nonexistent)), "get_disk_free_bytes": record_path})
+        check_prereqs(
+            **{**_passing_kwargs(install_path=str(nonexistent)), "get_disk_free_bytes": record_path}
+        )
         assert len(seen_paths) == 1
         # The path passed to the mock must exist (it's the nearest ancestor)
         assert seen_paths[0].exists()
@@ -277,11 +283,16 @@ class TestRootCheck:
 class TestSystemdCheck:
     def _systemd_finding(self, comm: str | None) -> PrereqFinding:
         if comm is None:
+
             def raise_oserror() -> str:
                 raise OSError("no such file")
+
             read_fn = raise_oserror
         else:
-            read_fn = lambda: comm
+
+            def read_fn():
+                return comm
+
         findings = check_prereqs(**{**_passing_kwargs(), "read_init_comm": read_fn})
         return next(f for f in findings if f.name == "systemd init")
 
@@ -367,7 +378,7 @@ class TestCheckPrereqs:
             call_log.append("init")
             return "systemd"
 
-        def logging_docker() -> Optional[str]:
+        def logging_docker() -> str | None:
             call_log.append("docker")
             return "27.0.3"
 
@@ -438,7 +449,7 @@ class TestCheckPrereqs:
 class TestDockerCheck:
     """Docker Engine prerequisite: present, absent, too old."""
 
-    def _docker_finding(self, version: Optional[str]) -> PrereqFinding:
+    def _docker_finding(self, version: str | None) -> PrereqFinding:
         findings = check_prereqs(**{**_passing_kwargs(), "get_docker_version": lambda: version})
         return next(f for f in findings if f.name == "docker engine")
 

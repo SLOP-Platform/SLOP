@@ -6,9 +6,10 @@ if the user already exists with the expected attributes it is verified and
 kept; mismatched attributes raise InstallUserMismatchError rather than
 silently modifying an account the installer did not create.
 """
+
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from installer._run import run_required
 
@@ -42,7 +43,7 @@ _SYSTEM_UID_CEILING: int = 1000  # system UIDs are < 1000
 # ── I/O helpers (replaceable in tests via ensure_user kwargs) ─────────────────
 
 
-def _get_passwd_entry(username: str) -> Optional[dict]:
+def _get_passwd_entry(username: str) -> dict | None:
     """Return passwd attributes for username, or None if the user does not exist."""
     result = run_required(["getent", "passwd", username])
     if result.returncode != 0:
@@ -56,23 +57,26 @@ def _get_passwd_entry(username: str) -> Optional[dict]:
 
 
 def _run_useradd(username: str) -> None:
-    result = run_required([
-        "useradd",
-        "--system",
-        "--user-group",
-        "--no-create-home",
-        "--home-dir", _EXPECTED_HOME,
-        "--shell", _EXPECTED_SHELL,
-        "--comment", "slop service account",
-        username,
-    ])
+    result = run_required(
+        [
+            "useradd",
+            "--system",
+            "--user-group",
+            "--no-create-home",
+            "--home-dir",
+            _EXPECTED_HOME,
+            "--shell",
+            _EXPECTED_SHELL,
+            "--comment",
+            "slop service account",
+            username,
+        ]
+    )
     if result.returncode != 0:
-        raise UserCreationError(
-            f"useradd failed for {username!r}: {result.stderr.strip()}"
-        )
+        raise UserCreationError(f"useradd failed for {username!r}: {result.stderr.strip()}")
 
 
-def _get_group_entry(group_name: str) -> Optional[dict]:
+def _get_group_entry(group_name: str) -> dict | None:
     """Return group attributes (including members list) or None if absent."""
     result = run_required(["getent", "group", group_name])
     if result.returncode != 0:
@@ -83,13 +87,10 @@ def _get_group_entry(group_name: str) -> Optional[dict]:
 
 
 def _run_usermod(username: str, group_name: str) -> None:
-    result = run_required(
-        ["usermod", "--append", "--groups", group_name, username]
-    )
+    result = run_required(["usermod", "--append", "--groups", group_name, username])
     if result.returncode != 0:
         raise UserError(
-            f"usermod --append --groups {group_name} {username} failed: "
-            f"{result.stderr.strip()}"
+            f"usermod --append --groups {group_name} {username} failed: {result.stderr.strip()}"
         )
 
 
@@ -99,7 +100,7 @@ def _run_usermod(username: str, group_name: str) -> None:
 def check_existing_user_attrs(
     *,
     username: str = "slop",
-    get_passwd_entry: Callable[[str], Optional[dict]] = _get_passwd_entry,
+    get_passwd_entry: Callable[[str], dict | None] = _get_passwd_entry,
 ) -> None:
     """Pre-flight read-only check: if username exists, verify its attributes.
 
@@ -129,9 +130,9 @@ def ensure_user(
     *,
     username: str = "slop",
     docker_group: str = "docker",
-    get_passwd_entry: Callable[[str], Optional[dict]] = _get_passwd_entry,
+    get_passwd_entry: Callable[[str], dict | None] = _get_passwd_entry,
     run_useradd: Callable[[str], None] = _run_useradd,
-    get_group_entry: Callable[[str], Optional[dict]] = _get_group_entry,
+    get_group_entry: Callable[[str], dict | None] = _get_group_entry,
     run_usermod: Callable[[str, str], None] = _run_usermod,
 ) -> None:
     """Create the slop system user and add it to the docker group.

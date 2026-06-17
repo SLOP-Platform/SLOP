@@ -21,6 +21,7 @@ from typing import Any
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.infra.base import InfraProvider
+from backend.infra.slots import SLOT_CONTRACTS
 
 log = get_logger(__name__)
 
@@ -222,28 +223,144 @@ def swap_slot(
     return result
 
 
+# ── Stateless engine ──────────────────────────────────────────────────────
+
+
+@dataclass
+class SetActiveResult:
+    ok: bool
+    slot: str
+    from_provider: str
+    to_provider: str
+    steps: list[SwapStep] = field(default_factory=list)
+    error: str = ""
+
+    def add(self, name: str, status: str, message: str, detail: str = "") -> None:
+        self.steps.append(SwapStep(name, status, message, detail))
+        if status == "error" and not self.error:
+            self.error = message
+
+
+def set_active(slot: str, key: str, config: dict[str, Any]) -> SetActiveResult:
+    """Activate a provider in a **stateless** slot — config-only, no migration.
+
+    Stateless slots (slot_kind == "stateless": vpn, management, dashboard) hold no
+    SLOP-migratable state. Switching providers is a plain redeploy: remove the
+    current provider (if any), then deploy the new one. There is no
+    snapshot → deploy-alongside → migrate → verify → remove dance — that ceremony
+    exists only to protect migratable state, which these slots do not have.
+
+    The contract's `slot_kind` selects this engine over `swap_slot`. Calling
+    `set_active` on a stateful slot is a programming error and is rejected
+    fail-closed (use `swap_slot`, which preserves users / hostnames).
+    """
+    result = SetActiveResult(ok=True, slot=slot, from_provider="", to_provider=key)
+
+    contract = SLOT_CONTRACTS.get(slot)
+    if contract is None:
+        result.ok = False
+        result.add("lookup", "error", f"Unknown slot '{slot}'.")
+        return result
+    if contract.slot_kind != "stateless":
+        # Fail-closed: refuse to config-swap a slot that carries state. The whole
+        # point of the two-engine split is that a stateful slot routes through the
+        # migration-preserving swap_slot, never this shortcut.
+        result.ok = False
+        result.add(
+            "guard",
+            "error",
+            f"Slot '{slot}' is stateful — use swap_slot() so its state is migrated, "
+            "not set_active().",
+        )
+        return result
+
+    try:
+        new_provider = get_provider(slot, key)
+    except KeyError as e:
+        result.ok = False
+        result.add("lookup", "error", str(e))
+        return result
+
+    # Determine and remove the currently-active provider (if any).
+    current_key = ""
+    try:
+        with StateDB() as db:
+            current = db.get_slot(slot)
+        current_key = getattr(current, "provider", "") or ""
+    except Exception as e:  # ground-truth read is best-effort; deploy still proceeds
+        log.debug("set_active: could not read current %s provider: %s", slot, e)
+
+    result.from_provider = current_key
+
+    if current_key and current_key != key:
+        try:
+            old_provider = get_provider(slot, current_key)
+            remove = old_provider.remove()
+            result.add(
+                "remove_old",
+                "ok" if remove.ok else "warning",
+                remove.message,
+                remove.detail,
+            )
+        except KeyError:
+            result.add("remove_old", "warning", f"No provider class for current '{current_key}'.")
+
+    deploy = new_provider.deploy(config)
+    if not deploy.ok:
+        result.ok = False
+        result.error = deploy.message
+        result.add("deploy_new", "error", deploy.message, deploy.detail)
+        return result
+    result.add("deploy_new", "ok", deploy.message)
+    result.add("complete", "ok", f"Slot '{slot}' now uses {new_provider.display_name}.")
+    return result
+
+
 def _migrate_config(slot: str, old: InfraProvider, new: InfraProvider) -> dict[str, str]:
     """Migrate configuration from old to new provider for the given slot."""
     if slot == "auth":
-        # Export users from old, import into new
+        # Export users from old, import into new. FAIL-CLOSED on data loss (#974):
+        # any condition where users EXIST but cannot be fully migrated returns
+        # "error" so swap_slot rolls back, rather than the old silent "warning"/
+        # "skipped" that let a swap complete while dropping every user.
         export = old.export_users()
-        if export.ok and export.data:
-            users = export.data.get("users", [])
-            if users:
-                imp = new.import_users(users)
-                if not imp.ok:
-                    return {
-                        "status": "warning",
-                        "message": f"User migration partial: {imp.message}",
-                        "detail": imp.detail,
-                    }
-                return {
-                    "status": "ok",
-                    "message": f"Migrated {len(users)} user(s) to {new.display_name}.",
-                }
+        if not export.ok:
+            # Export itself failed — we cannot know if users would be lost. Treat as
+            # an error so the swap rolls back instead of silently proceeding.
+            return {
+                "status": "error",
+                "message": f"Could not export users from {old.display_name}: {export.message}",
+                "detail": export.detail,
+            }
+        data = export.data or {}
+        users = data.get("users", [])
+        if not users:
+            # Genuinely no users to migrate (empty deployment) — safe to proceed.
+            return {
+                "status": "ok",
+                "message": "No users to migrate (none configured).",
+            }
+        if data.get("lossy"):
+            # Export declared it cannot carry the full user set — do NOT silently
+            # drop them. Roll back and surface why to the operator.
+            return {
+                "status": "error",
+                "message": (
+                    f"User migration would lose data: {data.get('lossy_reason') or 'lossy export'}. "
+                    "Swap aborted to protect users."
+                ),
+                "detail": data.get("lossy_reason", ""),
+            }
+        imp = new.import_users(users)
+        if not imp.ok:
+            return {
+                "status": "error",
+                "message": f"User migration failed — swap aborted: {imp.message}",
+                "detail": imp.detail,
+            }
         return {
-            "status": "skipped",
-            "message": "No user export available — users will need to be re-added.",
+            "status": "ok",
+            "message": f"Migrated {len(users)} user(s) to {new.display_name}.",
         }
     elif slot == "tunnel":
         # Hostname migration is manual — just report what needs to be done
@@ -344,7 +461,11 @@ def _ensure_providers_registered() -> None:
         PortainerBEProvider,
     )
 
-    for cls in [
+    # The imports above are what trigger each provider class definition. The
+    # registration loop iterates those same symbols directly — there is no longer
+    # a separate hand-maintained class list to drift out of sync with the imports
+    # (one of the three implicit slot lists the SLOT_CONTRACTS SSOT collapses).
+    _provider_classes = (
         TinyauthProvider,
         CloudflareTunnelProvider,
         TailscaleProvider,
@@ -358,5 +479,15 @@ def _ensure_providers_registered() -> None:
         PortainerBEProvider,
         AutheliaProvider,
         HeadscaleProvider,
-    ]:
-        _REGISTRY[(cls.slot, cls.key)] = cls  # type: ignore[type-abstract]  # registry stores classes; instantiation gated by get_provider()
+    )
+    for cls in _provider_classes:
+        # Fail-closed: a provider whose slot is not a declared contract slot is a
+        # registration error, not a silent add (the SLOT_CONTRACTS SSOT is the
+        # authority on what slots exist).
+        if cls.slot not in SLOT_CONTRACTS:
+            raise ValueError(
+                f"Provider {cls.__name__} declares unknown slot '{cls.slot}'. "
+                f"Known slots (backend/infra/slots.py): {sorted(SLOT_CONTRACTS)}"
+            )
+        # registry stores classes; instantiation is gated by get_provider().
+        _REGISTRY[(cls.slot, cls.key)] = cls

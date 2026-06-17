@@ -560,7 +560,22 @@ def load_all_manifests(force_reload: bool = False) -> dict[str, AppManifest]:
                     )
                     continue
                 if key in result and source == "community":
-                    log.info("Community manifest overrides official: %s", key)
+                    existing = result[key]
+                    existing_src = str(existing.source_path) if existing.source_path else "official"
+                    version_delta = ""
+                    if existing.version != manifest.version:
+                        version_delta = f" (version: {existing.version!r} → {manifest.version!r})"
+                    log.warning(
+                        "MANIFEST OVERRIDE: community manifest replaces built-in app %r"
+                        " | official source: %s"
+                        " | community source: %s"
+                        "%s"
+                        " — review community/manifest for unintended changes",
+                        key,
+                        existing_src,
+                        str(yaml_path),
+                        version_delta,
+                    )
                 result[key] = manifest
                 _cache[key] = manifest
             except ManifestError as e:

@@ -3,10 +3,11 @@
 build_frontend() runs `npm ci` then `npm run build` inside install_dir/frontend/.
 The vite config emits build artifacts to install_dir/backend/static/.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from installer._run import MissingBinaryError, run_required
 
@@ -45,6 +46,7 @@ def _build_exists(static_dir: Path) -> bool:
     # A committed-but-stale index.html referencing a different build's hashed
     # asset would otherwise fool this check and produce a blank page.
     import re as _re
+
     html = index.read_text(errors="replace")
     m = _re.search(r'src="/assets/(index-[^"]+\.js)"', html)
     if not m:
@@ -62,18 +64,16 @@ def _run_npm_ci(frontend_dir: Path) -> None:
         )
     try:
         result = run_required(["npm", "ci"], cwd=str(frontend_dir))
-    except MissingBinaryError:
+    except MissingBinaryError as e:
         # F4: npm not on PATH — means deps_debian.ensure_dependencies() did not
         # install nodejs (or NodeSource setup silently no-op'd per F2).
         raise NpmCiError(
             "npm is not on PATH. ensure_dependencies() should have installed nodejs "
             "with npm bundled — this indicates a NodeSource setup failure (F2) or a "
             "corrupt nodejs install. Diagnose: which node && node --version && which npm"
-        )
+        ) from e
     if result.returncode != 0:
-        raise NpmCiError(
-            f"npm ci failed (exit {result.returncode}): {result.stderr.strip()}"
-        )
+        raise NpmCiError(f"npm ci failed (exit {result.returncode}): {result.stderr.strip()}")
 
 
 def _run_npm_build(frontend_dir: Path) -> None:
@@ -85,13 +85,13 @@ def _run_npm_build(frontend_dir: Path) -> None:
         )
     try:
         result = run_required(["npm", "run", "build"], cwd=str(frontend_dir))
-    except MissingBinaryError:
+    except MissingBinaryError as e:
         # F4: same npm-absent failure mode as _run_npm_ci.
         raise NpmBuildError(
             "npm is not on PATH. ensure_dependencies() should have installed nodejs "
             "with npm bundled — this indicates a NodeSource setup failure (F2) or a "
             "corrupt nodejs install. Diagnose: which node && node --version && which npm"
-        )
+        ) from e
     if result.returncode != 0:
         raise NpmBuildError(
             f"npm run build failed (exit {result.returncode}): {result.stderr.strip()}"

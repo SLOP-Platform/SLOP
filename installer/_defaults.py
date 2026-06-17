@@ -7,5 +7,6 @@ rather than repeating the literals.
 
 check_structural_antipatterns.py rule-005 allowlists this file.
 """
+
 DEFAULT_INSTALL_DIR: str = "/opt/slop"
 DEFAULT_DATA_DIR: str = "/var/lib/slop"

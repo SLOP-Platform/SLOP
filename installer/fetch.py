@@ -3,14 +3,15 @@
 fetch_repo() clones the slop repo to install_dir at a pinned tag and
 removes .git/ so the installed copy is not a git working tree.
 """
+
 from __future__ import annotations
 
 import re
 import shutil
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from installer._run import MissingBinaryError, run_required
+from installer._run import run_required
 from installer.state import STATE_FILE_NAME, read_state_file
 
 _REPO_URL: str = "https://github.com/Nnyan/SLOP.git"
@@ -40,8 +41,7 @@ def _list_remote_tags(repo_url: str) -> list:
     result = run_required(["git", "ls-remote", "--tags", repo_url])
     if result.returncode != 0:
         raise CloneNetworkError(
-            f"Could not reach repository at {repo_url}. "
-            "Check network connectivity and re-run."
+            f"Could not reach repository at {repo_url}. Check network connectivity and re-run."
         )
     tags = []
     for line in result.stdout.splitlines():
@@ -50,7 +50,7 @@ def _list_remote_tags(repo_url: str) -> list:
             continue
         ref = parts[1].strip()
         if ref.startswith("refs/tags/") and not ref.endswith("^{}"):
-            tags.append(ref[len("refs/tags/"):])
+            tags.append(ref[len("refs/tags/") :])
     return tags
 
 
@@ -66,9 +66,7 @@ def _run_git_clone(url: str, dest: Path, ref: str) -> None:
         )
     tmp = dest.parent / (dest.name + ".clone-tmp")
     try:
-        result = run_required(
-            ["git", "clone", "--branch", ref, "--depth", "1", url, str(tmp)]
-        )
+        result = run_required(["git", "clone", "--branch", ref, "--depth", "1", url, str(tmp)])
         if result.returncode != 0:
             raise CloneNetworkError(
                 f"git clone failed for {url} at ref {ref!r}: {result.stderr.strip()}"
@@ -103,7 +101,7 @@ def _parse_v5_semver(tag: str) -> tuple:
 
 
 def _resolve_version_ref(
-    version_ref: Optional[str],
+    version_ref: str | None,
     repo_url: str,
     list_remote_tags: Callable[[str], list],
 ) -> str:
@@ -148,7 +146,7 @@ def _resolve_version_ref(
 
 def fetch_repo(
     install_dir,
-    version_ref: Optional[str] = None,
+    version_ref: str | None = None,
     *,
     repo_url: str = _REPO_URL,
     list_remote_tags: Callable[[str], list] = _list_remote_tags,

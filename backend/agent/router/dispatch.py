@@ -4,7 +4,7 @@
 router (``select`` + ``available_providers``) and dispatches the call with
 free/local-first bounded fallback.  EVERY per-provider call is routed through
 ``backend.health.checker._dispatch_llm_call`` so the ``scrub()`` choke
-point (ADR-0018) is preserved unchanged — there is deliberately NO second
+point (ADR-0021) is preserved unchanged — there is deliberately NO second
 egress path in this module.
 
 Graceful degrade is the overriding contract: if the router or its config is

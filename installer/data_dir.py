@@ -5,10 +5,11 @@ slop:slop, and sets mode 0750 per ADR 0013 §1.  Idempotent:
 mkdir uses exist_ok=True (no error if the directory already exists); chown
 and chmod always run — both are inherently idempotent.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from installer._run import run_required
 
@@ -39,27 +40,21 @@ def _make_dir(data_dir: Path) -> None:
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise DataDirCreationError(
-            f"Failed to create data directory {data_dir}: {exc}"
-        ) from exc
+        raise DataDirCreationError(f"Failed to create data directory {data_dir}: {exc}") from exc
 
 
 def _run_chown(user: str, group: str, data_dir: Path) -> None:
     spec = f"{user}:{group}"
     result = run_required(["chown", spec, str(data_dir)])
     if result.returncode != 0:
-        raise DataDirChownError(
-            f"chown {spec} {data_dir} failed: {result.stderr.strip()}"
-        )
+        raise DataDirChownError(f"chown {spec} {data_dir} failed: {result.stderr.strip()}")
 
 
 def _run_chmod(mode: int, data_dir: Path) -> None:
     mode_str = oct(mode)[2:]
     result = run_required(["chmod", mode_str, str(data_dir)])
     if result.returncode != 0:
-        raise DataDirChmodError(
-            f"chmod {mode_str} {data_dir} failed: {result.stderr.strip()}"
-        )
+        raise DataDirChmodError(f"chmod {mode_str} {data_dir} failed: {result.stderr.strip()}")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

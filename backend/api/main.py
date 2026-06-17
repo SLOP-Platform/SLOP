@@ -379,30 +379,19 @@ app.add_middleware(DeprecationHeaderMiddleware)
 # See migrations/004_audit_log.sql for the schema rationale.
 app.add_middleware(AuditLogMiddleware)
 
-# Step 4.1 — Prometheus instrumentation. Auto-instruments every
-# FastAPI route with request count + duration histograms; exposes
-# /metrics in the default Prometheus exposition format. Custom
-# SLOP-specific metrics (install duration, health-check
-# duration, DB query time, error counters) live in
-# backend/core/metrics.py and join the same registry.
+# Step 4.1 — Prometheus instrumentation. A thin, Starlette-correct
+# ASGI middleware (backend/api/http_metrics.py) records request count +
+# duration histograms per route template and exposes /metrics in the
+# default Prometheus exposition format. Custom SLOP-specific metrics
+# (install duration, health-check duration, DB query time, error
+# counters) live in backend/core/metrics.py and join the same registry.
 # Set MS_DISABLE_METRICS=true to skip mounting the /metrics endpoint.
 _disable_metrics = _os.environ.get("MS_DISABLE_METRICS", "").lower() == "true"
 
 if not _disable_metrics:
-    from prometheus_fastapi_instrumentator import Instrumentator
-    import backend.core.metrics  # noqa: F401  — register custom metrics
+    from backend.api.http_metrics import install_http_metrics
 
-    _metrics_instrumentator = Instrumentator(
-        should_group_status_codes=False,  # 200/201/204 stay distinct
-        should_ignore_untemplated=True,  # skip /docs etc. for cardinality control
-        excluded_handlers=["/metrics", "/openapi.json"],
-    )
-    _metrics_instrumentator.instrument(app).expose(
-        app,
-        endpoint="/metrics",
-        include_in_schema=False,
-        tags=["System"],
-    )
+    install_http_metrics(app)
 
 # Step 4.2 — Kubernetes-style health probes. /healthz /readyz
 # /startupz sit OUTSIDE the /api/v1/ versioning umbrella (they're

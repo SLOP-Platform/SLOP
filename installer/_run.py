@@ -4,10 +4,10 @@ All installer modules MUST use run_required() for subprocess invocations.
 Bare subprocess.run in installer/*.py (except this file) is a Class-A audit
 failure detected by tools/check_structural_antipatterns.py rule-006.
 """
+
 from __future__ import annotations
 
 import subprocess
-from typing import Optional, Union
 
 
 # ── Exception classes ─────────────────────────────────────────────────────────
@@ -32,9 +32,7 @@ class RunFailedError(Exception):
 
     def __init__(self, cmd: list, returncode: int, stderr: str) -> None:
         binary = cmd[0] if cmd else "<unknown>"
-        super().__init__(
-            f"{binary!r} failed (exit {returncode}): {stderr.strip()}"
-        )
+        super().__init__(f"{binary!r} failed (exit {returncode}): {stderr.strip()}")
         self.cmd = cmd
         self.returncode = returncode
         self.stderr = stderr
@@ -46,7 +44,7 @@ class RunTimeoutError(Exception):
     Raised by run_required() when subprocess raises subprocess.TimeoutExpired.
     """
 
-    def __init__(self, cmd: list, timeout: Optional[float]) -> None:
+    def __init__(self, cmd: list, timeout: float | None) -> None:
         binary = cmd[0] if cmd else "<unknown>"
         super().__init__(f"{binary!r} timed out after {timeout}s")
         self.cmd = cmd
@@ -59,11 +57,11 @@ class RunTimeoutError(Exception):
 def run_required(
     cmd: list,
     *,
-    cwd: Optional[str] = None,
+    cwd: str | None = None,
     env=None,
     check_output: bool = False,
-    timeout: Optional[float] = None,
-) -> Union[subprocess.CompletedProcess, str]:
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess | str:
     """Run an external command, mapping OS-level errors to installer exceptions.
 
     Returns CompletedProcess when check_output=False (caller checks returncode).
@@ -85,13 +83,13 @@ def run_required(
             text=True,
             timeout=timeout,
         )
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise MissingBinaryError(
             f"Required binary not on PATH: {cmd[0]!r}. "
             f"Full command: {' '.join(str(a) for a in cmd)}"
-        )
-    except subprocess.TimeoutExpired:
-        raise RunTimeoutError(cmd, timeout)
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RunTimeoutError(cmd, timeout) from e
     if check_output:
         return result.stdout
     return result

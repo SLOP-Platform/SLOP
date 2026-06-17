@@ -4,11 +4,12 @@ setup_backend() creates install_dir/.venv using the host python3, pip-installs
 requirements.txt (production deps only), and sets venv ownership to the
 slop system user.
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from installer._run import run_required
 
@@ -53,9 +54,7 @@ def _create_venv(venv_dir: Path) -> None:
                 "Install the venv package first: apt-get install -y python3-venv "
                 f"(original error: {stderr})"
             )
-        raise VenvCreationError(
-            f"python3 -m venv failed at {venv_dir}: {stderr}"
-        )
+        raise VenvCreationError(f"python3 -m venv failed at {venv_dir}: {stderr}")
 
 
 def _requirements_exists(req_path: Path) -> bool:
@@ -74,9 +73,7 @@ def _run_chown(user: str, venv_dir: Path) -> None:
     spec = f"{user}:{user}"
     result = run_required(["chown", "-R", spec, str(venv_dir)])
     if result.returncode != 0:
-        raise BackendError(
-            f"chown -R {spec} {venv_dir} failed: {result.stderr.strip()}"
-        )
+        raise BackendError(f"chown -R {spec} {venv_dir} failed: {result.stderr.strip()}")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

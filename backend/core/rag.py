@@ -285,7 +285,12 @@ class ChromaRetriever:
 
         client = chromadb.PersistentClient(path=str(self._dir))
         emb_fn = ef.DefaultEmbeddingFunction()
-        self._collection = client.get_or_create_collection("slop_kb", embedding_function=emb_fn)
+        # chromadb stub variance: DefaultEmbeddingFunction satisfies the runtime
+        # EmbeddingFunction protocol but its generic arg doesn't match the stub.
+        self._collection = client.get_or_create_collection(
+            "slop_kb",
+            embedding_function=emb_fn,  # type: ignore[arg-type]
+        )
         existing = set(self._collection.get()["ids"])
         to_add = [d for d in static_docs if d["id"] not in existing]
         if to_add:

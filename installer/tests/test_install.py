@@ -5,12 +5,11 @@ S3(interrupted), S4(corrupted), S5(no-state-file).
 
 Operator message text is tested against ADR 0015 §7 and ADR 0013 §4 content.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 from installer.install import ExistingInstallDetection, detect_existing_install
 from installer.state import (
@@ -27,26 +26,26 @@ _POST_INSTALL = _INSTALL_DIR / "POST_INSTALL.txt"
 
 
 def _make_state(phase="installed", smoke_test_passed=True, **overrides) -> StateFile:
-    defaults = dict(
-        schema_version=1,
-        slop_version="5.0.0",
-        phase=phase,
-        started_at="2026-01-01T00:00:00Z",
-        completed_at="2026-01-01T00:05:00Z" if phase == "installed" else None,
-        install_dir=str(_INSTALL_DIR),
-        data_dir="/var/lib/slop",
-        install_user="slop",
-        distro="ubuntu",
-        distro_version="24.04",
-        port=8080,
-        smoke_test_passed=smoke_test_passed,
-    )
+    defaults = {
+        "schema_version": 1,
+        "slop_version": "5.0.0",
+        "phase": phase,
+        "started_at": "2026-01-01T00:00:00Z",
+        "completed_at": "2026-01-01T00:05:00Z" if phase == "installed" else None,
+        "install_dir": str(_INSTALL_DIR),
+        "data_dir": "/var/lib/slop",
+        "install_user": "slop",
+        "distro": "ubuntu",
+        "distro_version": "24.04",
+        "port": 8080,
+        "smoke_test_passed": smoke_test_passed,
+    }
     defaults.update(overrides)
     return StateFile(**defaults)
 
 
 def _detect(
-    state: "StateFile | None | Exception" = None,
+    state: StateFile | None | Exception = None,
     post_install_present: bool = False,
     install_dir_present: bool = True,
 ) -> ExistingInstallDetection:

@@ -10,10 +10,10 @@ Coverage:
   TestFetchRepoClone       — clone + .git removal ordering; error propagation
   TestFetchRepoReturnValue — returned resolved-tag string
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -48,18 +48,18 @@ def _noop_remove(dest: Path) -> None:
 
 
 def _passing_kwargs(
-    tags: Optional[list] = None,
+    tags: list | None = None,
     state=None,
 ) -> dict:
     """Return fetch_repo injectable kwargs for a straightforward fetch."""
     if tags is None:
         tags = ["v5.1.0"]
-    return dict(
-        list_remote_tags=lambda url: tags,
-        run_git_clone=_noop_clone,
-        remove_git_dir=_noop_remove,
-        read_state=lambda path: state,
-    )
+    return {
+        "list_remote_tags": lambda url: tags,
+        "run_git_clone": _noop_clone,
+        "remove_git_dir": _noop_remove,
+        "read_state": lambda path: state,
+    }
 
 
 # ── TestParseV5Semver ─────────────────────────────────────────────────────────
@@ -346,6 +346,7 @@ class TestRunGitClonePreservesExistingDir:
 
         def fake_clone(*args, **kwargs):
             import types
+
             tmp_clone.mkdir(parents=True, exist_ok=True)
             (tmp_clone / "app.py").write_text("# repo content")
             (tmp_clone / ".git").mkdir()
@@ -370,17 +371,17 @@ class TestFetchBoundaryProbe:
 
     def test_list_remote_tags_raises_on_git_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("git")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("git")):
             with pytest.raises(MissingBinaryError, match="git"):
                 _list_remote_tags("https://example.com/repo.git")
 
     def test_run_git_clone_raises_on_git_absent(self, tmp_path):
         from unittest.mock import patch
+
         dest = tmp_path / "install"
         dest.mkdir()
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("git")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("git")):
             with pytest.raises(MissingBinaryError, match="git"):
                 _run_git_clone("https://example.com/repo.git", dest, "v5.1.0")
 

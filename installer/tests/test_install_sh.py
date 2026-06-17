@@ -7,10 +7,10 @@ Step 4.3.c. Uses subprocess.run with stdin=DEVNULL to simulate pipe mode
 All tests run bash install.sh directly; no root required because pipe-mode
 validation fires before the root check (ADR 0013 §3 ordering guarantee).
 """
+
 import subprocess
 from pathlib import Path
 
-import pytest
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _INSTALL_SH = _REPO_ROOT / "install.sh"

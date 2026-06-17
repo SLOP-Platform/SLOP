@@ -6,6 +6,7 @@ Covers the four scenarios named in V5_INSTALLER_PLAN.md Step 1.3.d:
   - malformed file raises StateFileCorruptedError
   - schema-validation rejects unknown fields / wrong types / version mismatch
 """
+
 import json
 from pathlib import Path
 
@@ -24,28 +25,29 @@ from installer.state import (
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 def _valid_dict(**overrides) -> dict:
     """Return a valid raw-dict representation of a state file."""
-    d = dict(
-        schema_version=1,
-        slop_version="5.0.0",
-        phase="installed",
-        started_at="2026-05-12T14:23:11Z",
-        completed_at="2026-05-12T14:25:47Z",
-        install_dir="/opt/slop",
-        data_dir="/var/lib/slop",
-        install_user="slop",
-        distro="debian",
-        distro_version="12",
-        port=8080,
-        smoke_test_passed=True,
-    )
+    d = {
+        "schema_version": 1,
+        "slop_version": "5.0.0",
+        "phase": "installed",
+        "started_at": "2026-05-12T14:23:11Z",
+        "completed_at": "2026-05-12T14:25:47Z",
+        "install_dir": "/opt/slop",
+        "data_dir": "/var/lib/slop",
+        "install_user": "slop",
+        "distro": "debian",
+        "distro_version": "12",
+        "port": 8080,
+        "smoke_test_passed": True,
+    }
     d.update(overrides)
     return d
 
 
 def _valid_state(**overrides) -> StateFile:
-    return StateFile(**{k: v for k, v in _valid_dict(**overrides).items()})
+    return StateFile(**dict(_valid_dict(**overrides).items()))
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -53,6 +55,7 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 # ── TestWriteLifecycle ────────────────────────────────────────────────────────
+
 
 class TestWriteLifecycle:
     """write_state_file → read_state_file roundtrip per ADR 0013 §2 Write lifecycle."""
@@ -119,6 +122,7 @@ class TestWriteLifecycle:
 
 # ── TestMissingFile ───────────────────────────────────────────────────────────
 
+
 class TestMissingFile:
     def test_missing_file_returns_none(self, tmp_path):
         result = read_state_file(tmp_path / STATE_FILE_NAME)
@@ -130,6 +134,7 @@ class TestMissingFile:
 
 
 # ── TestCorruption ────────────────────────────────────────────────────────────
+
 
 class TestCorruption:
     def test_not_json_raises(self, tmp_path):
@@ -158,6 +163,7 @@ class TestCorruption:
 
 
 # ── TestVersionMismatch ───────────────────────────────────────────────────────
+
 
 class TestVersionMismatch:
     def test_future_schema_version_raises(self, tmp_path):
@@ -191,6 +197,7 @@ class TestVersionMismatch:
 
 
 # ── TestSchemaValidation ──────────────────────────────────────────────────────
+
 
 class TestSchemaValidation:
     def test_unknown_field_raises(self, tmp_path):
@@ -245,10 +252,19 @@ class TestSchemaValidation:
         assert result is not None
         assert result.completed_at is None
 
-    @pytest.mark.parametrize("field", [
-        "slop_version", "phase", "started_at",
-        "install_dir", "data_dir", "install_user", "distro", "distro_version",
-    ])
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "slop_version",
+            "phase",
+            "started_at",
+            "install_dir",
+            "data_dir",
+            "install_user",
+            "distro",
+            "distro_version",
+        ],
+    )
     def test_missing_required_string_field_raises(self, tmp_path, field):
         d = _valid_dict()
         del d[field]
@@ -257,10 +273,18 @@ class TestSchemaValidation:
         with pytest.raises(StateFileCorruptedError):
             read_state_file(p)
 
-    @pytest.mark.parametrize("field", [
-        "slop_version", "started_at", "install_dir",
-        "data_dir", "install_user", "distro", "distro_version",
-    ])
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "slop_version",
+            "started_at",
+            "install_dir",
+            "data_dir",
+            "install_user",
+            "distro",
+            "distro_version",
+        ],
+    )
     def test_non_string_for_string_field_raises(self, tmp_path, field):
         d = _valid_dict()
         d[field] = 42

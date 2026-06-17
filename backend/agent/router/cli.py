@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import sys
 from typing import Any
 
-log = logging.getLogger(__name__)
+from backend.core.logging import get_logger
+
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

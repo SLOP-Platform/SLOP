@@ -194,7 +194,7 @@ async def _dispatch_llm_call(
     """Dispatch the LLM call to ollama / cloud / openai-compatible by provider.
 
     allow_raw: when True, skip scrub() even for cloud providers (opt-out).
-    Default False means cloud-bound prompts are always scrubbed (ADR-0018).
+    Default False means cloud-bound prompts are always scrubbed (ADR-0021).
     """
     if (is_external(provider) or provider in cloud_providers) and not allow_raw:
         prompt = scrub(prompt)

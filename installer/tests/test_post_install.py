@@ -5,13 +5,11 @@ Covers:
   - _resolve_hostname(): three-step fallback chain
   - write(): atomic temp-file rename, mode 0644, run_chown called
 """
+
 from __future__ import annotations
 
-import os
 import stat
 import types
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -34,15 +32,15 @@ _TEMPLATE = (
     "Uninstall:  sudo <install_dir>/bin/slop uninstall\n"
 )
 
-_RENDER_KWARGS = dict(
-    version="5.0.0",
-    hostname="192.168.1.10",
-    port=8080,
-    install_dir="/opt/slop",
-    data_dir="/var/lib/slop",
-    completed_at="2026-01-01T00:00:00Z",
-    template_text=_TEMPLATE,
-)
+_RENDER_KWARGS = {
+    "version": "5.0.0",
+    "hostname": "192.168.1.10",
+    "port": 8080,
+    "install_dir": "/opt/slop",
+    "data_dir": "/var/lib/slop",
+    "completed_at": "2026-01-01T00:00:00Z",
+    "template_text": _TEMPLATE,
+}
 
 
 def _run_ok(cmd, **_):
@@ -132,9 +130,7 @@ class TestResolveHostname:
             if "-I" in cmd:
                 if hostname_i_out is None:
                     return types.SimpleNamespace(returncode=1, stdout="", stderr="")
-                return types.SimpleNamespace(
-                    returncode=0, stdout=hostname_i_out, stderr=""
-                )
+                return types.SimpleNamespace(returncode=0, stdout=hostname_i_out, stderr="")
             if "--fqdn" in cmd:
                 if fqdn_out is None:
                     return types.SimpleNamespace(returncode=1, stdout="", stderr="")
@@ -212,9 +208,7 @@ class TestWrite:
         chown_calls = []
         write("x", tmp_path, run_chown=chown_calls.append)
         assert len(chown_calls) == 1
-        assert chown_calls[0].endswith(".post-install.tmp") or str(
-            tmp_path
-        ) in chown_calls[0]
+        assert chown_calls[0].endswith(".post-install.tmp") or str(tmp_path) in chown_calls[0]
 
     def test_atomic_rename_no_temp_on_success(self, tmp_path):
         write("content", tmp_path, run_chown=lambda p: None)

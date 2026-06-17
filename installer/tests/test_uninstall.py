@@ -2,17 +2,18 @@
 
 Covers ADR 0017 §A refusal logic (§A.2/§A.3/§A.3.5/§A.4/§A.5),
 §A.6/§A.6.5 carve-outs, §B pipeline U-predicates, §C clean structure,
-verify_removed() U1–U7 per §A.7/§B.2, and class predictions A–S.
+verify_removed() U1-U7 per §A.7/§B.2, and class predictions A-S.
 """
+
 from __future__ import annotations
 
 import subprocess
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
-import pytest
 
 from installer.state import StateFile, StateFileCorruptedError, StateFileNewerSchemaError
 from installer.uninstall import (
@@ -34,20 +35,20 @@ _DATA_DIR = Path("/var/lib/slop")
 
 
 def _make_state(**overrides) -> StateFile:
-    defaults = dict(
-        schema_version=1,
-        slop_version="5.0.0",
-        phase="installed",
-        started_at="2026-01-01T00:00:00Z",
-        completed_at="2026-01-01T00:05:00Z",
-        install_dir=str(_INSTALL_DIR),
-        data_dir=str(_DATA_DIR),
-        install_user="slop",
-        distro="ubuntu",
-        distro_version="24.04",
-        port=8080,
-        smoke_test_passed=True,
-    )
+    defaults = {
+        "schema_version": 1,
+        "slop_version": "5.0.0",
+        "phase": "installed",
+        "started_at": "2026-01-01T00:00:00Z",
+        "completed_at": "2026-01-01T00:05:00Z",
+        "install_dir": str(_INSTALL_DIR),
+        "data_dir": str(_DATA_DIR),
+        "install_user": "slop",
+        "distro": "ubuntu",
+        "distro_version": "24.04",
+        "port": 8080,
+        "smoke_test_passed": True,
+    }
     defaults.update(overrides)
     return StateFile(**defaults)
 
@@ -63,19 +64,20 @@ def _args(yes: bool = True, install_dir: str = str(_INSTALL_DIR)) -> SimpleNames
 # ── Uninstall/purge run helpers ───────────────────────────────────────────────
 
 _UNINSTALL_SUCCESS_SEQ = [
-    _proc(0),       # systemctl stop
-    _proc(0),       # systemctl disable
-    _proc(0),       # rm -f unit file
-    _proc(0),       # daemon-reload
-    _proc(0),       # rm -rf install_dir
-    _proc(1),       # getent passwd → user absent; userdel skipped
-    _proc(1),       # getent group → group absent; groupdel skipped
+    _proc(0),  # systemctl stop
+    _proc(0),  # systemctl disable
+    _proc(0),  # rm -f unit file
+    _proc(0),  # daemon-reload
+    _proc(0),  # rm -rf install_dir
+    _proc(1),  # getent passwd → user absent; userdel skipped
+    _proc(1),  # getent group → group absent; groupdel skipped
 ]
 
-_PURGE_SUCCESS_SEQ = _UNINSTALL_SUCCESS_SEQ + [
-    _proc(0),       # rm -rf data_dir
-    _proc(0, ""),   # docker ps (no containers)
-    _proc(0, ""),   # docker volume ls (no volumes)
+_PURGE_SUCCESS_SEQ = [
+    *_UNINSTALL_SUCCESS_SEQ,
+    _proc(0),  # rm -rf data_dir
+    _proc(0, ""),  # docker ps (no containers)
+    _proc(0, ""),  # docker volume ls (no volumes)
 ]
 
 
@@ -278,39 +280,50 @@ class TestPromptConfirm:
         def _bad_readline():
             raise AssertionError("stdin should not be read when --yes is set")
 
-        result = _prompt_confirm("prompt", yes=True, is_tty=True,
-                                 stdin_readline=_bad_readline, print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=True, is_tty=True, stdin_readline=_bad_readline, print_fn=lambda _: None
+        )
         assert result is True
 
     def test_y_answer_returns_true(self):
-        result = _prompt_confirm("prompt", yes=False, is_tty=True,
-                                 stdin_readline=lambda: "y", print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=False, is_tty=True, stdin_readline=lambda: "y", print_fn=lambda _: None
+        )
         assert result is True
 
     def test_yes_answer_returns_true(self):
-        result = _prompt_confirm("prompt", yes=False, is_tty=True,
-                                 stdin_readline=lambda: "yes", print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=False, is_tty=True, stdin_readline=lambda: "yes", print_fn=lambda _: None
+        )
         assert result is True
 
     def test_uppercase_y_returns_true(self):
-        result = _prompt_confirm("prompt", yes=False, is_tty=True,
-                                 stdin_readline=lambda: "Y\n", print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=False, is_tty=True, stdin_readline=lambda: "Y\n", print_fn=lambda _: None
+        )
         assert result is True
 
     def test_empty_answer_returns_false(self):
-        result = _prompt_confirm("prompt", yes=False, is_tty=True,
-                                 stdin_readline=lambda: "", print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=False, is_tty=True, stdin_readline=lambda: "", print_fn=lambda _: None
+        )
         assert result is False
 
     def test_n_answer_returns_false(self):
-        result = _prompt_confirm("prompt", yes=False, is_tty=True,
-                                 stdin_readline=lambda: "n", print_fn=lambda _: None)
+        result = _prompt_confirm(
+            "prompt", yes=False, is_tty=True, stdin_readline=lambda: "n", print_fn=lambda _: None
+        )
         assert result is False
 
     def test_prompt_text_is_printed(self):
         printed = []
-        _prompt_confirm("Proceed? [y/N]:", yes=False, is_tty=True,
-                        stdin_readline=lambda: "y", print_fn=printed.append)
+        _prompt_confirm(
+            "Proceed? [y/N]:",
+            yes=False,
+            is_tty=True,
+            stdin_readline=lambda: "y",
+            print_fn=printed.append,
+        )
         assert any("Proceed?" in p for p in printed)
 
 
@@ -388,11 +401,11 @@ class TestRunUninstallRefusals:
         assert rc == 1
 
     def test_a5_yes_does_not_override_corrupted_state(self):
-        rc, errors, _ = _run_uninstall(state=StateFileCorruptedError("corrupt"), run_seq=[])
+        rc, _errors, _ = _run_uninstall(state=StateFileCorruptedError("corrupt"), run_seq=[])
         assert rc == 1
 
     def test_a5_yes_does_not_override_permission_error(self):
-        rc, errors, _ = _run_uninstall(state=PermissionError("denied"), run_seq=[])
+        rc, _errors, _ = _run_uninstall(state=PermissionError("denied"), run_seq=[])
         assert rc == 1
 
 
@@ -465,8 +478,8 @@ class TestRunUninstallConfirmation:
 class TestRunUninstallPipeline:
     def test_u1_failure_stops_pipeline_exits_1(self):
         seq = [
-            _proc(1),   # systemctl stop → fails
-            _proc(0),   # test -e unit → present (rc=0) → hard fail
+            _proc(1),  # systemctl stop → fails
+            _proc(0),  # test -e unit → present (rc=0) → hard fail
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 1
@@ -492,7 +505,9 @@ class TestRunUninstallPipeline:
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 1
-        assert any("install directory" in e.lower() or "could not be fully removed" in e for e in errors)
+        assert any(
+            "install directory" in e.lower() or "could not be fully removed" in e for e in errors
+        )
 
     def test_u4_failure_is_late_exits_1(self):
         user_entry = "slop:x:50:50::/nonexistent:/usr/sbin/nologin"
@@ -529,13 +544,13 @@ class TestRunUninstallPipeline:
         # uid=1001 → mismatch → userdel skipped; pipeline continues
         user_entry = "slop:x:1001:1001::/home/slop:/bin/bash"
         seq = [
-            _proc(0),                        # stop
-            _proc(0),                        # disable
-            _proc(0),                        # rm unit
-            _proc(0),                        # daemon-reload
-            _proc(0),                        # rm install_dir
-            _proc(0, user_entry),            # getent passwd → mismatch → userdel SKIPPED
-            _proc(1),                        # getent group → absent; groupdel skipped
+            _proc(0),  # stop
+            _proc(0),  # disable
+            _proc(0),  # rm unit
+            _proc(0),  # daemon-reload
+            _proc(0),  # rm install_dir
+            _proc(0, user_entry),  # getent passwd → mismatch → userdel SKIPPED
+            _proc(1),  # getent group → absent; groupdel skipped
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -545,13 +560,13 @@ class TestRunUninstallPipeline:
         # extra member "thirdparty" → mismatch → groupdel skipped
         group_entry = "slop:x:999:thirdparty"
         seq = [
-            _proc(0),                         # stop
-            _proc(0),                         # disable
-            _proc(0),                         # rm unit
-            _proc(0),                         # daemon-reload
-            _proc(0),                         # rm install_dir
-            _proc(1),                         # getent passwd → user absent; userdel skipped
-            _proc(0, group_entry),            # getent group → extra members → groupdel SKIPPED
+            _proc(0),  # stop
+            _proc(0),  # disable
+            _proc(0),  # rm unit
+            _proc(0),  # daemon-reload
+            _proc(0),  # rm install_dir
+            _proc(1),  # getent passwd → user absent; userdel skipped
+            _proc(0, group_entry),  # getent group → extra members → groupdel SKIPPED
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -562,10 +577,14 @@ class TestRunUninstallPipeline:
         # getent group rc=1 → groupdel skipped → exit 0.
         user_entry = "slop:x:50:50::/nonexistent:/usr/sbin/nologin"
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(0, user_entry),   # getent passwd → present, correct attrs
-            _proc(0),               # userdel → success (also removes primary group on Ubuntu)
-            _proc(1),               # getent group → absent (userdel removed it)
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0, user_entry),  # getent passwd → present, correct attrs
+            _proc(0),  # userdel → success (also removes primary group on Ubuntu)
+            _proc(1),  # getent group → absent (userdel removed it)
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -577,11 +596,15 @@ class TestRunUninstallPipeline:
         user_entry = "slop:x:50:50::/nonexistent:/usr/sbin/nologin"
         group_entry = "slop:x:999:slop"
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(0, user_entry),          # getent passwd → present, correct attrs
-            _proc(0),                      # userdel → success (group NOT removed)
-            _proc(0, group_entry),         # getent group → present, only install_user
-            _proc(0),                      # groupdel → success
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0, user_entry),  # getent passwd → present, correct attrs
+            _proc(0),  # userdel → success (group NOT removed)
+            _proc(0, group_entry),  # getent group → present, only install_user
+            _proc(0),  # groupdel → success
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -633,7 +656,7 @@ class TestClassPredictions:
 
     def test_b4_corrupted_state_refusal_a3(self):
         """B.4: corrupted state file → §A.3 refusal."""
-        rc, errors, _ = _run_uninstall(state=StateFileCorruptedError("bad json"))
+        rc, _errors, _ = _run_uninstall(state=StateFileCorruptedError("bad json"))
         assert rc == 1
 
     def test_a1_userdel_blocked_by_running_process(self):
@@ -641,12 +664,16 @@ class TestClassPredictions:
         user_entry = "slop:x:50:50::/nonexistent:/usr/sbin/nologin"
         # user present, correct attrs → userdel called → userdel fails (process running)
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(0, user_entry),   # getent passwd → present, correct attrs
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0, user_entry),  # getent passwd → present, correct attrs
             _proc(1, "user slop is currently used by process 999"),  # userdel blocked
-            _proc(1),               # getent group → absent; groupdel skipped
+            _proc(1),  # getent group → absent; groupdel skipped
         ]
-        rc, errors, _ = _run_uninstall(run_seq=seq)
+        rc, _errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 1
 
     def test_a3_state_file_permission_denied_try_sudo(self):
@@ -665,14 +692,14 @@ class TestClassPredictions:
         # Unit file already absent (e.g., purge after prior uninstall);
         # systemctl stop returns non-zero → unit-absent check passes → soft-fail → pipeline continues.
         seq = [
-            _proc(1),   # systemctl stop → fails (unit absent)
-            _proc(1),   # test -e unit → absent (rc=1) → soft-fail
-            _proc(0),   # systemctl disable
-            _proc(0),   # rm -f unit file
-            _proc(0),   # daemon-reload
-            _proc(0),   # rm -rf install_dir
-            _proc(1),   # getent passwd → user absent; userdel skipped
-            _proc(1),   # getent group → absent; groupdel skipped
+            _proc(1),  # systemctl stop → fails (unit absent)
+            _proc(1),  # test -e unit → absent (rc=1) → soft-fail
+            _proc(0),  # systemctl disable
+            _proc(0),  # rm -f unit file
+            _proc(0),  # daemon-reload
+            _proc(0),  # rm -rf install_dir
+            _proc(1),  # getent passwd → user absent; userdel skipped
+            _proc(1),  # getent group → absent; groupdel skipped
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -681,8 +708,8 @@ class TestClassPredictions:
     def test_unit_present_systemctl_stop_hard_fail_exits_1(self):
         # Unit file present but systemctl stop fails → genuine failure → hard-fail → exit 1.
         seq = [
-            _proc(1),   # systemctl stop → fails
-            _proc(0),   # test -e unit → present (rc=0) → hard fail
+            _proc(1),  # systemctl stop → fails
+            _proc(0),  # test -e unit → present (rc=0) → hard fail
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 1
@@ -692,9 +719,13 @@ class TestClassPredictions:
         # User already absent before step 7 (e.g., removed by prior uninstall);
         # userdel is skipped entirely → exit 0.
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(1),   # getent passwd → absent; userdel skipped
-            _proc(1),   # getent group → absent; groupdel skipped
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(1),  # getent passwd → absent; userdel skipped
+            _proc(1),  # getent group → absent; groupdel skipped
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -704,10 +735,14 @@ class TestClassPredictions:
         # User present with correct attrs → userdel called → exits 0.
         user_entry = "slop:x:50:50::/nonexistent:/usr/sbin/nologin"
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(0, user_entry),   # getent passwd → present, correct attrs
-            _proc(0),               # userdel → success
-            _proc(1),               # getent group → absent; groupdel skipped
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0, user_entry),  # getent passwd → present, correct attrs
+            _proc(0),  # userdel → success
+            _proc(1),  # getent group → absent; groupdel skipped
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
@@ -715,10 +750,11 @@ class TestClassPredictions:
 
     def test_a5_docker_daemon_down_during_purge(self):
         """A.5: docker daemon down during purge → U6 failure."""
-        seq = list(_UNINSTALL_SUCCESS_SEQ) + [
-            _proc(0),   # rm -rf data_dir
-            _proc(1),   # docker ps fails (daemon down) → U6 late failure
-            _proc(1),   # docker volume ls fails → U7 late failure
+        seq = [
+            *_UNINSTALL_SUCCESS_SEQ,
+            _proc(0),  # rm -rf data_dir
+            _proc(1),  # docker ps fails (daemon down) → U6 late failure
+            _proc(1),  # docker volume ls fails → U7 late failure
         ]
         rc, errors, _ = _run_purge(run_seq=seq)
         assert rc == 1
@@ -737,7 +773,7 @@ class TestClassPredictions:
         """C.2: docker daemon unreachable during clean → exit 1."""
         seq = [
             _proc(0, "active"),  # is-active → active
-            _proc(1),            # docker ps fails (daemon down)
+            _proc(1),  # docker ps fails (daemon down)
         ]
         rc, errors, _ = _run_clean(run_seq=seq)
         assert rc == 1
@@ -756,28 +792,35 @@ class TestClassPredictions:
         rc = _run_removal_pipeline(
             "purge",
             _INSTALL_DIR,
-            Path("/different/resolved/path"),   # mismatches sf.data_dir
+            Path("/different/resolved/path"),  # mismatches sf.data_dir
             sf,
             run=_noop_run,
             print_fn=printed.append,
             err_fn=errors.append,
         )
         assert rc == 1
-        assert any("mismatch" in e.lower() or "symlink" in e.lower() or "Refusing" in e
-                   for e in errors)
+        assert any(
+            "mismatch" in e.lower() or "symlink" in e.lower() or "Refusing" in e for e in errors
+        )
 
     def test_s6_group_extra_members_skips_groupdel(self):
         """S.6: group with extra members → §A.6.5 refuses groupdel; rest continues."""
         group_entry = "slop:x:999:thirdparty,otheruser"
         seq = [
-            _proc(0), _proc(0), _proc(0), _proc(0), _proc(0),
-            _proc(1),                   # getent passwd → user absent; userdel skipped
-            _proc(0, group_entry),      # getent group → extra members
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(0),
+            _proc(1),  # getent passwd → user absent; userdel skipped
+            _proc(0, group_entry),  # getent group → extra members
         ]
         rc, errors, _ = _run_uninstall(run_seq=seq)
         assert rc == 0
-        assert any("members not added" in e or "additional members" in e or
-                   "will not remove" in e for e in errors)
+        assert any(
+            "members not added" in e or "additional members" in e or "will not remove" in e
+            for e in errors
+        )
 
 
 # ── run_purge ─────────────────────────────────────────────────────────────────
@@ -835,10 +878,11 @@ class TestRunPurge:
         assert any("Purge complete" in p for p in printed)
 
     def test_docker_daemon_unreachable_u6_late_failure(self):
-        seq = list(_UNINSTALL_SUCCESS_SEQ) + [
-            _proc(0),   # rm -rf data_dir
-            _proc(1),   # docker ps fails → U6
-            _proc(0),   # docker volume ls (continues after U6)
+        seq = [
+            *_UNINSTALL_SUCCESS_SEQ,
+            _proc(0),  # rm -rf data_dir
+            _proc(1),  # docker ps fails → U6
+            _proc(0),  # docker volume ls (continues after U6)
         ]
         rc, errors, _ = _run_purge(run_seq=seq)
         assert rc == 1
@@ -851,8 +895,8 @@ class TestRunPurge:
 class TestRunClean:
     def _clean_active_no_apps(self):
         return [
-            _proc(0, "active"),   # systemctl is-active
-            _proc(0, ""),         # docker ps (no apps)
+            _proc(0, "active"),  # systemctl is-active
+            _proc(0, ""),  # docker ps (no apps)
         ]
 
     def _clean_active_one_app(self, app_key="myapp"):
@@ -914,7 +958,7 @@ class TestRunClean:
         def _state_read(_p):
             return _make_state()
 
-        rc = run_clean(
+        run_clean(
             _args(yes=False),
             state_read=_state_read,
             stdin_is_tty=lambda: True,
@@ -955,11 +999,13 @@ class TestRunClean:
 
     def test_c5_warning_only_exits_0(self):
         seq = [_proc(0, "active"), _proc(0, "myapp-cont\tmyapp")]
-        api_results = [{
-            "ok": True,
-            "steps": [{"status": "warning", "name": "hostname", "message": "skipped"}],
-            "error": "",
-        }]
+        api_results = [
+            {
+                "ok": True,
+                "steps": [{"status": "warning", "name": "hostname", "message": "skipped"}],
+                "error": "",
+            }
+        ]
         rc, _, _ = _run_clean(run_seq=seq, api_results=api_results)
         assert rc == 0
 
@@ -1015,11 +1061,16 @@ class TestPrintCleanOutput:
     def test_warning_row_format(self):
         printed = []
         _print_clean_output(
-            [("sonarr", {
-                "ok": True,
-                "steps": [{"status": "warning", "name": "hostname", "message": "x"}],
-                "error": "",
-            })],
+            [
+                (
+                    "sonarr",
+                    {
+                        "ok": True,
+                        "steps": [{"status": "warning", "name": "hostname", "message": "x"}],
+                        "error": "",
+                    },
+                )
+            ],
             orphans=[],
             print_fn=printed.append,
         )
@@ -1042,11 +1093,16 @@ class TestPrintCleanOutput:
     def test_failed_row_with_step_detail(self):
         printed = []
         _print_clean_output(
-            [("radarr", {
-                "ok": False,
-                "steps": [{"status": "error", "name": "stop", "message": "timeout"}],
-                "error": "",
-            })],
+            [
+                (
+                    "radarr",
+                    {
+                        "ok": False,
+                        "steps": [{"status": "error", "name": "stop", "message": "timeout"}],
+                        "error": "",
+                    },
+                )
+            ],
             orphans=[],
             print_fn=printed.append,
         )
@@ -1056,8 +1112,10 @@ class TestPrintCleanOutput:
     def test_summary_line_all_ok(self):
         printed = []
         _print_clean_output(
-            [("a", {"ok": True, "steps": [], "error": ""}),
-             ("b", {"ok": True, "steps": [], "error": ""})],
+            [
+                ("a", {"ok": True, "steps": [], "error": ""}),
+                ("b", {"ok": True, "steps": [], "error": ""}),
+            ],
             orphans=[],
             print_fn=printed.append,
         )
@@ -1068,8 +1126,10 @@ class TestPrintCleanOutput:
     def test_summary_line_mixed(self):
         printed = []
         _print_clean_output(
-            [("a", {"ok": True, "steps": [], "error": ""}),
-             ("b", {"ok": False, "steps": [], "error": "err"})],
+            [
+                ("a", {"ok": True, "steps": [], "error": ""}),
+                ("b", {"ok": False, "steps": [], "error": "err"}),
+            ],
             orphans=["orphan-1"],
             print_fn=printed.append,
         )
@@ -1091,35 +1151,46 @@ class TestPrintCleanOutput:
     def test_all_ok_exits_0(self):
         rc = _print_clean_output(
             [("a", {"ok": True, "steps": [], "error": ""})],
-            orphans=[], print_fn=lambda _: None,
+            orphans=[],
+            print_fn=lambda _: None,
         )
         assert rc == 0
 
     def test_any_failed_exits_1(self):
         rc = _print_clean_output(
             [("a", {"ok": False, "steps": [], "error": "err"})],
-            orphans=[], print_fn=lambda _: None,
+            orphans=[],
+            print_fn=lambda _: None,
         )
         assert rc == 1
 
     def test_warning_only_exits_0(self):
         rc = _print_clean_output(
-            [("a", {
-                "ok": True,
-                "steps": [{"status": "warning", "name": "w", "message": "m"}],
-                "error": "",
-            })],
-            orphans=[], print_fn=lambda _: None,
+            [
+                (
+                    "a",
+                    {
+                        "ok": True,
+                        "steps": [{"status": "warning", "name": "w", "message": "m"}],
+                        "error": "",
+                    },
+                )
+            ],
+            orphans=[],
+            print_fn=lambda _: None,
         )
         assert rc == 0
 
     def test_inv16_row_greppable_format(self):
         """INV-16: each row matches <app-key>\\s+(ok|warning|failed)\\s+\\(.*\\)."""
         import re
+
         printed = []
         _print_clean_output(
-            [("jellyfin", {"ok": True, "steps": [], "error": ""}),
-             ("sonarr", {"ok": False, "steps": [], "error": "err"})],
+            [
+                ("jellyfin", {"ok": True, "steps": [], "error": ""}),
+                ("sonarr", {"ok": False, "steps": [], "error": "err"}),
+            ],
             orphans=[],
             print_fn=printed.append,
         )
@@ -1144,7 +1215,9 @@ class TestVerifyRemovedUninstall:
                 data_dir.mkdir()
             seq_iter = iter(run_seq)
             return verify_removed(
-                install_dir, data_dir, "uninstall",
+                install_dir,
+                data_dir,
+                "uninstall",
                 run=lambda _cmd: next(seq_iter),
                 pre_data_dir_stat=pre_stat,
             )
@@ -1222,7 +1295,9 @@ class TestVerifyRemovedUninstall:
             pre_stat = data_dir.stat()
             seq_iter = iter([_proc(1, "inactive"), _proc(1), _proc(1)])
             vr = verify_removed(
-                tmp / "install", data_dir, "uninstall",
+                tmp / "install",
+                data_dir,
+                "uninstall",
                 run=lambda _cmd: next(seq_iter),
                 pre_data_dir_stat=pre_stat,
             )
@@ -1237,7 +1312,9 @@ class TestVerifyRemovedUninstall:
             data_dir.rmdir()
             seq_iter = iter([_proc(1, "inactive"), _proc(1), _proc(1)])
             vr = verify_removed(
-                tmp / "install", data_dir, "uninstall",
+                tmp / "install",
+                data_dir,
+                "uninstall",
                 run=lambda _cmd: next(seq_iter),
                 pre_data_dir_stat=pre_stat,
             )
@@ -1250,7 +1327,9 @@ class TestVerifyRemovedUninstall:
             data_dir.mkdir()
             seq_iter = iter([_proc(1, "inactive"), _proc(1), _proc(1)])
             vr = verify_removed(
-                tmp / "install", data_dir, "uninstall",
+                tmp / "install",
+                data_dir,
+                "uninstall",
                 run=lambda _cmd: next(seq_iter),
                 pre_data_dir_stat=None,
             )
@@ -1281,18 +1360,24 @@ class TestVerifyRemovedPurge:
                 data_dir.mkdir()
             seq_iter = iter(run_seq)
             return verify_removed(
-                tmp / "install", data_dir, "purge",
+                tmp / "install",
+                data_dir,
+                "purge",
                 run=lambda _cmd: next(seq_iter),
             )
 
     def test_u5b_data_dir_absent_holds(self):
-        vr = self._vr([_proc(1, "inactive"), _proc(1), _proc(1), _proc(0, ""), _proc(0, "")],
-                      data_dir_exists=False)
+        vr = self._vr(
+            [_proc(1, "inactive"), _proc(1), _proc(1), _proc(0, ""), _proc(0, "")],
+            data_dir_exists=False,
+        )
         assert vr.predicates["U5b"] is True
 
     def test_u5b_data_dir_present_fails(self):
-        vr = self._vr([_proc(1, "inactive"), _proc(1), _proc(1), _proc(0, ""), _proc(0, "")],
-                      data_dir_exists=True)
+        vr = self._vr(
+            [_proc(1, "inactive"), _proc(1), _proc(1), _proc(0, ""), _proc(0, "")],
+            data_dir_exists=True,
+        )
         assert vr.predicates["U5b"] is False
 
     def test_u6_no_containers_holds(self):
@@ -1300,19 +1385,27 @@ class TestVerifyRemovedPurge:
         assert vr.predicates["U6"] is True
 
     def test_u6_containers_present_fails(self):
-        vr = self._vr([
-            _proc(1, "inactive"), _proc(1), _proc(1),
-            _proc(0, "container-abc"),
-            _proc(0, ""),
-        ])
+        vr = self._vr(
+            [
+                _proc(1, "inactive"),
+                _proc(1),
+                _proc(1),
+                _proc(0, "container-abc"),
+                _proc(0, ""),
+            ]
+        )
         assert vr.predicates["U6"] is False
 
     def test_u6_docker_unreachable_fails(self):
-        vr = self._vr([
-            _proc(1, "inactive"), _proc(1), _proc(1),
-            _proc(1, ""),   # docker ps fails
-            _proc(0, ""),
-        ])
+        vr = self._vr(
+            [
+                _proc(1, "inactive"),
+                _proc(1),
+                _proc(1),
+                _proc(1, ""),  # docker ps fails
+                _proc(0, ""),
+            ]
+        )
         assert vr.predicates["U6"] is False
 
     def test_u7_no_volumes_holds(self):
@@ -1320,11 +1413,15 @@ class TestVerifyRemovedPurge:
         assert vr.predicates["U7"] is True
 
     def test_u7_volumes_present_fails(self):
-        vr = self._vr([
-            _proc(1, "inactive"), _proc(1), _proc(1),
-            _proc(0, ""),
-            _proc(0, "vol-abc"),
-        ])
+        vr = self._vr(
+            [
+                _proc(1, "inactive"),
+                _proc(1),
+                _proc(1),
+                _proc(0, ""),
+                _proc(0, "vol-abc"),
+            ]
+        )
         assert vr.predicates["U7"] is False
 
     def test_purge_excludes_u5a(self):
@@ -1338,12 +1435,12 @@ class TestVerifyRemovedPurge:
 class TestVerifyRemovedClean:
     # clean mode calls run() for: U1(is-active), U4(getent passwd),
     # U4b(getent group), U6(docker ps), U7(docker volume ls) — 5 total.
-    _BASE = [
-        _proc(0, "active"),   # systemctl is-active → U1=False (still running)
-        _proc(1),              # getent passwd → U4=True (user absent)
-        _proc(1),              # getent group → U4b=True (group absent)
-        _proc(0, ""),          # docker ps → U6=True (no containers)
-        _proc(0, ""),          # docker volume ls → U7=True (no volumes)
+    _BASE: ClassVar = [
+        _proc(0, "active"),  # systemctl is-active → U1=False (still running)
+        _proc(1),  # getent passwd → U4=True (user absent)
+        _proc(1),  # getent group → U4b=True (group absent)
+        _proc(0, ""),  # docker ps → U6=True (no containers)
+        _proc(0, ""),  # docker volume ls → U7=True (no volumes)
     ]
 
     def _vr(self, run_seq):
@@ -1351,7 +1448,9 @@ class TestVerifyRemovedClean:
             tmp = Path(td)
             seq_iter = iter(run_seq)
             return verify_removed(
-                tmp / "install", tmp / "data", "clean",
+                tmp / "install",
+                tmp / "data",
+                "clean",
                 run=lambda _cmd: next(seq_iter),
             )
 

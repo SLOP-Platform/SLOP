@@ -12,9 +12,9 @@ Coverage:
   TestEnsureUserDockerGroup — docker group absent/present; membership idempotency
   TestEnsureUserOrdering   — useradd before docker-group check
 """
+
 from __future__ import annotations
 
-from typing import Optional
 
 import pytest
 
@@ -59,12 +59,12 @@ def _passing_kwargs(
     passwd = _system_passwd() if user_present else None
     members = ["slop"] if user_in_group else []
     group = _docker_group(members) if group_present else None
-    return dict(
-        get_passwd_entry=lambda username: passwd,
-        run_useradd=_noop,
-        get_group_entry=lambda group_name: group,
-        run_usermod=_noop,
-    )
+    return {
+        "get_passwd_entry": lambda username: passwd,
+        "run_useradd": _noop,
+        "get_group_entry": lambda group_name: group,
+        "run_usermod": _noop,
+    }
 
 
 # ── TestEnsureUserCreation ────────────────────────────────────────────────────
@@ -300,45 +300,31 @@ class TestCheckExistingUserAttrs:
         check_existing_user_attrs(get_passwd_entry=lambda u: None)
 
     def test_correct_attrs_no_raise(self):
-        check_existing_user_attrs(
-            get_passwd_entry=lambda u: _system_passwd()
-        )
+        check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd())
 
     def test_wrong_shell_raises(self):
         with pytest.raises(InstallUserMismatchError):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(shell="/bin/bash")
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(shell="/bin/bash"))
 
     def test_wrong_home_raises(self):
         with pytest.raises(InstallUserMismatchError):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(home="/home/slop")
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(home="/home/slop"))
 
     def test_non_system_uid_raises(self):
         with pytest.raises(InstallUserMismatchError):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(uid=1001)
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(uid=1001))
 
     def test_uid_at_ceiling_raises(self):
         with pytest.raises(InstallUserMismatchError):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(uid=1000)
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(uid=1000))
 
     def test_mismatch_message_names_username(self):
         with pytest.raises(InstallUserMismatchError, match="slop"):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(uid=1500)
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(uid=1500))
 
     def test_mismatch_message_names_bad_uid(self):
         with pytest.raises(InstallUserMismatchError, match="1500"):
-            check_existing_user_attrs(
-                get_passwd_entry=lambda u: _system_passwd(uid=1500)
-            )
+            check_existing_user_attrs(get_passwd_entry=lambda u: _system_passwd(uid=1500))
 
     def test_custom_username_queried(self):
         queried = []
@@ -362,28 +348,28 @@ class TestUserBoundaryProbe:
 
     def test_get_passwd_entry_raises_on_getent_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("getent")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("getent")):
             with pytest.raises(MissingBinaryError, match="getent"):
                 _get_passwd_entry("slop")
 
     def test_run_useradd_raises_on_useradd_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("useradd")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("useradd")):
             with pytest.raises(MissingBinaryError, match="useradd"):
                 _run_useradd("slop")
 
     def test_get_group_entry_raises_on_getent_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("getent")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("getent")):
             with pytest.raises(MissingBinaryError, match="getent"):
                 _get_group_entry("docker")
 
     def test_run_usermod_raises_on_usermod_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("usermod")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("usermod")):
             with pytest.raises(MissingBinaryError, match="usermod"):
                 _run_usermod("slop", "docker")

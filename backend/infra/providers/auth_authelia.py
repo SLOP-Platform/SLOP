@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
+import yaml
+
 from backend.core.compose import compose_up, compose_down, write_fragment
 from backend.core.config import config
 from backend.core.logging import get_logger
@@ -16,6 +18,34 @@ from backend.infra.base import InfraProvider, ProviderResult
 
 log = get_logger(__name__)
 CONTAINER_NAME = "authelia"
+
+
+def _authelia_config_dir() -> Path:
+    """The host directory mounted at /config — holds users.yml (the user SSOT)."""
+    return Path(config.data_dir).parent / "config" / "authelia"
+
+
+def _users_file() -> Path:
+    return _authelia_config_dir() / "users.yml"
+
+
+def _load_users_doc() -> dict[str, Any]:
+    """Parse users.yml into ``{"users": {username: {...}}}`` (empty if absent)."""
+    path = _users_file()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return {"users": {}}
+    try:
+        doc = yaml.safe_load(raw) or {}
+    except yaml.YAMLError:
+        return {"users": {}}
+    if not isinstance(doc, dict):
+        return {"users": {}}
+    users = doc.get("users")
+    if not isinstance(users, dict):
+        doc["users"] = {}
+    return doc
 
 
 class AutheliaProvider(InfraProvider):
@@ -170,7 +200,7 @@ notifier:
                 "traefik.http.routers.authelia.tls.certresolver": cert_resolver,
                 "traefik.http.services.authelia.loadbalancer.server.port": "9091",
                 # Middleware definition for other services to use
-                "traefik.http.middlewares.authelia.forwardauth.address": "http://authelia:9091/api/verify?rd=https://auth.{domain}",
+                "traefik.http.middlewares.authelia.forwardauth.address": f"http://authelia:9091/api/verify?rd=https://auth.{domain}",
                 "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader": "true",
                 "traefik.http.middlewares.authelia.forwardauth.authResponseHeaders": "Remote-User,Remote-Groups,Remote-Name,Remote-Email",
             },
@@ -256,3 +286,154 @@ notifier:
             return ProviderResult.failure(f"Authelia status: {status or 'not found'}.", "")
         except Exception as e:
             return ProviderResult.failure("Cannot check Authelia.", str(e))
+
+    # ── Auth slot verbs ───────────────────────────────────────────────────
+
+    def protect(self, hostname: str, rules: dict[str, Any] | None = None) -> ProviderResult:
+        """Authelia protects routes via its Traefik forwardAuth middleware.
+
+        Like Tinyauth, protection is applied with router labels (the ``authelia``
+        middleware deploy() defines), not a per-hostname API call. Per-host access
+        policy lives in access_control rules in configuration.yml.
+        """
+        return ProviderResult.success(
+            f"Authelia protection is applied via the 'authelia' Traefik middleware "
+            f"(covers {hostname}); per-host policy is set in configuration.yml access_control."
+        )
+
+    def unprotect(self, hostname: str) -> ProviderResult:
+        return ProviderResult.success(
+            "Authelia protection removed by dropping the 'authelia' middleware from "
+            "the route's Traefik labels."
+        )
+
+    def export_users(self) -> ProviderResult:
+        """Export Authelia's file-backend users as portable records.
+
+        Reads users.yml (the file authentication backend). Authelia stores argon2id
+        (or bcrypt) hashes; we carry the hash verbatim with its detected scheme so
+        the target provider can decide whether it can accept it.
+        """
+        doc = _load_users_doc()
+        users_map = doc.get("users", {})
+        users: list[dict[str, Any]] = []
+        for username, rec in users_map.items():
+            if not isinstance(rec, dict):
+                continue
+            hashed = str(rec.get("password", "")).strip()
+            if not username or not hashed:
+                continue
+            if hashed.startswith("$argon2"):
+                scheme = "argon2id"
+            elif hashed.startswith(("$2a$", "$2b$", "$2y$")):
+                scheme = "bcrypt"
+            else:
+                scheme = "unknown"
+            users.append(
+                {
+                    "username": str(username),
+                    "hash": hashed,
+                    "hash_scheme": scheme,
+                    "email": rec.get("email"),
+                    "displayname": rec.get("displayname"),
+                    "groups": rec.get("groups"),
+                }
+            )
+        unknown = [u["username"] for u in users if u["hash_scheme"] == "unknown"]
+        # argon2id users are lossless to other Authelia-class targets but CANNOT be
+        # accepted by a bcrypt-only target (Tinyauth) — that target's import_users
+        # fail-closes. We declare lossy only for truly-unrecognized hashes here.
+        lossy = bool(unknown)
+        return ProviderResult.success(
+            f"Exported {len(users)} Authelia user(s).",
+            data={
+                "users": users,
+                "lossy": lossy,
+                "lossy_reason": (
+                    f"unrecognized hash scheme for: {', '.join(unknown)}" if lossy else ""
+                ),
+            },
+        )
+
+    def import_users(self, users: list[dict[str, Any]]) -> ProviderResult:
+        """Import portable user records into Authelia's users.yml file backend.
+
+        Authelia's file backend accepts BOTH argon2id and bcrypt ($2b/$2y) hashes,
+        so a Tinyauth→Authelia migration is password-lossless — the bcrypt hash is
+        written verbatim, no reset needed. An unrecognized hash scheme cannot be
+        written safely → fail-closed so the swap engine rolls back.
+        """
+        if not users:
+            return ProviderResult.success("No users to import.", data={"imported": 0})
+
+        doc = _load_users_doc()
+        users_map = doc.setdefault("users", {})
+        unmigratable: list[str] = []
+        imported = 0
+        for u in users:
+            username = str(u.get("username", "")).strip()
+            hashed = str(u.get("hash", "")).strip()
+            if not username or not hashed:
+                continue
+            scheme = u.get("hash_scheme")
+            if not scheme:
+                if hashed.startswith("$argon2"):
+                    scheme = "argon2id"
+                elif hashed.startswith(("$2a$", "$2b$", "$2y$")):
+                    scheme = "bcrypt"
+                else:
+                    scheme = "unknown"
+            if scheme not in ("argon2id", "bcrypt"):
+                unmigratable.append(username)
+                continue
+            email = u.get("email") or f"{username}@local"
+            rec: dict[str, Any] = {
+                "displayname": u.get("displayname") or username,
+                "password": hashed,
+                "email": email,
+            }
+            groups = u.get("groups")
+            if groups:
+                rec["groups"] = groups
+            users_map[username] = rec
+            imported += 1
+
+        if unmigratable:
+            return ProviderResult.failure(
+                f"Cannot import {len(unmigratable)} user(s) into Authelia: "
+                "unrecognized password hash scheme. Migration aborted.",
+                f"Affected: {', '.join(unmigratable)}",
+            )
+
+        path = _users_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(doc, default_flow_style=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        return ProviderResult.success(
+            f"Imported {imported} user(s) into Authelia users.yml. Restart Authelia to load them.",
+            data={"imported": imported},
+        )
+
+    # ── Migration support ─────────────────────────────────────────────────
+
+    def pre_migration_snapshot(self) -> ProviderResult:
+        """Capture users.yml so a failed swap can be rolled back without user loss."""
+        try:
+            content = _users_file().read_text(encoding="utf-8")
+        except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+            content = None
+        return ProviderResult.success(
+            "Authelia user snapshot captured.", data={"users_yml": content}
+        )
+
+    def restore_from_snapshot(self, snapshot: dict[str, Any]) -> ProviderResult:
+        """Restore users.yml captured by pre_migration_snapshot on rollback."""
+        content = snapshot.get("users_yml")
+        if content is None:
+            return ProviderResult.success("No Authelia user snapshot to restore.")
+        path = _users_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return ProviderResult.success("Authelia users.yml restored from snapshot.")

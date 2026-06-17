@@ -14,9 +14,9 @@ present-but-below-floor, absent per dependency entry):
   TestEnsureDependenciesErrors — error propagation from injected helpers
   TestDependenciesConstant   — DEPENDENCIES constant shape for INV-D2
 """
+
 from __future__ import annotations
 
-from typing import List, Optional
 
 import pytest
 
@@ -25,7 +25,6 @@ from installer.deps_debian import (
     DEPENDENCIES,
     AptLockError,
     AptUpdateNetworkError,
-    DependencyError,
     DependencyVersionUnparseableError,
     NodeSourceSetupError,
     PackageNotFoundError,
@@ -65,19 +64,19 @@ def _noop_apt_install(pkgs):
 
 
 def _passing_kwargs(
-    pkgs: Optional[dict] = None,
-    node_version: Optional[str] = "v22.5.0",
+    pkgs: dict | None = None,
+    node_version: str | None = "v22.5.0",
 ) -> dict:
     """Return ensure_dependencies kwargs where everything passes (all present, node ok)."""
     if pkgs is None:
         pkgs = {"curl": True, "netcat-openbsd": True}
-    return dict(
-        is_pkg_installed=_pkg_map(pkgs),
-        get_node_version_str=lambda: node_version,
-        run_apt_update=_noop_apt_update,
-        run_nodesource_setup=_noop_nodesource,
-        run_apt_install=_noop_apt_install,
-    )
+    return {
+        "is_pkg_installed": _pkg_map(pkgs),
+        "get_node_version_str": lambda: node_version,
+        "run_apt_update": _noop_apt_update,
+        "run_nodesource_setup": _noop_nodesource,
+        "run_apt_install": _noop_apt_install,
+    }
 
 
 # ── TestParseNodeVersion ──────────────────────────────────────────────────────
@@ -173,7 +172,7 @@ class TestEnsureDependenciesNodejs:
         installed = []
         kwargs = _passing_kwargs(node_version="v22.5.0")
         kwargs["run_apt_install"] = lambda pkgs: installed.extend(pkgs)
-        result = ensure_dependencies(**kwargs)
+        ensure_dependencies(**kwargs)
         assert "nodejs" not in installed
 
     def test_present_below_floor_triggers_nodesource(self):
@@ -198,6 +197,7 @@ class TestEnsureDependenciesNodejs:
         assert "nodejs" in installed
         assert "nodejs" in result
 
+
 # ── TestGetNodeVersionStrProbe ────────────────────────────────────────────────
 
 
@@ -207,6 +207,7 @@ class TestGetNodeVersionStrProbe:
     def test_returns_none_on_file_not_found(self):
         from unittest.mock import patch
         from installer.deps_debian import _get_node_version_str
+
         # Patch at the subprocess boundary (installer._run) — deps_debian no
         # longer imports subprocess directly after run_required migration (F7).
         with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("node")):
@@ -248,8 +249,7 @@ class TestEnsureDependenciesOrdering:
         apt_update_idx = ops.index("apt_update")
         nodesource_idx = ops.index("nodesource")
         curl_install_idx = next(
-            i for i, op in enumerate(ops)
-            if isinstance(op, tuple) and "curl" in op[1]
+            i for i, op in enumerate(ops) if isinstance(op, tuple) and "curl" in op[1]
         )
         assert apt_update_idx < curl_install_idx
         assert curl_install_idx < nodesource_idx
@@ -285,8 +285,9 @@ class TestEnsureDependenciesOrdering:
         kwargs["run_apt_install"] = lambda pkgs: order.append(("apt_install", tuple(pkgs)))
         kwargs["run_nodesource_setup"] = lambda d: order.append(("nodesource",))
         ensure_dependencies(**kwargs)
-        curl_idx = next(i for i, (op, *args) in enumerate(order)
-                        if op == "apt_install" and "curl" in args[0])
+        curl_idx = next(
+            i for i, (op, *args) in enumerate(order) if op == "apt_install" and "curl" in args[0]
+        )
         nodesource_idx = next(i for i, (op, *_) in enumerate(order) if op == "nodesource")
         assert curl_idx < nodesource_idx
 
@@ -306,12 +307,14 @@ class TestNodeSourceSetupProbe:
 
     def test_nodesource_setup_fails_loudly_when_curl_absent(self):
         from unittest.mock import patch
+
         with patch("installer.deps_debian.shutil.which", return_value=None):
             with pytest.raises(NodeSourceSetupError, match="curl is not on PATH"):
                 _run_nodesource_setup("ubuntu")
 
     def test_nodesource_setup_passes_when_curl_present(self):
         from unittest.mock import patch, MagicMock
+
         fake_result = MagicMock(returncode=0, stdout="", stderr="")
         with patch("installer.deps_debian.shutil.which", return_value="/usr/bin/curl"):
             with patch("installer._run.subprocess.run", return_value=fake_result):
@@ -417,21 +420,21 @@ class TestDepsDebianBoundaryProbe:
 
     def test_is_pkg_installed_raises_on_dpkg_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("dpkg-query")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("dpkg-query")):
             with pytest.raises(MissingBinaryError, match="dpkg-query"):
                 _is_pkg_installed("curl")
 
     def test_run_apt_update_raises_on_apt_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("apt-get")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("apt-get")):
             with pytest.raises(MissingBinaryError, match="apt-get"):
                 _run_apt_update()
 
     def test_run_apt_install_raises_on_apt_absent(self):
         from unittest.mock import patch
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("apt-get")):
+
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("apt-get")):
             with pytest.raises(MissingBinaryError, match="apt-get"):
                 _run_apt_install(["curl"])

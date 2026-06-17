@@ -15,6 +15,7 @@ Checks (V5_INSTALLER_PLAN.md Step 1.4.a):
   docker     — Docker Engine ≥ 24.0 is present and daemon is reachable
   compose    — Docker Compose v2 plugin (docker compose) is available
 """
+
 from __future__ import annotations
 
 import os
@@ -24,7 +25,7 @@ import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 _MIN_KERNEL: tuple[int, int] = (5, 10)
 _MIN_DISK_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GiB
@@ -69,14 +70,16 @@ def _read_init_comm() -> str:
     return Path("/proc/1/comm").read_text(encoding="utf-8").strip()
 
 
-def _get_docker_version() -> Optional[str]:
+def _get_docker_version() -> str | None:
     """Return Docker Server version string, or None when absent/unreachable."""
     if shutil.which("docker") is None:
         return None
     try:
         r = subprocess.run(
             ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if r.returncode != 0:
             return None
@@ -92,7 +95,9 @@ def _has_compose_plugin() -> bool:
     try:
         r = subprocess.run(
             ["docker", "compose", "version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.returncode == 0
     except Exception:
@@ -200,9 +205,7 @@ def _check_root(
         name="root access",
         ok=ok,
         remediation=(
-            ""
-            if ok
-            else "The installer must run as root. Re-run with: sudo ./install.sh"
+            "" if ok else "The installer must run as root. Re-run with: sudo ./install.sh"
         ),
     )
 
@@ -235,7 +238,7 @@ _DOCKER_MIN_MAJOR: int = 24
 
 
 def _check_docker(
-    get_docker_version: Callable[[], Optional[str]],
+    get_docker_version: Callable[[], str | None],
 ) -> PrereqFinding:
     """Check Docker Engine is present, daemon is reachable, and version ≥ 24.0."""
     raw = get_docker_version()
@@ -301,7 +304,7 @@ def check_prereqs(
     is_port_free: Callable[[int], bool] = _is_port_free,
     get_effective_uid: Callable[[], int] = _get_effective_uid,
     read_init_comm: Callable[[], str] = _read_init_comm,
-    get_docker_version: Callable[[], Optional[str]] = _get_docker_version,
+    get_docker_version: Callable[[], str | None] = _get_docker_version,
     has_compose_plugin: Callable[[], bool] = _has_compose_plugin,
 ) -> list[PrereqFinding]:
     """Run all prerequisite checks and return the full list of findings.

@@ -31,7 +31,9 @@ structlog>=24
 # Rate limiting
 slowapi>=0.1.9
 
-# Prometheus metrics — /metrics endpoint
-# v8.0.0 dropped the <1.0.0 Starlette pin → unblocks Starlette 1.0.x (native CVE-2026-48710 fix).
-prometheus-fastapi-instrumentator>=8.0.0
+# Prometheus metrics — /metrics endpoint. Instrumentation is a thin
+# in-tree ASGI middleware (backend/api/http_metrics.py); the
+# prometheus-fastapi-instrumentator library was dropped because its
+# 8.0.0 (only 8.x release) crashes on Starlette 1.x (route.path on an
+# _IncludedRouter raises AttributeError → 500 on every request).
 prometheus-client>=0.25

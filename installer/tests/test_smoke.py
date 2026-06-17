@@ -14,15 +14,14 @@ Coverage:
   Timing: per-predicate budget exercised; 30s total budget exercised.
   smoke_test(): short-circuits on first failure; passes all five on success.
 """
+
 from __future__ import annotations
 
 import json
 import time
 import urllib.error
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from installer.smoke import (
     SmokeTestResult,
@@ -132,8 +131,11 @@ class TestP1SystemdActive:
     def test_success_active(self):
         run = MagicMock(return_value=_make_run_result("active\n"))
         result = _check_systemd_active(
-            0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert result.passed
         assert result.predicate == "P1"
@@ -141,8 +143,11 @@ class TestP1SystemdActive:
     def test_failure_failed(self):
         run = MagicMock(return_value=_make_run_result("failed\n"))
         result = _check_systemd_active(
-            0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P1_FAILED"
@@ -153,8 +158,11 @@ class TestP1SystemdActive:
         # monotonic always returns 9999 → retry_deadline is in the past
         run = MagicMock(return_value=_make_run_result("activating\n"))
         result = _check_systemd_active(
-            0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_exhausted_monotonic(),
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_exhausted_monotonic(),
         )
         assert not result.passed
         assert result.failure_shape == "P1_TIMEOUT"
@@ -171,7 +179,11 @@ class TestP1SystemdActive:
 
     def test_retry_on_inactive(self):
         # Return inactive twice then active.
-        results = [_make_run_result("inactive\n"), _make_run_result("inactive\n"), _make_run_result("active\n")]
+        results = [
+            _make_run_result("inactive\n"),
+            _make_run_result("inactive\n"),
+            _make_run_result("active\n"),
+        ]
         run = MagicMock(side_effect=results)
         times = [0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.5, 1.5]
         monotonic = MagicMock(side_effect=times)
@@ -181,7 +193,14 @@ class TestP1SystemdActive:
 
     def test_uses_custom_unit_name(self):
         run = MagicMock(return_value=_make_run_result("active\n"))
-        _check_systemd_active(0.0, 30.0, unit="custom.service", run=run, sleep=MagicMock(), monotonic=_fast_monotonic(0.0))
+        _check_systemd_active(
+            0.0,
+            30.0,
+            unit="custom.service",
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
+        )
         called_cmd = run.call_args[0][0]
         assert "custom.service" in called_cmd
 
@@ -200,12 +219,8 @@ class TestP1SystemdActive:
 
 
 class TestP2PortBound:
-    _SS_WITH_PID = (
-        "tcp LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:((pid=1234))\n"
-    )
-    _SS_WRONG_PID = (
-        "tcp LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:((pid=9999))\n"
-    )
+    _SS_WITH_PID = "tcp LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:((pid=1234))\n"
+    _SS_WRONG_PID = "tcp LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:((pid=9999))\n"
     _SS_NO_PORT = "tcp LISTEN 0 128 0.0.0.0:9090 0.0.0.0:* users:((pid=1234))\n"
 
     def _run_factory(self, main_pid: str, ss_out: str):
@@ -213,21 +228,30 @@ class TestP2PortBound:
             if "MainPID" in cmd:
                 return _make_run_result(main_pid + "\n")
             return _make_run_result(ss_out)
+
         return run
 
     def test_success_port_bound_correct_pid(self):
         run = self._run_factory("1234", self._SS_WITH_PID)
         result = _check_port_bound(
-            8080, 0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert result.passed
 
     def test_failure_port_not_bound(self):
         run = self._run_factory("1234", self._SS_NO_PORT)
         result = _check_port_bound(
-            8080, 0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_exhausted_monotonic(),
+            8080,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_exhausted_monotonic(),
         )
         assert not result.passed
         assert result.failure_shape == "P2_NOT_BOUND"
@@ -237,8 +261,12 @@ class TestP2PortBound:
     def test_failure_port_bound_wrong_pid(self):
         run = self._run_factory("1234", self._SS_WRONG_PID)
         result = _check_port_bound(
-            8080, 0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P2_WRONG_PID"
@@ -251,8 +279,12 @@ class TestP2PortBound:
         # iteration and run() is never called (avoids _SS_NO_PORT confusion).
         run = self._run_factory("1234", self._SS_NO_PORT)
         result = _check_port_bound(
-            8080, 0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=MagicMock(return_value=9999.0),
+            8080,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=MagicMock(return_value=9999.0),
         )
         assert not result.passed
         assert "8080" in result.operator_message
@@ -281,16 +313,24 @@ class TestP3Healthz:
     def test_success_200_valid_shape(self):
         urlopen = _make_urlopen_ctx(200, self._GOOD_BODY)
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert result.passed
 
     def test_failure_non200(self):
         urlopen = _make_urlopen_ctx(503, b"")
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.predicate == "P3"
@@ -300,8 +340,12 @@ class TestP3Healthz:
         body = json.dumps({"ts": 123}).encode()
         urlopen = _make_urlopen_ctx(200, body)
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert "did not respond as expected" in result.operator_message
@@ -309,16 +353,24 @@ class TestP3Healthz:
     def test_failure_200_wrong_shape_bad_status_value(self):
         urlopen = _make_urlopen_ctx(200, self._BAD_STATUS_BODY)
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
 
     def test_failure_200_wrong_shape_no_ts(self):
         urlopen = _make_urlopen_ctx(200, self._NO_TS_BODY)
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
 
@@ -340,8 +392,12 @@ class TestP3Healthz:
 
         times = [0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2]
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=fake_urlopen, sleep=MagicMock(), monotonic=MagicMock(side_effect=times),
+            8080,
+            0.0,
+            30.0,
+            urlopen=fake_urlopen,
+            sleep=MagicMock(),
+            monotonic=MagicMock(side_effect=times),
         )
         assert result.passed
         assert call_count[0] == 2
@@ -349,8 +405,12 @@ class TestP3Healthz:
     def test_budget_exhaustion_returns_failure(self):
         urlopen = MagicMock(side_effect=urllib.error.URLError("refused"))
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_exhausted_monotonic(),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_exhausted_monotonic(),
         )
         assert not result.passed
         assert result.failure_shape == "P3_FAILED"
@@ -358,8 +418,12 @@ class TestP3Healthz:
     def test_diagnostic_command_references_journalctl(self):
         urlopen = _make_urlopen_ctx(503, b"")
         result = _check_healthz(
-            8080, 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert "journalctl" in result.diagnostic_command
 
@@ -370,8 +434,12 @@ class TestP3Healthz:
 class TestP4StartupzReadyz:
     _STARTUPZ_OK = json.dumps({"status": "ok", "startup_complete": True}).encode()
     _STARTUPZ_STARTING = json.dumps({"status": "starting", "startup_complete": False}).encode()
-    _READYZ_OK = json.dumps({"status": "ok", "checks": {"db_ping": "ok", "state_configured": "ok"}}).encode()
-    _READYZ_FAIL = json.dumps({"status": "not_ready", "checks": {"db_ping": "fail: OperationalError"}}).encode()
+    _READYZ_OK = json.dumps(
+        {"status": "ok", "checks": {"db_ping": "ok", "state_configured": "ok"}}
+    ).encode()
+    _READYZ_FAIL = json.dumps(
+        {"status": "not_ready", "checks": {"db_ping": "fail: OperationalError"}}
+    ).encode()
 
     def _make_dual_urlopen(self, startupz_body, startupz_status, readyz_body, readyz_status):
         def fake_urlopen(req, timeout=None):
@@ -385,13 +453,19 @@ class TestP4StartupzReadyz:
             resp.__enter__ = MagicMock(return_value=resp)
             resp.__exit__ = MagicMock(return_value=False)
             return resp
+
         return fake_urlopen
 
     def test_success_both_probes_pass(self):
         urlopen = self._make_dual_urlopen(self._STARTUPZ_OK, 200, self._READYZ_OK, 200)
         result = _check_startupz_and_readyz(
-            8080, "/data", 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            "/data",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert result.passed
         assert result.predicate == "P4"
@@ -399,8 +473,13 @@ class TestP4StartupzReadyz:
     def test_failure_startupz_never_completes(self):
         urlopen = self._make_dual_urlopen(self._STARTUPZ_STARTING, 503, self._READYZ_OK, 200)
         result = _check_startupz_and_readyz(
-            8080, "/data", 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_exhausted_monotonic(),
+            8080,
+            "/data",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_exhausted_monotonic(),
         )
         assert not result.passed
         assert result.failure_shape == "P4_STARTUP_TIMEOUT"
@@ -410,8 +489,13 @@ class TestP4StartupzReadyz:
     def test_failure_readyz_db_ping_not_ok(self):
         urlopen = self._make_dual_urlopen(self._STARTUPZ_OK, 200, self._READYZ_FAIL, 503)
         result = _check_startupz_and_readyz(
-            8080, "/data", 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            "/data",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P4_DB_PING"
@@ -421,8 +505,13 @@ class TestP4StartupzReadyz:
     def test_failure_message_includes_data_dir_path(self):
         urlopen = self._make_dual_urlopen(self._STARTUPZ_OK, 200, self._READYZ_FAIL, 503)
         result = _check_startupz_and_readyz(
-            8080, "/var/mydata", 0.0, 30.0,
-            urlopen=urlopen, sleep=MagicMock(), monotonic=_fast_monotonic(0.0),
+            8080,
+            "/var/mydata",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            sleep=MagicMock(),
+            monotonic=_fast_monotonic(0.0),
         )
         assert "/var/mydata" in result.operator_message
 
@@ -445,8 +534,13 @@ class TestP4StartupzReadyz:
 
         times = [0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.5, 1.5, 2.0, 2.0, 2.5]
         result = _check_startupz_and_readyz(
-            8080, "/data", 0.0, 30.0,
-            urlopen=fake_urlopen, sleep=MagicMock(), monotonic=MagicMock(side_effect=times),
+            8080,
+            "/data",
+            0.0,
+            30.0,
+            urlopen=fake_urlopen,
+            sleep=MagicMock(),
+            monotonic=MagicMock(side_effect=times),
         )
         assert result.passed
         assert call_count[0] >= 3
@@ -457,7 +551,7 @@ class TestP4StartupzReadyz:
 
 class TestP5SpaAndQuickstart:
     _GOOD_SPA = (
-        b'<!DOCTYPE html><html><head><title>SLOP</title></head>'
+        b"<!DOCTYPE html><html><head><title>SLOP</title></head>"
         b'<body><div id="app"></div>'
         b'<script src="/assets/index-abc123.js"></script></body></html>'
     )
@@ -478,13 +572,18 @@ class TestP5SpaAndQuickstart:
             resp.__enter__ = MagicMock(return_value=resp)
             resp.__exit__ = MagicMock(return_value=False)
             return resp
+
         return fake_urlopen
 
     def test_success_spa_and_quickstart(self):
         urlopen = self._make_dual_urlopen(200, self._GOOD_SPA, 200, self._QS_OK)
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert result.passed
         assert result.predicate == "P5"
@@ -492,8 +591,12 @@ class TestP5SpaAndQuickstart:
     def test_failure_503_frontend_not_built(self):
         urlopen = self._make_dual_urlopen(503, self._FRONTEND_NOT_BUILT, 200, self._QS_OK)
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P5_FRONTEND_NOT_BUILT"
@@ -504,8 +607,12 @@ class TestP5SpaAndQuickstart:
         bad_spa = b'<html><body><div id="notapp"></div></body></html>'
         urlopen = self._make_dual_urlopen(200, bad_spa, 200, self._QS_OK)
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P5_SPA_WRONG_SIGNATURE"
@@ -514,8 +621,12 @@ class TestP5SpaAndQuickstart:
     def test_failure_quickstart_non200(self):
         urlopen = self._make_dual_urlopen(200, self._GOOD_SPA, 404, b"Not Found")
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P5_QUICKSTART_FAILED"
@@ -525,8 +636,12 @@ class TestP5SpaAndQuickstart:
     def test_failure_quickstart_not_json(self):
         urlopen = self._make_dual_urlopen(200, self._GOOD_SPA, 200, b"not-json")
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
         assert result.failure_shape == "P5_QUICKSTART_FAILED"
@@ -534,9 +649,14 @@ class TestP5SpaAndQuickstart:
     def test_failure_spa_unreachable(self):
         def fake_urlopen(req, timeout=None):
             raise urllib.error.URLError("connection refused")
+
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=fake_urlopen, monotonic=_fast_monotonic(0.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=fake_urlopen,
+            monotonic=_fast_monotonic(0.0),
         )
         assert not result.passed
 
@@ -546,8 +666,12 @@ class TestP5SpaAndQuickstart:
         # make _remaining() return 30.0 (not exhausted) and the test would pass
         # rather than return P5_BUDGET_EXHAUSTED.  Use a plain constant mock.
         result = _check_spa_and_quickstart(
-            8080, "/opt/ms", 0.0, 30.0,
-            urlopen=urlopen, monotonic=MagicMock(return_value=9999.0),
+            8080,
+            "/opt/ms",
+            0.0,
+            30.0,
+            urlopen=urlopen,
+            monotonic=MagicMock(return_value=9999.0),
         )
         assert not result.passed
         assert result.failure_shape == "P5_BUDGET_EXHAUSTED"
@@ -567,11 +691,16 @@ class TestSmokeTestOrchestration:
 
     def _make_pipeline_mocks(
         self,
-        p1_pass=True, p2_pass=True, p3_pass=True, p4_pass=True, p5_pass=True,
+        p1_pass=True,
+        p2_pass=True,
+        p3_pass=True,
+        p4_pass=True,
+        p5_pass=True,
     ):
         def _make_pred(predicate_name: str, passed: bool):
             return SmokeTestResult(
-                predicate=predicate_name, passed=passed,
+                predicate=predicate_name,
+                passed=passed,
                 failure_shape="" if passed else f"{predicate_name}_FAIL",
                 operator_message="" if passed else f"{predicate_name} failed",
                 diagnostic_command="",
@@ -603,7 +732,7 @@ class TestSmokeTestOrchestration:
         _STARTUP = json.dumps({"status": "ok", "startup_complete": True}).encode()
         _READYZ = json.dumps({"status": "ok", "checks": {"db_ping": "ok"}}).encode()
         _SPA = (
-            b'<html><head><title>SLOP</title></head>'
+            b"<html><head><title>SLOP</title></head>"
             b'<body><div id="app"></div>'
             b'<script src="/assets/index-abc.js"></script></body></html>'
         )
@@ -719,8 +848,11 @@ class TestMaxIterationGuard:
         run = MagicMock(return_value=_make_run_result("activating\n"))
         t0 = time.monotonic()
         result = _check_systemd_active(
-            0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=broken,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=broken,
         )
         elapsed = time.monotonic() - t0
         assert not result.passed
@@ -740,8 +872,12 @@ class TestMaxIterationGuard:
 
         t0 = time.monotonic()
         result = _check_port_bound(
-            8080, 0.0, 30.0,
-            run=run, sleep=MagicMock(), monotonic=broken,
+            8080,
+            0.0,
+            30.0,
+            run=run,
+            sleep=MagicMock(),
+            monotonic=broken,
         )
         elapsed = time.monotonic() - t0
         assert not result.passed

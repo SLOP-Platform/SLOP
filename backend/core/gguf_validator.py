@@ -236,19 +236,23 @@ def resolve_gguf_url(url_or_hf: str) -> str:
     if "huggingface.co" in url_or_hf and "/blob/" in url_or_hf:
         url_or_hf = url_or_hf.replace("/blob/", "/resolve/")
 
-    # Reject non-HTTP(S) schemes (e.g. file:, ftp:, custom) before download.
-    # url_or_hf is user-supplied, so an unvalidated scheme could read local
-    # files or hit unexpected handlers via urlopen.
-    if not url_or_hf.startswith(("http://", "https://")):
-        raise ValueError(f"Unsupported URL scheme: {url_or_hf!r}")
+    # Enforce https-only scheme before any network call.  file://, http://,
+    # ftp://, and custom schemes are rejected here — they can read local files
+    # or bypass TLS.  The S310 noqa on the urlopen call site is justified by
+    # this check: by the time urlopen is reached, the scheme is guaranteed https.
+    if not url_or_hf.startswith("https://"):
+        raise ValueError(
+            f"Unsupported URL scheme in {url_or_hf!r}. "
+            f"Only https:// URLs are accepted (use hf:// for HuggingFace)."
+        )
 
     return url_or_hf
 
 
 def _assert_safe_url(url: str) -> None:
-    """Raise ValueError if url is not http(s). Keeps urlopen call sites branch-free."""
-    if not url.startswith(("https://", "http://")):
-        raise ValueError(f"Refusing non-http(s) URL: {url!r}")
+    """Raise ValueError if url is not https. Keeps urlopen call sites branch-free."""
+    if not url.startswith("https://"):
+        raise ValueError(f"Refusing non-https URL: {url!r}")
 
 
 def download_gguf(
@@ -298,13 +302,13 @@ def download_gguf(
     dest_path = dest_dir / filename
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    _assert_safe_url(url)  # local invariant: scheme is http(s) before urlopen
+    _assert_safe_url(url)  # local invariant: scheme is https before urlopen
     try:
         headers = {"User-Agent": "SLOP/3.0"}
         if hf_token and "huggingface.co" in url:
             headers["Authorization"] = f"Bearer {hf_token}"
-        req = urllib.request.Request(url, headers=headers)  # noqa: S310  # nosec B310  # scheme asserted above
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310  # scheme asserted above
+        req = urllib.request.Request(url, headers=headers)  # noqa: S310  # nosec B310  # https enforced by resolve_gguf_url + _assert_safe_url
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310  # https enforced by resolve_gguf_url + _assert_safe_url
             total = int(resp.headers.get("Content-Length", 0)) or None
             downloaded = 0
             chunk_size = 1_048_576  # 1 MB chunks

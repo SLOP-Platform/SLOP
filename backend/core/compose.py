@@ -466,12 +466,17 @@ def _frag_volumes(
 
 
 def _frag_ports(web_port: int | None, host_port: int | None) -> list[str]:
-    """Assemble the `ports:` block. Empty list when either port is unset.
+    """Assemble the `ports:` block. Empty list when either port is unset or
+    when web_port is a system-reserved port.
 
-    The system-port guard is NOT applied here — _compute_host_port already
-    remaps the host side when web_port conflicts with a system port, so
-    host_port is always a safe, available port by the time this is called."""
-    if web_port and host_port:
+    Defense-in-depth: even though _compute_host_port (install path) also
+    guards against system ports, _frag_ports applies the guard independently
+    so that any caller that bypasses the install path (direct fragment build,
+    tests, future code paths) cannot accidentally bind a system port.
+
+    Traefik's own 80/443 bindings are NOT affected — build_traefik_fragment
+    uses hardcoded port strings and does not go through _frag_ports."""
+    if web_port and host_port and web_port not in _SYSTEM_PORTS:
         return [f"{host_port}:{web_port}"]
     return []
 

@@ -9,6 +9,7 @@ Coverage:
   TestRunRequired        — success paths (CompletedProcess + check_output)
   TestRunRequiredPassthrough — cwd, env, timeout forwarded to subprocess.run
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -29,20 +30,17 @@ from installer._run import (
 
 class TestMissingBinaryError:
     def test_filenotfound_raises_missing_binary_error(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("git")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("git")):
             with pytest.raises(MissingBinaryError):
                 run_required(["git", "--version"])
 
     def test_missing_binary_error_names_binary(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("apt-get")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("apt-get")):
             with pytest.raises(MissingBinaryError, match="apt-get"):
                 run_required(["apt-get", "update"])
 
     def test_missing_binary_error_message_contains_full_command(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("docker")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("docker")):
             with pytest.raises(MissingBinaryError, match="compose"):
                 run_required(["docker", "compose", "version"])
 
@@ -52,20 +50,23 @@ class TestMissingBinaryError:
 
 class TestRunTimeoutError:
     def test_timeout_expired_raises_run_timeout_error(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired(["git"], 5.0)):
+        with patch(
+            "installer._run.subprocess.run", side_effect=subprocess.TimeoutExpired(["git"], 5.0)
+        ):
             with pytest.raises(RunTimeoutError):
                 run_required(["git", "ls-remote"], timeout=5.0)
 
     def test_run_timeout_error_message_names_binary(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired(["curl"], 10.0)):
+        with patch(
+            "installer._run.subprocess.run", side_effect=subprocess.TimeoutExpired(["curl"], 10.0)
+        ):
             with pytest.raises(RunTimeoutError, match="curl"):
                 run_required(["curl", "https://example.com"], timeout=10.0)
 
     def test_run_timeout_error_stores_timeout(self):
-        with patch("installer._run.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired(["git"], 30.0)):
+        with patch(
+            "installer._run.subprocess.run", side_effect=subprocess.TimeoutExpired(["git"], 30.0)
+        ):
             try:
                 run_required(["git", "clone"], timeout=30.0)
             except RunTimeoutError as exc:

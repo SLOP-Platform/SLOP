@@ -10,6 +10,7 @@ Coverage:
   TestBuildFrontendNpmBuild     — npm run build called after ci; failure propagation
   TestBuildFrontendOrdering     — full call sequence and failure-halts-sequence
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +18,6 @@ from pathlib import Path
 import pytest
 
 from installer.frontend import (
-    FrontendError,
     NpmBuildError,
     NpmCiError,
     PackageJsonNotFoundError,
@@ -39,12 +39,12 @@ def _passing_kwargs(
     build_present: bool = False,
 ) -> dict:
     """Return build_frontend injectable kwargs for a default-success scenario."""
-    return dict(
-        package_json_exists=lambda frontend_dir: pkg_json_present,
-        build_exists=lambda static_dir: build_present,
-        run_npm_ci=_noop,
-        run_npm_build=_noop,
-    )
+    return {
+        "package_json_exists": lambda frontend_dir: pkg_json_present,
+        "build_exists": lambda static_dir: build_present,
+        "run_npm_ci": _noop,
+        "run_npm_build": _noop,
+    }
 
 
 # ── TestBuildFrontendPackageJson ──────────────────────────────────────────────
@@ -58,7 +58,7 @@ class TestBuildFrontendPackageJson:
 
     def test_missing_package_json_message_names_file(self):
         kwargs = _passing_kwargs(pkg_json_present=False)
-        with pytest.raises(PackageJsonNotFoundError, match="package.json"):
+        with pytest.raises(PackageJsonNotFoundError, match=r"package.json"):
             build_frontend("/some/dir", **kwargs)
 
     def test_missing_package_json_skips_npm_ci(self):
@@ -227,15 +227,16 @@ class TestNpmCiProbe:
 
     def test_raises_on_npm_absent(self, tmp_path):
         from unittest.mock import patch
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("npm")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("npm")):
             with pytest.raises(NpmCiError, match="npm is not on PATH"):
                 _run_npm_ci(frontend_dir)
 
     def test_raises_on_nonzero_returncode(self, tmp_path):
         from unittest.mock import patch, MagicMock
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
         fake = MagicMock(returncode=1, stdout="", stderr="ERESOLVE")
@@ -245,6 +246,7 @@ class TestNpmCiProbe:
 
     def test_success_does_not_raise(self, tmp_path):
         from unittest.mock import patch, MagicMock
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
         fake = MagicMock(returncode=0, stdout="", stderr="")
@@ -264,15 +266,16 @@ class TestNpmBuildProbe:
 
     def test_raises_on_npm_absent(self, tmp_path):
         from unittest.mock import patch
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
-        with patch("installer._run.subprocess.run",
-                   side_effect=FileNotFoundError("npm")):
+        with patch("installer._run.subprocess.run", side_effect=FileNotFoundError("npm")):
             with pytest.raises(NpmBuildError, match="npm is not on PATH"):
                 _run_npm_build(frontend_dir)
 
     def test_raises_on_nonzero_returncode(self, tmp_path):
         from unittest.mock import patch, MagicMock
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
         fake = MagicMock(returncode=1, stdout="", stderr="Build failed")
@@ -282,6 +285,7 @@ class TestNpmBuildProbe:
 
     def test_success_does_not_raise(self, tmp_path):
         from unittest.mock import patch, MagicMock
+
         frontend_dir = tmp_path / "frontend"
         frontend_dir.mkdir()
         fake = MagicMock(returncode=0, stdout="", stderr="")

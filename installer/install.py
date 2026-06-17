@@ -1,20 +1,20 @@
-"""installer/install.py — existing-install detection per ADR 0013 §4 + ADR 0015 §7.
+"""installer/install.py - existing-install detection per ADR 0013 §4 + ADR 0015 §7.
 
 detect_existing_install() is the single point of truth for the five-state
-machine (S1–S5). Sub-task 3.2.c extends S2 to distinguish S2a (healthy) from
+machine (S1-S5). Sub-task 3.2.c extends S2 to distinguish S2a (healthy) from
 S2b (pipeline complete but smoke failed) per ADR 0015 §7.
 
 The function is pure: reads files, does not write. Callers decide whether to
 proceed based on ExistingInstallDetection.state and .forceable.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from installer.state import (
-    STATE_FILE_NAME,
     StateFile,
     StateFileCorruptedError,
     StateFileNewerSchemaError,
@@ -33,10 +33,11 @@ class ExistingInstallDetection:
     forceable: True if --force can override; False for S4 (corrupted_state)
     existing: the parsed StateFile if present; None for clean/partial/corrupted
     """
+
     state: str
     message: str
     forceable: bool
-    existing: Optional[StateFile]
+    existing: StateFile | None
 
 
 def detect_existing_install(
@@ -66,7 +67,7 @@ def detect_existing_install(
       S5:  state file absent, install dir exists (v4.x or hand-rolled)
       S1/clean: no signals — proceed
     """
-    existing: Optional[StateFile] = None
+    existing: StateFile | None = None
 
     try:
         existing = state_read(state_file_path)

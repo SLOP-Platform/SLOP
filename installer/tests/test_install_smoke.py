@@ -9,11 +9,11 @@ Coverage:
   TestSmokeStopAfter  — env var absent/set; each stop point returns 0 and
                         skips downstream steps; unknown step name ignored
 """
+
 from __future__ import annotations
 
 import argparse
 
-import pytest
 
 from installer.main import run_install_pipeline
 from installer.smoke import SmokeTestResult
@@ -35,14 +35,14 @@ def _ok_prereqs(*_args, **_kwargs):
 
 
 def _make_args(**overrides):
-    defaults = dict(
-        install_dir="/opt/ms",
-        data_dir="/var/lib/ms",
-        port=8080,
-        install_docker="yes",
-        force=False,
-        version_ref=None,
-    )
+    defaults = {
+        "install_dir": "/opt/ms",
+        "data_dir": "/var/lib/ms",
+        "port": 8080,
+        "install_docker": "yes",
+        "force": False,
+        "version_ref": None,
+    }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
@@ -63,8 +63,11 @@ def _mocks(**overrides) -> dict:
         "frontend_build": lambda d: None,
         "service_install": lambda d, dd: None,
         "smoke_test": lambda p, **kw: SmokeTestResult(
-            predicate="all", passed=True,
-            failure_shape="", operator_message="", diagnostic_command="",
+            predicate="all",
+            passed=True,
+            failure_shape="",
+            operator_message="",
+            diagnostic_command="",
         ),
         "resolve_hostname": lambda: "localhost",
         "post_install_write": lambda content, install_dir, **kw: None,
