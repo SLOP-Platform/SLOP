@@ -19,6 +19,9 @@ on:
   schedule:
     # Weekly — taint analysis is slow.
     - cron: '0 4 * * 0'
+  # Allow on-demand runs (e.g. to scan after a non-backend change, or to
+  # re-run the analysis without waiting for the weekly schedule).
+  workflow_dispatch:
 
 jobs:
   analyze:
