@@ -71,6 +71,32 @@ export default [
     },
   },
   {
+    // Structural guard (CL-01 STREAM E / C3): ban raw `fetch('/api/...reset...')`
+    // in .vue files. Raw fetch to the platform reset endpoints silently omits the
+    // required confirm token (?confirm=RESET_PLATFORM / ?confirm=DESTROY_ALL_DATA),
+    // producing a silent 400 in production. Reset MUST go through the typed client
+    // (`platform.reset()` / `platform.resetFull()` in src/api/client.ts), which
+    // always attaches the token. This prevents the bug class from recurring.
+    files: ["src/**/*.vue"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.name='fetch'] > Literal[value=/\\/api\\/.*reset/]",
+          message:
+            "Do not call fetch('/api/.../reset') directly — use the typed client (platform.reset() / platform.resetFull()) so the required ?confirm token is attached. Raw fetch omits it → silent 400.",
+        },
+        {
+          selector:
+            "CallExpression[callee.name='fetch'] > TemplateLiteral:has(TemplateElement[value.raw=/\\/api\\/.*reset/])",
+          message:
+            "Do not call fetch(`/api/.../reset`) directly — use the typed client (platform.reset() / platform.resetFull()) so the required ?confirm token is attached. Raw fetch omits it → silent 400.",
+        },
+      ],
+    },
+  },
+  {
     ignores: ["dist/**", "node_modules/**", "*.min.js"],
   },
 ];

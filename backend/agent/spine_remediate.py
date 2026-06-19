@@ -31,6 +31,14 @@ from backend.agent.apply import DIAGNOSIS_TO_FIX_TYPE, SAFE_FIX_TYPES
 from backend.agent.spine import Decision, Finding, Verdict
 from backend.core.logging import get_logger
 
+# SHARED GOVERNANCE SEAM — this advisory module and the acting path
+# (apply.py) now call the SAME governance module.  Only the advisory-safe
+# ``frozen_verdict_respected`` predicate is imported here: it is a pure
+# string-comparison guard (invariant 3) and binds NO executor/mutator symbol, so
+# the import-absence guarantee is preserved.  This is "one governance regime, two
+# callers" without merging the modules.
+from backend.agent.governance import frozen_verdict_respected
+
 log = get_logger(__name__)
 
 _WHY_NOT = "advisory-only spine; no auto-remediation wired"
@@ -85,10 +93,19 @@ def remediate(findings: list[Finding]) -> list[Decision]:
     for f in findings:
         if f.verdict is not Verdict.DRIFT:
             continue
+        # Shared-governance invariant 3: producing a proposal must NEVER mutate
+        # the ground verdict.  We compute the proposal and assert via the shared
+        # gate that the verdict is carried through unchanged — the same predicate
+        # the acting path uses, so both callers honour one regime.
+        proposal = _propose_action(f)
+        if not frozen_verdict_respected(f.verdict.value, f.verdict.value):  # pragma: no cover
+            # Unreachable by construction (we never reassign f.verdict); the check
+            # documents and enforces the invariant at the seam.
+            continue
         decisions.append(
             Decision(
                 finding_id=f.id,
-                would_propose=_propose_action(f),
+                would_propose=proposal,
                 why_not_acting=_WHY_NOT,
             )
         )

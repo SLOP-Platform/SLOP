@@ -721,6 +721,90 @@
             </div>
           </div>
         </section>
+
+        <!-- Pre-approval policy (N5 — tier × scope) -->
+        <section class="card mb-3">
+          <div class="card-header">
+            <div class="font-semibold text-sm">
+              Pre-Approval Policy
+            </div>
+            <div class="text-xs text-slate-400 mt-0.5">
+              Decide which risk tiers the agent may act on WITHOUT asking, per app
+            </div>
+          </div>
+          <div class="card-body space-y-4">
+            <div class="rounded-lg bg-amber-50 border border-amber-100 p-3 text-xs text-amber-800">
+              <strong>Tiers by blast radius:</strong>
+              <strong> T0 Investigate</strong> — read-only (always on).
+              <strong> T1 Reversible</strong>, <strong>T2 Recoverable</strong> — opt-in.
+              <strong> T3 Irreversible</strong> — always asks; <em>cannot</em> be pre-approved.
+            </div>
+
+            <div
+              v-if="preApproval"
+              class="space-y-4"
+            >
+              <!-- Global per-tier defaults -->
+              <div>
+                <div class="text-xs font-semibold text-slate-500 uppercase mb-2">
+                  Global defaults
+                </div>
+                <div class="space-y-2">
+                  <div
+                    v-for="t in preApproval.tiers"
+                    :key="t.tier"
+                    class="flex items-center justify-between"
+                  >
+                    <div>
+                      <span class="text-sm font-medium text-slate-700">T{{ t.tier }} — {{ t.name }}</span>
+                      <span
+                        v-if="!t.pre_approvable"
+                        class="ml-2 text-xs text-red-500"
+                      >always asks</span>
+                    </div>
+                    <button
+                      :disabled="!t.pre_approvable"
+                      :class="['text-xs px-3 py-1 rounded-full border font-medium transition-colors',
+                               !t.pre_approvable ? 'border-slate-200 text-slate-300 cursor-not-allowed'
+                               : t.global_pre_approved ? 'bg-emerald-500 border-emerald-500 text-white'
+                                 : 'border-slate-200 text-slate-500 hover:border-slate-300']"
+                      @click="t.pre_approvable && setTierDefault(t.tier, !t.global_pre_approved)"
+                    >
+                      {{ t.global_pre_approved ? 'Pre-approved' : 'Ask first' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Per-app overrides (read-out of the effective policy) -->
+              <div v-if="Object.keys(preApproval.per_app || {}).length">
+                <div class="text-xs font-semibold text-slate-500 uppercase mb-2">
+                  Per-app overrides
+                </div>
+                <div
+                  v-for="(over, app) in preApproval.per_app"
+                  :key="app"
+                  class="flex items-center justify-between text-xs text-slate-600 py-1"
+                >
+                  <span class="font-medium">{{ app }}</span>
+                  <span>{{ Object.entries(over).map(([k, v]) => `T${k}:${v ? 'pre-approved' : 'ask'}`).join(', ') }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else
+              class="text-sm text-slate-400 text-center py-3"
+            >
+              <button
+                class="btn-secondary btn-sm"
+                @click="loadPreApproval"
+              >
+                Load pre-approval policy
+              </button>
+            </div>
+          </div>
+        </section>
       </div><!-- /ai -->
 
       <div v-show="activeTab === 'system'">
@@ -1934,6 +2018,7 @@ const savingPuid = ref(false)
 const dockerSocket = ref('/var/run/docker.sock')
 const savingSocket = ref(false)
 const safetyLevels = ref<Record<string, any> | null>(null)
+const preApproval = ref<{ tiers: any[]; per_app: Record<string, any>; note?: string } | null>(null)
 const ghosts = ref<any>(null)
 const loadingGhosts = ref(false)
 const cloudLLM = ref<any>(null)
@@ -2265,6 +2350,36 @@ async function setSafetyLevel(actionType: string, level: string) {
     }
   } catch {
     toast.error('Could not update safety level.')
+  }
+}
+
+async function loadPreApproval() {
+  try {
+    const res = await fetch('/api/v1/settings/preapproval')
+    preApproval.value = await res.json()
+  } catch {
+    toast.error('Could not load pre-approval policy.')
+  }
+}
+
+async function setTierDefault(tier: number, preApproved: boolean) {
+  try {
+    const res = await fetch('/api/v1/settings/preapproval/tier', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier, pre_approved: preApproved }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      toast.error(err.detail || 'Could not update tier policy.')
+      return
+    }
+    preApproval.value = await res.json()
+    if (preApproved) {
+      toast.warn(`Tier T${tier} pre-approved — the agent may act on these without asking.`)
+    }
+  } catch {
+    toast.error('Could not update tier policy.')
   }
 }
 

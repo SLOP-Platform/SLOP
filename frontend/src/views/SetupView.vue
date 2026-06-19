@@ -2041,7 +2041,9 @@ async function runWizard() {
     const statusRes = await fetch('/api/v1/platform/status')
     const statusData = await statusRes.json()
     if (statusData.status === 'ready') {
-      await fetch('/api/v1/platform/reset', { method: 'POST' })
+      // Route through the typed client so the required ?confirm=RESET_PLATFORM
+      // token is always sent (raw fetch omitted it → silent 400 in production).
+      await platformApi.reset()
       await new Promise(r => setTimeout(r, 500))
     }
   } catch { /* intentional: non-fatal */ }
@@ -2632,7 +2634,9 @@ async function doFullReset() {
   showReset.value = false
   platformStore.clearStatus()  // sidebar clears instantly
   try {
-    await fetch('/api/v1/platform/reset/full', { method: 'POST' })
+    // Typed client sends the required ?confirm=DESTROY_ALL_DATA token
+    // (raw fetch omitted it → silent 400 in production).
+    await platformApi.resetFull()
     await platformStore.fetchStatus()
     forceSetup.value = true
     currentStage.value = 0

@@ -523,6 +523,13 @@ from backend.api import updates as updates_router  # noqa: E402
 _mount(updates_router, "updates", "Updates")
 
 
+# N6 — operator conversational control surface. text → intent → registry action
+# (dispatched ONLY via registry.invoke_action / the shared governance gate).
+from backend.api import chat as chat_router  # noqa: E402
+
+_mount(chat_router, "chat", "Chat")
+
+
 # ── System health endpoint ────────────────────────────────────────────────
 
 

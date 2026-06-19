@@ -231,6 +231,8 @@ export const platform = {
   wizardRun: (data: Record<string, unknown>) =>
     request<WizardRunResponse>('/platform/wizard/run', { method: 'POST', body: JSON.stringify(data) }, 180_000),
   reset: () => request('/platform/reset?confirm=RESET_PLATFORM', { method: 'POST' }),
+  // Full factory reset — backend requires ?confirm=DESTROY_ALL_DATA (platform.py /reset/full).
+  resetFull: () => request('/platform/reset/full?confirm=DESTROY_ALL_DATA', { method: 'POST' }),
 }
 
 // ── Apps ───────────────────────────────────────────────────────────────────

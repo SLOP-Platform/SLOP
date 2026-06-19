@@ -430,6 +430,11 @@ async def _llm_diagnose(
     try:
         from backend.agent.classifier import classify_offline as _cls_offline
         from backend.agent.classifier import compute_signature_hash as _compute_sig
+        from backend.agent.classifier import (
+            LEGACY_CACHE_CONFIDENCE as _LEGACY_CONF,
+            current_image_digest as _cur_digest,
+            evaluate_learned_confidence as _eval_conf,
+        )
         from backend.core.state import StateDB as _SDB
 
         _err_class = _cls_offline(check_result.message)
@@ -443,16 +448,24 @@ async def _llm_diagnose(
             ).fetchone()
         if _cached:
             _cached_fix = dict(_cached)["suggested_fix"]
+            # Evidence-ranked: derive an outcome-weighted, image_digest-aware
+            # score (demote-on-failure) and log it to the shadow gate. In shadow
+            # mode the legacy 0.95 still drives behaviour; the enforce flag
+            # promotes the derived score. The health path has a running
+            # container, so resolve its digest for version-aware reconciliation.
+            _digest = _cur_digest(getattr(check_result, "container_name", None) or app_key)
+            _learned = _eval_conf(app_key, _sig_hash, image_digest=_digest)
+            _conf = _learned.score if _learned.enforce else _LEGACY_CONF
             _persist_pending_fix(
                 app_key,
                 check_result.check_name,
                 "manual",
                 check_result.message,
                 _cached_fix,
-                0.95,
+                _conf,
                 "cache",
             )
-            return f"[CACHED | confidence=95%] {check_result.message[:80]} — {_cached_fix}"
+            return f"[CACHED | confidence={_conf:.0%}] {check_result.message[:80]} — {_cached_fix}"
     except Exception:  # noqa: S110  # best-effort cache lookup; fall through to LLM if DB unavailable
         pass
 

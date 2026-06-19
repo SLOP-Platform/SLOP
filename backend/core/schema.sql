@@ -6,6 +6,19 @@
 -- The authoritative source of schema changes is the numbered files in migrations/.
 -- See docs/cleanup/01_migrations_design.md for the rationale.
 
+CREATE TABLE IF NOT EXISTS agent_action_audit (
+    id          INTEGER  PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT     NOT NULL,
+    ts          INTEGER  NOT NULL,
+    trigger     TEXT     NOT NULL CHECK(trigger IN ('scheduler','chat','api','unknown')),
+    action_id   TEXT     NOT NULL,
+    app_key     TEXT     NOT NULL,
+    tier        INTEGER  NOT NULL CHECK(tier BETWEEN 0 AND 3),
+    status      TEXT     NOT NULL CHECK(status IN ('queued','ok','failed','rolled_back')),
+    outcome_msg TEXT,
+    rollback    INTEGER  NOT NULL DEFAULT 0 CHECK(rollback IN (0, 1))
+);
+
 CREATE TABLE IF NOT EXISTS app_dependencies (
     id              INTEGER PRIMARY KEY,
     app_id          INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
@@ -98,7 +111,7 @@ CREATE TABLE IF NOT EXISTS fix_attempts (
     fix_type   TEXT    NOT NULL,
     outcome    TEXT    NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
+, image_digest TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE IF NOT EXISTS fix_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +122,7 @@ CREATE TABLE IF NOT EXISTS fix_history (
     outcome     TEXT NOT NULL DEFAULT 'pending',  -- pending | success | failure
     thumbs      INTEGER DEFAULT NULL,             -- 1=up, -1=down, NULL=no feedback
     created_at  INTEGER NOT NULL
-, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', signature_hash TEXT NOT NULL DEFAULT '');
+, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', signature_hash TEXT NOT NULL DEFAULT '', image_digest TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE IF NOT EXISTS health_check_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,6 +191,21 @@ CREATE TABLE IF NOT EXISTS jobs (
     payload     TEXT    NOT NULL DEFAULT '{}',   -- JSON
     created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at  INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+CREATE TABLE IF NOT EXISTS learning_shadow_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_key         TEXT    NOT NULL,
+    signature_hash  TEXT    NOT NULL DEFAULT '',
+    image_digest    TEXT    NOT NULL DEFAULT '',
+    learned_score   REAL    NOT NULL,           -- derived, outcome-weighted
+    legacy_score    REAL    NOT NULL,           -- the flat 0.95 it replaces
+    sample_size     INTEGER NOT NULL DEFAULT 0, -- evidence count behind the score
+    success_count   INTEGER NOT NULL DEFAULT 0,
+    failure_count   INTEGER NOT NULL DEFAULT 0,
+    digest_match    INTEGER NOT NULL DEFAULT 0, -- 1 iff evidence shares this digest
+    enforced        INTEGER NOT NULL DEFAULT 0, -- 1 iff learned score drove behaviour
+    created_at      INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
 CREATE TABLE IF NOT EXISTS llm_model_registry (
@@ -419,6 +447,12 @@ CREATE TABLE IF NOT EXISTS wiring (
     UNIQUE (source_app_id, target_app_id, wire_type)
 );
 
+CREATE INDEX IF NOT EXISTS idx_agent_audit_app_key ON agent_action_audit (app_key, ts DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_audit_run_id  ON agent_action_audit (run_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_audit_ts      ON agent_action_audit (ts DESC);
+
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_ts     ON audit_log(ts DESC);
@@ -436,6 +470,9 @@ CREATE INDEX IF NOT EXISTS idx_fix_history_class_app ON fix_history(diagnosis_cl
 
 CREATE INDEX IF NOT EXISTS idx_fix_history_error ON fix_history (error_type, outcome);
 
+CREATE INDEX IF NOT EXISTS idx_fix_history_sig_digest
+    ON fix_history (signature_hash, image_digest, outcome, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_fix_history_signature ON fix_history(signature_hash);
 
 CREATE INDEX IF NOT EXISTS idx_hch_key ON health_check_history (subject_key, check_name, checked_at);
@@ -445,6 +482,9 @@ CREATE INDEX IF NOT EXISTS idx_hch_status ON health_check_history (status, check
 CREATE INDEX IF NOT EXISTS idx_jobs_kind ON jobs (kind);
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);
+
+CREATE INDEX IF NOT EXISTS idx_learning_shadow_sig
+    ON learning_shadow_log (signature_hash, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_op_steps_key ON operation_steps(op_key, created_at);
 

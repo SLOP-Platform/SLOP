@@ -11,7 +11,6 @@ import dataclasses
 import datetime
 import os
 import shutil
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -55,8 +54,8 @@ def _run_parallel(fn_a: Callable, fn_b: Callable) -> None:
     rather than being abandoned mid-way).
 
     Thread safety: Python's list.append is GIL-protected; _errors is safe to
-    write from multiple threads.  subprocess.run inside each callable is also
-    thread-safe (each call creates its own child process with its own fds).
+    write from multiple threads.  The external command inside each callable is
+    also thread-safe (each call creates its own child process with its own fds).
     """
     _errors: list[BaseException] = []
 
@@ -402,11 +401,12 @@ def _cmd_clean(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
-        return subprocess.run(["systemctl", "status", "slop.service"], timeout=10).returncode
-    except FileNotFoundError:
+        result = _run_mod.run_required(["systemctl", "status", "slop.service"], timeout=10)
+        return result.returncode
+    except _run_mod.MissingBinaryError:
         print("not available")
         return 1
-    except subprocess.TimeoutExpired:
+    except _run_mod.RunTimeoutError:
         print("timeout")
         return 1
 

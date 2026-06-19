@@ -22,10 +22,11 @@ import os
 import platform
 import shutil
 import socket
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
+
+from installer._run import run_required
 
 _MIN_KERNEL: tuple[int, int] = (5, 10)
 _MIN_DISK_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GiB
@@ -75,10 +76,8 @@ def _get_docker_version() -> str | None:
     if shutil.which("docker") is None:
         return None
     try:
-        r = subprocess.run(
+        r = run_required(
             ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         if r.returncode != 0:
@@ -93,10 +92,8 @@ def _has_compose_plugin() -> bool:
     if shutil.which("docker") is None:
         return False
     try:
-        r = subprocess.run(
+        r = run_required(
             ["docker", "compose", "version"],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         return r.returncode == 0

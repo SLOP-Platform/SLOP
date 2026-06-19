@@ -31,27 +31,26 @@ from typing import Any
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.agent.backoff import attempt_allowed, record_attempt
+from backend.agent.registry import diagnosis_to_fix_type, safe_fix_types
+from backend.agent.safe_update import safe_update_container
 from backend.agent.verify import verify_container_healthy
 
 log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Taxonomy mappings
+# Taxonomy mappings — REGISTRY-DERIVED (N1).
 # ---------------------------------------------------------------------------
+#
+# These two names are now DERIVED from the Action Registry
+# (``backend.agent.registry``) so the taxonomy can never drift from the
+# registry. They remain plain dict/set objects exported by name, so
+# ``spine_remediate`` still imports them as PURE DATA (the import-absence test
+# stays green — registry's metadata layer imports no executor). The W1 meta-gate
+# test asserts every executable handler appears in the registry with a tier.
+DIAGNOSIS_TO_FIX_TYPE: dict[str, str] = diagnosis_to_fix_type()
 
-# Derive fix_type from the stored diagnosis_class.
-# Only diagnosis classes that map here are candidates for auto-apply.
-DIAGNOSIS_TO_FIX_TYPE: dict[str, str] = {
-    "CRASH_LOOP": "restart_container",
-    "HEALTHCHECK_TIMEOUT": "restart_container",
-    "DEPENDENCY_DOWN": "restart_container",
-    "IMAGE_PULL_FAIL": "repull_restart",
-    "UNRESOLVED_PLACEHOLDER": "env_var_format",
-}
-
-# The set of fix types this tier will execute without human approval.
-# All other fix types → 422 (requires human review).
-SAFE_FIX_TYPES: set[str] = {"restart_container", "repull_restart", "env_var_format"}
+# The set of fix types this tier knows about. Derived from the registry.
+SAFE_FIX_TYPES: set[str] = safe_fix_types()
 
 ApplyResult = dict[str, Any]  # {"ok": bool, "message": str, "fix_type": str}
 
@@ -251,29 +250,61 @@ def _restart_container(app_key: str) -> ApplyResult:
 
 
 def _repull_restart(app_key: str, metadata: dict[str, Any]) -> ApplyResult:
-    """Run `docker pull <image>` then `docker restart <app_key>`.
+    """Re-pull the image and restart, WITH auto-rollback on failed verify (N3).
 
-    Image defaults to app_key if not found in metadata.
-    Pull timeout: 120 s.  Restart timeout: 30 s.
+    Previously this was a blind ``docker pull`` + ``docker restart`` with no
+    recovery: a bad new image left the container broken. It now delegates to
+    ``safe_update.safe_update_container`` — capture current image id → pull →
+    restart → verify → re-tag prior image + restart on failure — wiring the
+    existing (but orphaned) rollback leg into the restart/repull path.
+
+    Image defaults to app_key if not found in metadata. ``safe_update_container``
+    never raises for an expected docker failure; it returns a structured result
+    which we normalise to the ApplyResult shape.
     """
     image = metadata.get("image") or app_key
-    subprocess.run(
-        ["docker", "pull", image],
-        check=True,
-        timeout=120,
-        capture_output=True,
+    res = safe_update_container(app_key, image)
+    log.info(
+        "_repull_restart: %s safe-update to %s ok=%s rolled_back=%s",
+        app_key,
+        image,
+        res.get("ok"),
+        res.get("rolled_back"),
     )
+    return {
+        "ok": bool(res.get("ok")),
+        "message": str(res.get("message", "")),
+        "fix_type": "repull_restart",
+        "rolled_back": bool(res.get("rolled_back", False)),
+    }
+
+
+def _restart_managed_service(app_key: str, params: dict[str, Any]) -> ApplyResult:
+    """Restart a managed service unit (N3 — T2 recoverable).
+
+    The managed-service surface in SLOP is the per-app container, so a safe
+    restart of a managed service is a VERIFIED container restart on the SAME
+    image. A restart-in-place cannot change the image, so there is no image to
+    roll back: the recoverability requirement for this T2 action is satisfied by
+    post-restart health verification (a failed verify is reported, not silently
+    swallowed), and the IMAGE rollback leg is wired into ``repull_restart`` where
+    an image actually changes.
+
+    Returns the ApplyResult shape. Raises CalledProcessError / TimeoutExpired if
+    the docker restart itself fails (caller records the failure).
+    """
     subprocess.run(
         ["docker", "restart", app_key],
         check=True,
         timeout=30,
         capture_output=True,
     )
-    log.info("_repull_restart: %s re-pulled (%s) and restarted", app_key, image)
+    healthy, summary = verify_container_healthy(app_key)
+    log.info("_restart_managed_service: %s restarted; healthy=%s; %s", app_key, healthy, summary)
     return {
-        "ok": True,
-        "message": "Image re-pulled and container restarted",
-        "fix_type": "repull_restart",
+        "ok": bool(healthy),
+        "message": f"managed service restarted; {summary}",
+        "fix_type": "restart_managed_service",
     }
 
 

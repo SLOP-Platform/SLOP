@@ -86,8 +86,10 @@ def _ensure_table(db: Any) -> None:
 
 
 def _get_phases(db: Any) -> list[dict[str, Any]]:
+    # dict(r): db.execute() yields raw sqlite3.Row objects, which have no .get();
+    # convert so the row.get(...) lookups below work when a phase row exists.
     rows = {
-        r["phase"]: r
+        r["phase"]: dict(r)
         for r in db.execute("SELECT phase, status, completed_at FROM quickstart_phases").fetchall()
     }
     result = []

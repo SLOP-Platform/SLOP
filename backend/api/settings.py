@@ -558,6 +558,80 @@ def update_ai_safety(payload: SafetyUpdate) -> dict[str, Any]:
     return {"ok": True, "action_type": payload.action_type, "level": payload.level}
 
 
+# ── Pre-approval policy (N5 — tier x scope) ──────────────────────────────────
+
+
+@router.get("/preapproval")
+def get_preapproval_policy() -> dict[str, Any]:
+    """Return the effective tier x scope pre-approval policy (operational plan §W5).
+
+    Surfaces the per-tier global defaults, per-app overrides, and the immutable fact
+    that T3 (irreversible/always-ask) can never be pre-approved (safety invariant 8).
+    """
+    from backend.agent.policy import effective_policy_view
+
+    return effective_policy_view()
+
+
+class TierDefaultUpdate(BaseModel):
+    tier: int = Field(..., ge=0, le=3)
+    pre_approved: bool
+
+
+@router.put("/preapproval/tier")
+def update_preapproval_tier(payload: TierDefaultUpdate) -> dict[str, Any]:
+    """Set the GLOBAL pre-approval default for a tier.
+
+    Refuses T3 (always-ask) — no toggle can pre-approve an irreversible action.
+    """
+    from backend.agent.policy import set_tier_default
+    from backend.agent.types import ActionTier
+    from fastapi import HTTPException
+
+    try:
+        set_tier_default(ActionTier.from_value(payload.tier), payload.pre_approved)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    from backend.agent.policy import effective_policy_view
+
+    return effective_policy_view()
+
+
+class AppOverrideUpdate(BaseModel):
+    app_key: str
+    tier: int = Field(..., ge=0, le=3)
+    pre_approved: bool
+
+
+@router.put("/preapproval/app")
+def update_preapproval_app(payload: AppOverrideUpdate) -> dict[str, Any]:
+    """Set a PER-APP pre-approval override for (app_key, tier).
+
+    Per-app blast-radius scoping (invariant 6). Refuses T3.
+    """
+    from backend.agent.policy import set_app_override
+    from backend.agent.types import ActionTier
+    from fastapi import HTTPException
+
+    try:
+        set_app_override(payload.app_key, ActionTier.from_value(payload.tier), payload.pre_approved)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    from backend.agent.policy import effective_policy_view
+
+    return effective_policy_view()
+
+
+@router.delete("/preapproval/app/{app_key}")
+def clear_preapproval_app(app_key: str, tier: int | None = None) -> dict[str, Any]:
+    """Remove a per-app override — one tier (``?tier=N``) or the whole app."""
+    from backend.agent.policy import clear_app_override, effective_policy_view
+    from backend.agent.types import ActionTier
+
+    clear_app_override(app_key, ActionTier.from_value(tier) if tier is not None else None)
+    return effective_policy_view()
+
+
 # ── Cloud LLM settings ──────────────────────────────────────────────────────
 
 

@@ -1299,7 +1299,12 @@ async function confirmInstall() {
     const es = new EventSource(`/api/v1/apps/${key}/install/stream`)
     _activeEs = es
 
-    const timeout = setTimeout(() => {
+    // 5-minute (300_000 ms) install poll timeout. On expiry the UI must surface
+    // the failure (installError + "timed out") and reset the progress bar
+    // (stopInstallProgress) — never silently stop, or the user is left staring
+    // at a stuck progress bar with no error.
+    const INSTALL_TIMEOUT_MS = 300_000
+    const onInstallTimeout = () => {
       es.close(); _activeEs = null
       if (installing.value === key) {
         installing.value = null
@@ -1307,7 +1312,8 @@ async function confirmInstall() {
         stopInstallProgress()
         toast.error(`Install timed out for ${key}.`, installError.value ?? undefined, 8000)
       }
-    }, 300_000)
+    }
+    const timeout = setTimeout(onInstallTimeout, INSTALL_TIMEOUT_MS)
 
     es.onmessage = (event) => {
       const step = JSON.parse(event.data)

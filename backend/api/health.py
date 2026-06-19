@@ -2,11 +2,14 @@
 
 Health monitoring API routes.
 
-GET  /api/health/status          — last health run summary
-GET  /api/health/apps            — all app health check results
-GET  /api/health/apps/{key}      — single app health
-POST /api/health/run             — trigger a health cycle immediately
-GET  /api/health/llm-agent       — LLM agent status
+GET  /api/health/status              — last health run summary
+GET  /api/health/apps                — all app health check results
+GET  /api/health/apps/{key}          — single app health
+POST /api/health/run                 — trigger a health cycle immediately
+GET  /api/health/llm-agent           — LLM agent status
+POST /api/health/scheduler/pause — engage agent kill-switch
+POST /api/health/scheduler/unpause   — release agent kill-switch
+GET  /api/health/agent-audit         — recent agent action audit rows (#978)
 """
 
 from __future__ import annotations
@@ -17,12 +20,13 @@ from typing import Any
 
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.api.auth import Scope, require_scope
 from backend.api.rate_limit import limiter
 from backend.core.logging import get_logger
-from backend.core.state import StateDB
+from backend.core.state import StateDB, is_scheduler_paused, set_scheduler_paused
 from backend.health.checker import _llm_state, run_health_cycle
 
 log = get_logger(__name__)
@@ -402,6 +406,7 @@ def get_scheduler_status() -> dict[str, Any]:
         **status,
         "last_cycle_at": last_ts,
         "last_cycle_summary": summary,
+        "kill_switch_engaged": is_scheduler_paused(),
     }
 
 
@@ -414,14 +419,84 @@ def get_probe_failures(request: Request) -> dict[str, Any]:
 
 
 @router.post("/scheduler/pause", tags=["Health"])
-def pause_scheduler() -> dict[str, Any]:
-    """Temporarily pause the health scheduler.
-    Useful when running maintenance that would produce false alarms.
-    """
-    from backend.health.scheduler import stop_scheduler
+def pause_scheduler(
+    _auth: Scope = Depends(require_scope(Scope.ACT)),
+) -> dict[str, Any]:
+    """Engage the agent kill-switch — pause all autonomous scheduler mutations.
 
-    stop_scheduler()
-    return {"ok": True, "message": "Health scheduler paused. Restart the API to resume."}
+    The health-check loop continues to run and report findings; only
+    autonomous fix actions are suppressed until ``POST /scheduler/unpause``.
+    The flag resets to False on process restart (intentional — a paused
+    scheduler that survives a restart without operator awareness is a footgun).
+
+    Requires the ACT control-plane scope (``SLOP_CONTROL_PLANE_TOKEN`` or
+    ``control_plane_token`` setting).  When no token is configured the
+    endpoint returns 403 (fail-closed — never silently allow a kill-switch
+    without an explicit credential).
+    """
+    try:
+        set_scheduler_paused(True)
+    except Exception as e:  # pragma: no cover - flag setter is in-memory, but never 500 bare
+        raise HTTPException(status_code=500, detail=f"failed to engage kill-switch: {e}") from e
+    log.info("scheduler kill-switch ENGAGED via API")
+    return {
+        "ok": True,
+        "paused": True,
+        "message": (
+            "Agent kill-switch engaged. Autonomous mutations are suppressed; "
+            "health checks continue. POST /scheduler/unpause to resume."
+        ),
+    }
+
+
+@router.post("/scheduler/unpause", tags=["Health"])
+def unpause_scheduler(
+    _auth: Scope = Depends(require_scope(Scope.ACT)),
+) -> dict[str, Any]:
+    """Release the agent kill-switch — allow autonomous scheduler mutations again.
+
+    Requires the ACT control-plane scope.  No-op if the scheduler is not
+    currently paused.
+    """
+    try:
+        was_paused = is_scheduler_paused()
+        set_scheduler_paused(False)
+    except Exception as e:  # pragma: no cover - flag setter is in-memory, but never 500 bare
+        raise HTTPException(status_code=500, detail=f"failed to release kill-switch: {e}") from e
+    log.info("scheduler kill-switch RELEASED via API (was_paused=%s)", was_paused)
+    return {
+        "ok": True,
+        "paused": False,
+        "was_paused": was_paused,
+        "message": "Agent kill-switch released. Autonomous mutations may resume.",
+    }
+
+
+@router.get("/agent-audit", tags=["Health"])
+def get_agent_audit(
+    limit: int = 20,
+    app_key: str | None = None,
+    _auth: Scope = Depends(require_scope(Scope.READ)),
+) -> dict[str, Any]:
+    """Return recent agent action audit rows (#978 / N7).
+
+    The audit trail is the authoritative "what did you do" source — every
+    autonomous fix (pre-approved or chat-dispatched) writes a QUEUED row
+    before execution and an OUTCOME row (ok/failed/rolled_back) after.
+
+    Optional query parameters:
+      limit    — max rows to return (default 20, max 100)
+      app_key  — filter by app (returns only outcome rows for that app)
+    """
+    from backend.agent.audit import get_recent_actions
+
+    rows = get_recent_actions(limit=min(max(1, limit), 100), app_key=app_key)
+    return {
+        "ok": True,
+        "count": len(rows),
+        "rows": rows,
+        "scheduler_paused": is_scheduler_paused(),
+    }
 
 
 @router.put("/settings", tags=["Health"])
@@ -441,22 +516,27 @@ def update_health_settings(
     from backend.core.state import StateDB
 
     updated: dict[str, Any] = {}
-    with StateDB() as db:
-        if interval_secs is not None:
-            val = max(30, interval_secs)  # 30s minimum matches DNS challenge delay
-            db.set_setting("health_check_interval_secs", str(val))
-            updated["health_check_interval_secs"] = val
-        if ntfy_topic is not None:
-            db.set_setting("ntfy_topic", ntfy_topic)
-            updated["ntfy_topic"] = ntfy_topic
-        if ollama_url is not None:
-            import json as _json
+    try:
+        with StateDB() as db:
+            if interval_secs is not None:
+                val = max(30, interval_secs)  # 30s minimum matches DNS challenge delay
+                db.set_setting("health_check_interval_secs", str(val))
+                updated["health_check_interval_secs"] = val
+            if ntfy_topic is not None:
+                db.set_setting("ntfy_topic", ntfy_topic)
+                updated["ntfy_topic"] = ntfy_topic
+            if ollama_url is not None:
+                import json as _json
 
-            existing = db.get_setting("llm_agent_config") or "{}"
-            cfg = _json.loads(existing)
-            cfg["ollama_url"] = ollama_url
-            db.set_setting("llm_agent_config", _json.dumps(cfg))
-            updated["ollama_url"] = ollama_url
+                existing = db.get_setting("llm_agent_config") or "{}"
+                cfg = _json.loads(existing)
+                cfg["ollama_url"] = ollama_url
+                db.set_setting("llm_agent_config", _json.dumps(cfg))
+                updated["ollama_url"] = ollama_url
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update health settings: {type(_e).__name__}: {_e}"
+        ) from _e
     return {"ok": True, "updated": updated}
 
 
@@ -1160,13 +1240,18 @@ def record_test_results(payload: TestResultPayload) -> dict[str, Any]:
     import json
     import time as _time
 
-    with StateDB() as db:
-        db.set_setting("last_test_run_ts", str(int(_time.time())))
-        db.set_setting("last_test_run_passed", str(payload.passed))
-        db.set_setting("last_test_run_failed", str(payload.failed))
-        db.set_setting("last_test_run_duration", str(payload.duration_s))
-        failures = [f.model_dump() for f in payload.failures]
-        db.set_setting("last_test_run_failures", json.dumps(failures[:20]))
+    try:
+        with StateDB() as db:
+            db.set_setting("last_test_run_ts", str(int(_time.time())))
+            db.set_setting("last_test_run_passed", str(payload.passed))
+            db.set_setting("last_test_run_failed", str(payload.failed))
+            db.set_setting("last_test_run_duration", str(payload.duration_s))
+            failures = [f.model_dump() for f in payload.failures]
+            db.set_setting("last_test_run_failures", json.dumps(failures[:20]))
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to record test results: {type(_e).__name__}: {_e}"
+        ) from _e
 
     return {"ok": True, "recorded": True}
 
@@ -1453,8 +1538,13 @@ def snooze_anomaly(app_key: str, check_name: str, req: AnomalySnoozeRequest) -> 
     from backend.core.state import StateDB
 
     snooze_until = int(_time.time()) + req.hours * 3600
-    with StateDB() as db:
-        db.set_setting(f"snooze_{app_key}_{check_name}", str(snooze_until))
+    try:
+        with StateDB() as db:
+            db.set_setting(f"snooze_{app_key}_{check_name}", str(snooze_until))
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to snooze anomaly: {type(_e).__name__}: {_e}"
+        ) from _e
     return {
         "ok": True,
         "snoozed_until": snooze_until,
@@ -1494,18 +1584,23 @@ def put_agent_config(
     from backend.core.state import StateDB
     import json as _json
 
-    with StateDB() as db:
-        raw = db.get_setting("llm_agent_config")
-        cfg = _json.loads(raw) if raw else {}
-        if provider is not None:
-            cfg["provider"] = provider
-        if ollama_url is not None:
-            cfg["ollama_url"] = ollama_url
-        if model is not None:
-            cfg["ollama_model"] = model
-        if api_key is not None:
-            cfg["api_key"] = api_key
-        db.set_setting("llm_agent_config", _json.dumps(cfg))
+    try:
+        with StateDB() as db:
+            raw = db.get_setting("llm_agent_config")
+            cfg = _json.loads(raw) if raw else {}
+            if provider is not None:
+                cfg["provider"] = provider
+            if ollama_url is not None:
+                cfg["ollama_url"] = ollama_url
+            if model is not None:
+                cfg["ollama_model"] = model
+            if api_key is not None:
+                cfg["api_key"] = api_key
+            db.set_setting("llm_agent_config", _json.dumps(cfg))
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update agent config: {type(_e).__name__}: {_e}"
+        ) from _e
     return {"ok": True, "config": cfg}
 
 
@@ -1682,21 +1777,34 @@ def create_maintenance_window(req: MaintenanceWindowIn) -> dict[str, Any]:
     """Create a maintenance window to suppress a recurring false-positive."""
     from backend.core.state import StateDB
 
-    with StateDB() as db:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS maintenance_windows (
-                id INTEGER PRIMARY KEY, app_key TEXT NOT NULL,
-                check_name TEXT NOT NULL, label TEXT NOT NULL DEFAULT 'Scheduled task',
-                day_of_week INTEGER, hour_start INTEGER NOT NULL,
-                hour_end INTEGER NOT NULL DEFAULT -1, enabled INTEGER NOT NULL DEFAULT 1,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )""")
-        db.execute(
-            """INSERT INTO maintenance_windows
-               (app_key, check_name, label, day_of_week, hour_start, hour_end)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (req.app_key, req.check_name, req.label, req.day_of_week, req.hour_start, req.hour_end),
-        )
+    try:
+        with StateDB() as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS maintenance_windows (
+                    id INTEGER PRIMARY KEY, app_key TEXT NOT NULL,
+                    check_name TEXT NOT NULL, label TEXT NOT NULL DEFAULT 'Scheduled task',
+                    day_of_week INTEGER, hour_start INTEGER NOT NULL,
+                    hour_end INTEGER NOT NULL DEFAULT -1, enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+                )""")
+            db.execute(
+                """INSERT INTO maintenance_windows
+                   (app_key, check_name, label, day_of_week, hour_start, hour_end)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    req.app_key,
+                    req.check_name,
+                    req.label,
+                    req.day_of_week,
+                    req.hour_start,
+                    req.hour_end,
+                ),
+            )
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create maintenance window: {type(_e).__name__}: {_e}",
+        ) from _e
     return {"ok": True}
 
 
@@ -1706,9 +1814,15 @@ def delete_maintenance_window(request: Request, window_id: int) -> dict[str, Any
     """Remove a maintenance window."""
     from backend.core.state import StateDB
 
-    with StateDB() as db:
-        db.execute("DELETE FROM maintenance_windows WHERE id = ?", (window_id,))
-        # NOTE: StateDB auto-commits on __exit__ — db._c.commit() removed (Core Rule 4.4)
+    try:
+        with StateDB() as db:
+            db.execute("DELETE FROM maintenance_windows WHERE id = ?", (window_id,))
+            # NOTE: StateDB auto-commits on __exit__ — db._c.commit() removed (Core Rule 4.4)
+    except Exception as _e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete maintenance window: {type(_e).__name__}: {_e}",
+        ) from _e
     return {"ok": True}
 
 
@@ -1813,32 +1927,38 @@ def apply_source_replacement(req: ApplyReplacementRequest) -> dict[str, Any]:
         else:
             new_image, new_tag = req.new_url, "latest"
 
-        with StateDB() as db:
-            db.execute(
-                "UPDATE apps SET image=?, image_tag=? WHERE key=?",
-                (new_image, new_tag, req.resource_key),
-            )
-            # Mark source as ok with new URL
-            db.execute(
-                """
-                INSERT INTO source_availability
-                    (source_type, resource_key, url, status, last_checked)
-                VALUES (?, ?, ?, 'ok', unixepoch())
-                ON CONFLICT(source_type, resource_key, url)
-                DO UPDATE SET status='ok', last_checked=unixepoch()
-            """,
-                (req.source_type, req.resource_key, req.new_url),
-            )
-            # Mark old URL as superseded
-            db.execute(
-                """
-                UPDATE source_availability
-                SET status='superseded', error='Replaced by user'
-                WHERE source_type=? AND resource_key=? AND url=?
-            """,
-                (req.source_type, req.resource_key, req.old_url),
-            )
-            # NOTE: StateDB auto-commits on __exit__ — db._c.commit() removed (Core Rule 4.4)
+        try:
+            with StateDB() as db:
+                db.execute(
+                    "UPDATE apps SET image=?, image_tag=? WHERE key=?",
+                    (new_image, new_tag, req.resource_key),
+                )
+                # Mark source as ok with new URL
+                db.execute(
+                    """
+                    INSERT INTO source_availability
+                        (source_type, resource_key, url, status, last_checked)
+                    VALUES (?, ?, ?, 'ok', unixepoch())
+                    ON CONFLICT(source_type, resource_key, url)
+                    DO UPDATE SET status='ok', last_checked=unixepoch()
+                """,
+                    (req.source_type, req.resource_key, req.new_url),
+                )
+                # Mark old URL as superseded
+                db.execute(
+                    """
+                    UPDATE source_availability
+                    SET status='superseded', error='Replaced by user'
+                    WHERE source_type=? AND resource_key=? AND url=?
+                """,
+                    (req.source_type, req.resource_key, req.old_url),
+                )
+                # NOTE: StateDB auto-commits on __exit__ — db._c.commit() removed (Core Rule 4.4)
+        except Exception as _e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to apply source replacement: {type(_e).__name__}: {_e}",
+            ) from _e
         return {"ok": True, "message": f"Image updated to {req.new_url}. Restart app to apply."}
 
     elif req.source_type == "hf_model":

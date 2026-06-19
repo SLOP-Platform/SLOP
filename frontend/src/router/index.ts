@@ -50,6 +50,11 @@ const router = createRouter({
       meta: { title: 'Health' }
     },
     {
+      path: '/chat',
+      component: () => import('../views/ChatView.vue'),
+      meta: { title: 'Agent Chat' }
+    },
+    {
       path: '/observability',
       component: () => import('../views/ObservabilityView.vue'),
       meta: { title: 'Observability' }
