@@ -1,0 +1,17 @@
+[Unit]
+Description=SLOP scheduled backup timer (triggers ms-backup.service)
+Documentation=https://github.com/Nnyan/SLOP
+
+[Timer]
+# The timer FIRES on this schedule; what actually backs up is decided per-app by `--due-only`
+# against the backup_cadence_hours setting (#1284) — so cadence changes are a settings write, not
+# a unit re-render. Default fire = hourly (a frequent tick the due-check filters down to per-app
+# cadence). {{ cadence }} is the install-time default; operators tune cadence via the setting.
+OnCalendar={{ cadence }}
+# Persistent=true catches up a run missed while the host was powered off — exactly the window
+# (host down) when a recovery point matters most. RandomizedDelaySec spreads load off the hour.
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target
