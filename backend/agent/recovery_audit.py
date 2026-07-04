@@ -16,17 +16,6 @@ Four GROUND probes reconciled against physics only:
      contain at least one artifact whose mtime is within 24h.  INDETERMINATE if
      the directory is absent (config absent ≠ failure).  DRIFT if empty or stale.
 
-  2c. **backup_verify** — the recoverability KEYSTONE (#868 §9): surfaces the
-     restore-verify verdict recorded by ``backup_ops.verify_backup_artifact`` (read
-     observe-only via ``backup.latest_verify_result``).  DRIFT when the latest backup
-     FAILED to restore (freshness alone cannot catch this).  Silent until a verify
-     has run (no sidecar → None), so it adds no noise before the P1b verify wiring.
-
-  2d. **backup_schedule_overdue** — system-level (#868 P3 §9), runs once outside the per-app
-     loop: GROUND on ``systemctl is-active ms-backup.timer``.  DRIFT when the scheduled-backup
-     timer is inactive/failed (the scheduler stopped — a recoverability gap BEFORE backups go
-     stale).  INDETERMINATE on a non-systemd host.  Observe-only (never starts the timer).
-
   3. **cert_expiry** — if the app manifest exposes a ``tls_cert_path`` field,
      the cert must not expire within 30 days.  DRIFT < 30 days (warn), DRIFT
      < 7 days (crit).  INDETERMINATE if the cert file is unreadable.
@@ -55,14 +44,9 @@ from typing import Any
 from backend.agent.recovery_probes import (
     _probe_backup_configured,
     _probe_backup_freshness,
-    _probe_backup_schedule_overdue,
-    _probe_backup_verify_result,
     _probe_cert_expiry,
-    _probe_custom_volume_verify_results,
     _probe_credential_validity,
-    _probe_media_volume_index_declared,
     _probe_mount_health,
-    _probe_platform_backup_verify_result,
 )
 from backend.agent.spine import Finding, Verdict
 from backend.core.logging import get_logger
@@ -70,7 +54,7 @@ from backend.core.logging import get_logger
 log = get_logger(__name__)
 
 
-def reconcile_recovery(  # noqa: C901 — flat dispatch of 6 per-app guarded GROUND probes (mount/backup-configured/backup-freshness/backup-verify/cert/credential) + 2 system-level (backup-schedule-overdue #868 P3, platform-backup-verify #1281, run once after the loop); each carries its own INDETERMINATE fallback, splitting scatters the per-probe guard
+def reconcile_recovery(  # noqa: C901 — flat dispatch of 5 independent guarded GROUND probes (mount/backup-configured/backup-freshness/cert/credential); each carries its own INDETERMINATE fallback, splitting scatters the per-probe guard
     apps: list[Any],
     config_root: str | None = None,
     *,
@@ -165,57 +149,6 @@ def reconcile_recovery(  # noqa: C901 — flat dispatch of 6 per-app guarded GRO
                 )
             )
 
-        # Probe 2c: restore-verify result (omit if no backup_dir or no verify has run)
-        try:
-            f = _probe_backup_verify_result(app, config_root)
-            if f is not None:
-                findings.append(f)
-        except Exception as exc:
-            log.warning("backup_verify probe failed for %s: %s", app_key, exc)
-            findings.append(
-                Finding(
-                    id=f"recovery.backup_verify.{app_key}",
-                    physics=f"restore-verify result for app {app_key}",
-                    verdict=Verdict.INDETERMINATE,
-                    summary="backup_verify probe raised unexpectedly",
-                    detail=f"{type(exc).__name__}: {exc}",
-                )
-            )
-
-        # Probe 2e: media-class volume must declare its index (design §14; omit if no media volume)
-        try:
-            f = _probe_media_volume_index_declared(app)
-            if f is not None:
-                findings.append(f)
-        except Exception as exc:
-            log.warning("media_index probe failed for %s: %s", app_key, exc)
-            findings.append(
-                Finding(
-                    id=f"recovery.media_index_declared.{app_key}",
-                    physics=f"media-class volume index declaration for app {app_key}",
-                    verdict=Verdict.INDETERMINATE,
-                    summary="media_index_declared probe raised unexpectedly",
-                    detail=f"{type(exc).__name__}: {exc}",
-                )
-            )
-
-        # Probe 2f: per-volume restore-verify for config-class custom volumes (#1292; #1281-class).
-        # Returns a LIST (one finding per volume subdir carrying a verdict) — extend, don't append.
-        # Empty until an app declares custom_volumes AND a verify sidecar exists (no-noise contract).
-        try:
-            findings.extend(_probe_custom_volume_verify_results(app, config_root))
-        except Exception as exc:
-            log.warning("custom_volume_verify probe failed for %s: %s", app_key, exc)
-            findings.append(
-                Finding(
-                    id=f"recovery.custom_volume_verify.{app_key}",
-                    physics=f"restore-verify results for custom volumes of app {app_key}",
-                    verdict=Verdict.INDETERMINATE,
-                    summary="custom_volume_verify probe raised unexpectedly",
-                    detail=f"{type(exc).__name__}: {exc}",
-                )
-            )
-
         # Probe 3: cert expiry (omit if no tls_cert_path)
         try:
             f = _probe_cert_expiry(app, config_root=resolved_config_root)
@@ -249,43 +182,6 @@ def reconcile_recovery(  # noqa: C901 — flat dispatch of 6 per-app guarded GRO
                     detail=f"{type(exc).__name__}: {exc}",
                 )
             )
-
-    # Probe 2d: scheduled-backup timer alive (#868 P3) — SYSTEM-LEVEL, runs once outside the
-    # per-app loop (the ms-backup.timer drives `--all`, not a single app). This establishes the
-    # post-loop system-probe seam #1281's platform-DB verify probe reuses.
-    try:
-        findings.append(_probe_backup_schedule_overdue())
-    except Exception as exc:
-        log.warning("backup_schedule_overdue probe failed: %s", exc)
-        findings.append(
-            Finding(
-                id="recovery.backup_schedule_overdue",
-                physics="ms-backup.timer systemd unit active-state",
-                verdict=Verdict.INDETERMINATE,
-                summary="backup_schedule_overdue probe raised unexpectedly",
-                detail=f"{type(exc).__name__}: {exc}",
-            )
-        )
-
-    # Probe 2e: platform-DB restore-verify result (#1281) — SYSTEM-LEVEL, runs once outside the
-    # per-app loop. The per-app verify probe never sees the platform DB's own backup (fixed
-    # <config_root>/backups/_platform dir, no app key), so its verify verdict — incl. DRIFT ("the
-    # platform backup does not restore") — was previously written to a sidecar nothing surfaced.
-    try:
-        f = _probe_platform_backup_verify_result(resolved_config_root)
-        if f is not None:
-            findings.append(f)
-    except Exception as exc:
-        log.warning("platform_backup_verify probe failed: %s", exc)
-        findings.append(
-            Finding(
-                id="recovery.platform_backup_verify",
-                physics="restore-verify result for the SLOP platform DB backup",
-                verdict=Verdict.INDETERMINATE,
-                summary="platform_backup_verify probe raised unexpectedly",
-                detail=f"{type(exc).__name__}: {exc}",
-            )
-        )
 
     return findings
 

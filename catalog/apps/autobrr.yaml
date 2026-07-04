@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 7474
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: autobrr
 

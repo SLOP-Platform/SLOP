@@ -8,13 +8,10 @@ All symbols are re-exported from checker.py for backward compatibility.
 Responsibilities:
   - _llm_state  — module-level LLM degradation state
   - _LLM_ACTION_MAP — raw-to-canonical action mapping
+  - LLM call dispatch (ollama / cloud / openai-compatible)
   - Diagnosis prompt construction (DB context + RAG enrichment)
   - LLM error classification and state tracking
   - pending_fixes persistence
-
-The LLM call transport/dispatch layer (ollama / cloud / openai-compatible +
-router cloud-spend metering, incl. the ADR-0021 scrub choke) lives in the sibling
-`checker_llm_dispatch.py` and is re-exported below for backward compatibility.
 """
 
 from __future__ import annotations
@@ -22,20 +19,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from backend.core.url_guard_httpx import pinned_async_client
+import httpx
+
+from backend.agent.scrub import scrub
+from backend.agent.scrub import is_external
 from backend.core.logging import get_logger
 from backend.health.swallow_counter import record_swallow
 from backend.manifests.executor import PERF_THRESHOLDS
-
-# Transport layer (extracted) — re-exported so `checker_llm._call_*` /
-# `checker_llm._dispatch_llm_call` and the checker.py re-export chain keep resolving.
-from backend.health.checker_llm_dispatch import (
-    _call_ollama as _call_ollama,
-    _call_cloud_provider as _call_cloud_provider,
-    _record_cloud_dispatch_usage as _record_cloud_dispatch_usage,
-    _call_openai_compatible as _call_openai_compatible,
-    _dispatch_llm_call as _dispatch_llm_call,
-)
 
 log = get_logger(__name__)
 
@@ -130,6 +120,91 @@ def _load_provider_config() -> tuple[str, str, str, set[str]]:
         return "ollama", "", "", set()
 
 
+async def _call_ollama(client: httpx.AsyncClient, prompt: str, ollama_url: str, model: str) -> str:
+    """Hit ollama /api/generate; return the raw response string."""
+    resp = await client.post(
+        f"{ollama_url}/api/generate",
+        json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
+    )
+    resp.raise_for_status()
+    return resp.json().get("response", "") or ""
+
+
+async def _call_cloud_provider(
+    client: httpx.AsyncClient, prompt: str, provider: str, api_key: str, model: str
+) -> str:
+    """Hit an OpenAI-style cloud /v1/chat/completions; return the assistant content."""
+    from typing import Any as _Any
+    from backend.core.cloud_llm import PROVIDERS as _CP
+
+    _p_cfg = _CP.get(provider, {})
+    _base = _p_cfg.get("base_url", "").rstrip("/")
+    if not _base:
+        raise ValueError(f"Unknown provider '{provider}'")
+    _endpoint = f"{_base}/chat/completions"
+    hdrs = {
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://github.com/Nnyan/SLOP",
+        "X-Title": "SLOP Health Agent",
+    }
+    cloud_model = model or _p_cfg.get("default_model", "")
+    _rf: dict[str, _Any] = {}
+    if provider not in ("anthropic",):
+        _rf = {"response_format": {"type": "json_object"}}
+    if provider == "anthropic":
+        hdrs["anthropic-version"] = "2023-06-01"
+    resp = await client.post(
+        _endpoint,
+        headers=hdrs,
+        json={"model": cloud_model, "messages": [{"role": "user", "content": prompt}], **_rf},
+    )
+    resp.raise_for_status()
+    return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+
+
+async def _call_openai_compatible(
+    client: httpx.AsyncClient, prompt: str, ollama_url: str, api_key: str, model: str
+) -> str:
+    """Hit an OpenAI-shaped local server (llamacpp / shimmy / localai)."""
+    hdrs = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    resp = await client.post(
+        f"{ollama_url}/v1/chat/completions",
+        headers=hdrs,
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+        },
+    )
+    resp.raise_for_status()
+    return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+
+
+async def _dispatch_llm_call(
+    client: httpx.AsyncClient,
+    prompt: str,
+    ollama_url: str,
+    provider: str,
+    api_key: str,
+    model: str,
+    cloud_providers: set[str],
+    *,
+    allow_raw: bool = False,
+) -> str:
+    """Dispatch the LLM call to ollama / cloud / openai-compatible by provider.
+
+    allow_raw: when True, skip scrub() even for cloud providers (opt-out).
+    Default False means cloud-bound prompts are always scrubbed (ADR-0021).
+    """
+    if (is_external(provider) or provider in cloud_providers) and not allow_raw:
+        prompt = scrub(prompt)
+    if provider == "ollama":
+        return await _call_ollama(client, prompt, ollama_url, model)
+    if provider in cloud_providers:
+        return await _call_cloud_provider(client, prompt, provider, api_key, model)
+    return await _call_openai_compatible(client, prompt, ollama_url, api_key, model)
+
+
 async def _maybe_rag_expand(
     raw: str, prompt: str, app_key: str, ollama_url: str, model: str, logs: str
 ) -> str:
@@ -156,7 +231,7 @@ async def _maybe_rag_expand(
         )
         expanded_context = "\n\n".join(extra_chunks)
         expanded_prompt = f"Additional knowledge base context:\n{expanded_context}\n\n{prompt}"
-        async with pinned_async_client(timeout=50) as client2:
+        async with httpx.AsyncClient(timeout=50) as client2:
             resp2 = await client2.post(
                 f"{ollama_url}/api/generate",
                 json={"model": model, "prompt": expanded_prompt, "stream": False, "format": "json"},
@@ -221,7 +296,6 @@ def _classify_llm_error(e: Exception, ollama_url: str, model: str) -> None:
     err_str = str(e)
     _provider = _llm_state.get("configured_provider", "ollama") or "ollama"
     _pname = "Ollama" if _provider == "ollama" else _provider
-    _host = ollama_url.split("//")[-1].split("/")[0].split(":")[0]
     if (
         "Connection refused" in err_str
         or "Connect call failed" in err_str
@@ -229,31 +303,10 @@ def _classify_llm_error(e: Exception, ollama_url: str, model: str) -> None:
     ):
         _llm_state["last_error_type"] = "connection"
         _llm_state["last_error"] = f"Cannot reach {ollama_url} — {_pname} may not be running."
-    elif any(
-        x in err_str
-        for x in (
-            "Name or service not known",
-            "getaddrinfo failed",
-            "nodename nor servname",
-            "Name does not resolve",
-            "Temporary failure in name resolution",
-            "[Errno -2]",
-            "[Errno 11001]",
-        )
-    ):
-        _llm_state["last_error_type"] = "dns"
-        _llm_state["last_error"] = (
-            f"Cannot resolve host '{_host}' — check the {_pname} URL / DNS / container network."
-        )
     elif "timed out" in err_str.lower() or "TimeoutError" in err_str:
         _llm_state["last_error_type"] = "timeout"
         _llm_state["last_error"] = (
             f"Request to {ollama_url} timed out — model may be too slow or overloaded."
-        )
-    elif "401" in err_str or "Unauthorized" in err_str or "authentication" in err_str.lower():
-        _llm_state["last_error_type"] = "auth"
-        _llm_state["last_error"] = (
-            f"{_pname} rejected the request (401 Unauthorized) — check the API key / credentials."
         )
     elif "404" in err_str or ("model" in err_str.lower() and "not found" in err_str.lower()):
         _llm_state["last_error_type"] = "model"
@@ -347,8 +400,7 @@ def _persist_pending_fix(
                     status='pending',
                     model=excluded.model,
                     created_at=unixepoch(),
-                    resolved_at=NULL,
-                    fix_history_id=NULL
+                    resolved_at=NULL
             """,
                 (app_key, check_name, effective_action_type, problem, suggested, confidence, model),
             )
@@ -379,34 +431,31 @@ async def _llm_diagnose(
         from backend.agent.classifier import classify_offline as _cls_offline
         from backend.agent.classifier import compute_signature_hash as _compute_sig
         from backend.agent.classifier import (
+            LEGACY_CACHE_CONFIDENCE as _LEGACY_CONF,
             current_image_digest as _cur_digest,
-            derive_cache_confidence as _derive_conf,
-            lookup_cached_fix as _lookup_cached_fix,
+            evaluate_learned_confidence as _eval_conf,
         )
         from backend.core.state import StateDB as _SDB
 
         _err_class = _cls_offline(check_result.message)
         _sig_hash = _compute_sig(_err_class, check_result.message, app_key)
-        # Resolve the RUNNING image's digest so the cache serve is version-aware (#1003
-        # TIER-D): a fix recorded against a different image version must NOT be replayed.
-        # If the digest can't be resolved (empty), skip the cache entirely (fall through to
-        # a fresh LLM diagnosis) — serving a version-unverifiable cached fix is the F2 hazard.
-        _digest = _cur_digest(getattr(check_result, "container_name", None) or app_key)
-        _served = None
-        if _digest:
-            with _SDB() as _cdb:
-                # Shared serve helper: version- + supersede-aware (latest outcome for this
-                # (signature, digest) must be 'success'). Centralised so the install + health
-                # paths can never diverge (the #823 Reuse principle).
-                _served = _lookup_cached_fix(_cdb, _sig_hash, image_digest=_digest)
-        if _served is not None:
-            _cached_fix = _served[0]
-            # Evidence-ranked confidence via the shared derive_cache_confidence
-            # (#823) so the install + health paths can never diverge. The health
-            # path has a running container, so use its resolved digest for
-            # version-aware reconciliation (the install path passes the cached
-            # row's digest instead).
-            _conf = _derive_conf(app_key, _sig_hash, image_digest=_digest)
+        with _SDB() as _cdb:
+            _cached = _cdb.execute(
+                "SELECT suggested_fix FROM fix_history "
+                "WHERE signature_hash=? AND outcome='success' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (_sig_hash,),
+            ).fetchone()
+        if _cached:
+            _cached_fix = dict(_cached)["suggested_fix"]
+            # Evidence-ranked: derive an outcome-weighted, image_digest-aware
+            # score (demote-on-failure) and log it to the shadow gate. In shadow
+            # mode the legacy 0.95 still drives behaviour; the enforce flag
+            # promotes the derived score. The health path has a running
+            # container, so resolve its digest for version-aware reconciliation.
+            _digest = _cur_digest(getattr(check_result, "container_name", None) or app_key)
+            _learned = _eval_conf(app_key, _sig_hash, image_digest=_digest)
+            _conf = _learned.score if _learned.enforce else _LEGACY_CONF
             _persist_pending_fix(
                 app_key,
                 check_result.check_name,
@@ -430,7 +479,7 @@ async def _llm_diagnose(
     try:
         from backend.agent.router.dispatch import route_and_dispatch  # scrub path preserved
 
-        async with pinned_async_client(timeout=50) as client:
+        async with httpx.AsyncClient(timeout=50) as client:
             raw = await route_and_dispatch(  # keeps per-provider _dispatch_llm_call scrub
                 client,
                 prompt,

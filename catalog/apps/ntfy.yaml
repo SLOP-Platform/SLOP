@@ -26,7 +26,7 @@ env:
   NTFY_AUTH_FILE: /etc/ntfy/auth.db
   NTFY_AUTH_DEFAULT_ACCESS: deny-all
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: ntfy
 

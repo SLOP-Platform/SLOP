@@ -34,7 +34,7 @@ env:
 dependencies:
   postgres: true
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: zilean
 

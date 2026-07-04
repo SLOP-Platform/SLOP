@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 6789
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: nzbget
 

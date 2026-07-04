@@ -27,13 +27,13 @@ env:
   AFFINE_ENV: selfhosted
   AFFINE_SERVER_HTTPS: "true"
   DATABASE_URL: "postgresql://slop:${POSTGRES_PASSWORD}@postgres:5432/affine"
-  REDIS_SERVER_HOST: "redis"
+  REDIS_SERVER_HOST: "valkey"
 
 dependencies:
   postgres: true
   redis: true
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: affine
 

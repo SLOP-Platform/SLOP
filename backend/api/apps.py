@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -30,10 +31,7 @@ from backend.api.rate_limit import limiter
 from backend.core import docker_client
 import time as _time
 
-from backend.api.apps_validate import sanitize_manifest
-from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
-from backend.core.path_guard import PathNotAllowed, safe_component
 from backend.core.state import StateDB
 
 # Install priority for batch preflight topological sort.
@@ -89,20 +87,6 @@ log = get_logger(__name__)
 router = APIRouter()
 
 
-def _safe_key(key: str) -> str:
-    """Validate a route ``{key}`` path-param as a safe single path segment BEFORE it is
-    used to build a filesystem path (#1103, CodeQL py/path-injection). The shared guard for
-    the apps.py write sinks that join ``{key}`` onto a real directory (update_app frag,
-    enhance_custom_app manifest, get_app_config dir). Returns the key unchanged when safe;
-    raises HTTP 400 on traversal/charset violations. Mirrors the registry/health seam (#1041)."""
-    try:
-        return safe_component(key, field="key")
-    except PathNotAllowed as e:
-        raise HTTPException(
-            status_code=400, detail=safe_detail(e, "Invalid app key.", log=log)
-        ) from e
-
-
 # ── Port detection sentinel ───────────────────────────────────────────────
 # Returned by _get_listening_ports() when all detection methods fail (e.g.
 # inside a restricted container with no /proc access and no ss/netstat).
@@ -129,8 +113,124 @@ class _PortsIndeterminate:
 PORTS_INDETERMINATE = _PortsIndeterminate()
 
 
-# Community manifest sanitization (id=472) extracted to apps_validate.py
-# (#1302 drain) — sanitize_manifest re-imported at top.
+# ── Community manifest sanitization (id=472) ─────────────────────────────
+# Applied to user/community-sourced manifest dicts BEFORE they are processed
+# into compose fragments or persisted to disk.
+
+# Allow-list of top-level manifest keys that a community manifest may set.
+# Any other key is silently stripped (defence in depth against future fields
+# being injected via crafted manifests).
+_MANIFEST_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {
+        "key",
+        "display_name",
+        "description",
+        "category",
+        "tier",
+        "service_type",
+        "linuxserver",
+        "image",
+        "image_tag",
+        "start_grace_s",
+        "ports",
+        "volumes",
+        "traefik",
+        "health",
+        "tags",
+        "env",
+        "extra_config",
+        "web_port",
+        "source",
+        "source_url",
+        "post_deploy",
+        "wiring",
+        "companions",
+    }
+)
+
+# Shell metacharacters and command-injection candidates to strip from string values.
+_SHELL_META_RE = re.compile(r"[;&|`$><\\\n\r]")
+
+# Path traversal sequences to strip from string values.
+_PATH_TRAVERSAL_RE = re.compile(r"\.\.[/\\]|^~")
+
+# Allowed post_deploy step types for community manifests.
+_ALLOWED_POST_DEPLOY_TYPES: frozenset[str] = frozenset({"wire", "wait_healthy", "api_ready"})
+
+# Safe character pattern for companion image references.
+_COMPANION_IMAGE_RE = re.compile(r"^[a-zA-Z0-9._/:-]+$")
+
+
+def sanitize_manifest(manifest_data: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize a community/user-sourced manifest dict.
+
+    Pure function (no side effects) — safe to call repeatedly.
+
+    Steps applied:
+      1. Strip keys not in _MANIFEST_ALLOWED_KEYS.
+      2. In all remaining string values (recursively), remove shell
+         metacharacters (;&|`$><\\\\n\\r) and path traversal sequences
+         (../ or starting with ~).
+
+    Args:
+        manifest_data: Raw manifest dict from user input.
+
+    Returns:
+        Sanitized copy of the dict (input is not mutated).
+    """
+
+    def _sanitize_value(val: Any) -> Any:
+        if isinstance(val, str):
+            val = _SHELL_META_RE.sub("", val)
+            val = _PATH_TRAVERSAL_RE.sub("", val)
+            return val
+        if isinstance(val, dict):
+            return {k: _sanitize_value(v) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_sanitize_value(item) for item in val]
+        return val  # int, float, bool, None — pass through unchanged
+
+    result = {
+        k: _sanitize_value(v) for k, v in manifest_data.items() if k in _MANIFEST_ALLOWED_KEYS
+    }
+
+    # Validate post_deploy step types
+    if "post_deploy" in result:
+        for step in result["post_deploy"]:
+            if isinstance(step, dict):
+                step_type = step.get("type", "")
+                if step_type and step_type not in _ALLOWED_POST_DEPLOY_TYPES:
+                    raise ValueError(
+                        f"post_deploy step type {step_type!r} is not allowed in community manifests "
+                        f"(allowed: {', '.join(sorted(_ALLOWED_POST_DEPLOY_TYPES))})"
+                    )
+
+    # Validate wiring entries
+    if "wiring" in result:
+        wiring = result["wiring"]
+        if isinstance(wiring, dict):
+            for entry in wiring.get("connects_to", []):
+                if isinstance(entry, dict):
+                    if "type" not in entry or "to" not in entry:
+                        raise ValueError(
+                            f"wiring.connects_to entry missing required fields 'type' and 'to': {entry!r}"
+                        )
+            for entry in wiring.get("accepts", []):
+                if isinstance(entry, dict):
+                    if "type" not in entry or "from" not in entry:
+                        raise ValueError(
+                            f"wiring.accepts entry missing required fields 'type' and 'from': {entry!r}"
+                        )
+
+    # Validate companion images
+    if "companions" in result:
+        for companion in result["companions"]:
+            if isinstance(companion, dict):
+                image = companion.get("image", "")
+                if image and not _COMPANION_IMAGE_RE.match(image):
+                    raise ValueError(f"companion image {image!r} contains invalid characters")
+
+    return result
 
 
 # ── SLOP-managed env vars (always written to .env by the wizard) ──────────
@@ -159,10 +259,6 @@ _SLOP_MANAGED_VARS: frozenset[str] = frozenset(
         # Generated by the setup wizard on every SLOP install — suppress linter false positives
         "POSTGRES_PASSWORD",
         "POSTGRES_USER",
-        # Generated by the managed mariadb service on first provision (#1203);
-        # MARIADB_USER/MARIADB_DATABASE use ${..:-booklore} defaults so they self-resolve.
-        "MARIADB_ROOT_PASSWORD",
-        "MARIADB_PASSWORD",
     }
 )
 
@@ -208,7 +304,6 @@ class AppOut(BaseModel):
     config_path: str | None
     installed_at: int
     last_healthy_at: int | None
-    criticality: str
     container_status: str | None = None
     container_health: str | None = None
 
@@ -249,7 +344,6 @@ def _app_with_container(app: Any) -> AppOut:
         config_path=app.config_path,
         installed_at=app.installed_at,
         last_healthy_at=app.last_healthy_at,
-        criticality=get_criticality(app.key).value,
         container_status=c.status if c else None,
         container_health=c.health if c else None,
     )
@@ -284,7 +378,6 @@ def list_apps() -> list[AppOut]:
             config_path=a.config_path,
             installed_at=a.installed_at,
             last_healthy_at=a.last_healthy_at,
-            criticality=get_criticality(a.key).value,
             container_status=containers[a.key].status if a.key in containers else None,
             container_health=containers[a.key].health if a.key in containers else None,
         )
@@ -362,7 +455,6 @@ def get_app(key: str) -> AppOut:
         config_path=app.config_path,
         installed_at=app.installed_at,
         last_healthy_at=app.last_healthy_at,
-        criticality=get_criticality(key).value,
         container_status=c.status if c else None,
         container_health=c.health if c else None,
     )
@@ -374,7 +466,7 @@ async def api_install(
     request: Request,
     key: str,
     background_tasks: BackgroundTasks,
-    req: InstallRequest = Body(default_factory=InstallRequest),
+    req: InstallRequest = InstallRequest(),
 ) -> dict[str, Any]:
     """Install an app from the catalog.
 
@@ -581,7 +673,7 @@ def api_remove(
     request: Request,
     key: str,
     background_tasks: BackgroundTasks,
-    req: RemoveRequest = Body(default_factory=RemoveRequest),
+    req: RemoveRequest = RemoveRequest(),
 ) -> dict[str, Any]:
     """Remove an installed app.
 
@@ -635,7 +727,7 @@ def api_replace(
     key: str,
     new_key: str,
     background_tasks: BackgroundTasks,
-    req: InstallRequest = Body(default_factory=InstallRequest),
+    req: InstallRequest = InstallRequest(),
 ) -> dict[str, Any]:
     """Replace an installed app with a different one.
 
@@ -701,7 +793,7 @@ def api_restart(key: str) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(
             status_code=503,
-            detail=safe_detail(e, f"Could not restart '{key}'. Is Docker running?", log=log),
+            detail=f"Could not restart '{key}': {e}. Is Docker running?",
         ) from e
 
 
@@ -735,14 +827,10 @@ def api_logs(key: str, tail: int = Query(default=100, le=500)) -> dict[str, Any]
     except docker_client.DockerError as e:
         raise HTTPException(
             status_code=503,
-            detail=safe_detail(
-                e, f"Docker unavailable — cannot retrieve logs for '{key}'.", log=log
-            ),
+            detail=f"Docker unavailable — cannot retrieve logs for '{key}': {e}",
         ) from e
     except Exception as e:
-        raise HTTPException(
-            status_code=503, detail=safe_detail(e, "Could not retrieve logs.", log=log)
-        ) from e
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -800,7 +888,7 @@ def _criticality_warning(key: str, crit: Criticality) -> str | None:
 
 
 @router.post("/{key}/disable", response_model=DisableOut)
-def api_disable(key: str, req: DisableRequest = Body(default_factory=DisableRequest)) -> DisableOut:
+def api_disable(key: str, req: DisableRequest = DisableRequest()) -> DisableOut:
     """Gracefully disable an app.
 
     Stops the container and renames its compose fragment to .yaml.disabled.
@@ -868,7 +956,7 @@ def api_criticality(key: str) -> dict[str, Any]:
     crit = get_criticality(key)
     return {
         "key": key,
-        "criticality": crit.value,
+        "criticality": str(crit),
         "can_disable": crit != Criticality.INVIOLABLE,
         "warning": _criticality_warning(key, crit),
         "perf_thresholds": PERF_THRESHOLDS,
@@ -1706,32 +1794,22 @@ def install_from_github(req: GitHubManifestRequest) -> dict[str, Any]:
     Security: only fetches from github.com / raw.githubusercontent.com.
     Manifest is validated before install (required fields, image format, etc.)
     """
+    import urllib.request as _req
     import urllib.error as _err
     import yaml as _yaml
 
     url = req.repo_url.strip()
 
-    # Validate via shared SSRF guard: exact-host match (github.com.evil.com or a
-    # path-embedded token can never pass) + private-IP block. Re-checked after each
-    # rewrite below, before any urlopen.
-    from backend.core.url_guard import (
-        GITHUB_HOSTS,
-        UrlNotAllowed,
-        assert_allowed_url,
-        is_allowed_url,
-        pinned_urlopen,
-    )
+    # Validate domain — only allow GitHub
+    allowed = ("github.com", "raw.githubusercontent.com", "gist.githubusercontent.com")
+    from urllib.parse import urlparse
 
-    def _require_github(u: str) -> None:
-        try:
-            assert_allowed_url(u, allowed_hosts=GITHUB_HOSTS)
-        except UrlNotAllowed as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=safe_detail(exc, "Only GitHub https URLs accepted.", log=log),
-            ) from exc
-
-    _require_github(url)
+    parsed = urlparse(url)
+    if parsed.netloc not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only GitHub URLs are accepted. Got: {parsed.netloc}",
+        )
 
     # Convert GitHub blob URL → raw URL
     if "github.com" in url and "/blob/" in url:
@@ -1741,10 +1819,10 @@ def install_from_github(req: GitHubManifestRequest) -> dict[str, Any]:
         base = url.rstrip("/")
         for candidate in ("manifest.yaml", "slop.yaml", "slop-manifest.yaml"):
             raw = base.replace("github.com", "raw.githubusercontent.com") + f"/main/{candidate}"
-            if not is_allowed_url(raw, allowed_hosts=GITHUB_HOSTS):  # re-validate rewrite
+            if not raw.startswith(("http://", "https://")):
                 continue
             try:
-                pinned_urlopen(raw, timeout=5).close()  # SSRF seam: host re-validated + IP-pinned
+                _req.urlopen(raw, timeout=5).close()  # noqa: S310  # nosec B310  # scheme validated above
                 url = raw
                 break
             except Exception:  # noqa: S112  # probe each candidate; move on if unavailable
@@ -1755,29 +1833,22 @@ def install_from_github(req: GitHubManifestRequest) -> dict[str, Any]:
                 detail="No manifest file found at repo root. Expected: manifest.yaml or slop.yaml",
             )
 
-    _require_github(url)  # re-validate the final (possibly rewritten) URL
+    # Fetch manifest
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail=f"Unsupported URL scheme: {url}")
     try:
-        with pinned_urlopen(url, timeout=15) as resp:  # SSRF seam: host re-validated + IP-pinned
+        with _req.urlopen(url, timeout=15) as resp:  # noqa: S310  # nosec B310  # scheme validated above
             raw_content = resp.read().decode("utf-8")
     except _err.HTTPError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=safe_detail(
-                e, "GitHub returned an error response while fetching the manifest.", log=log
-            ),
-        ) from e
+        raise HTTPException(status_code=502, detail=f"GitHub returned HTTP {e.code}: {url}") from e
     except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=safe_detail(e, "Could not fetch manifest.", log=log)
-        ) from e
+        raise HTTPException(status_code=502, detail=f"Could not fetch manifest: {e}") from e
 
     # Parse YAML
     try:
         manifest_data = _yaml.safe_load(raw_content)
     except _yaml.YAMLError as e:
-        raise HTTPException(
-            status_code=422, detail=safe_detail(e, "Invalid YAML in manifest.", log=log)
-        ) from e
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {e}") from e
 
     if not isinstance(manifest_data, dict):
         raise HTTPException(status_code=422, detail="Manifest must be a YAML mapping.")
@@ -1895,7 +1966,6 @@ def update_app(key: str) -> dict[str, Any]:
     This is the 'Update' button — pulls the image then does compose up --force-recreate.
     Non-blocking: check progress via GET /apps/{key}/install/progress.
     """
-    key = _safe_key(key)  # #1103: validate before {key} -> compose-fragment path
     import threading
     from backend.manifests.executor import install_app
 
@@ -1990,7 +2060,6 @@ def get_app_config(key: str) -> dict[str, Any]:
 
     Returns: {schema: [...fields...], values: {key: value}, config_file: path}
     """
-    key = _safe_key(key)  # #1103: validate before {key} -> app_configs/{key} path
     from backend.manifests.loader import load_manifest, ManifestError
 
     try:
@@ -2092,9 +2161,6 @@ def get_post_install_steps(key: str) -> list[dict[str, Any]]:
     """
     from backend.manifests.loader import load_manifest, ManifestError
 
-    key = _safe_key(
-        key
-    )  # #1167: validate before {key} -> manifest path (uncaught PathNotAllowed -> 500)
     try:
         manifest = load_manifest(key)
     except (KeyError, ManifestError) as e:
@@ -2329,9 +2395,6 @@ def get_health_config(key: str) -> dict[str, Any]:
     from backend.manifests.loader import load_manifest, ManifestError
     from backend.core.state import StateDB
 
-    key = _safe_key(
-        key
-    )  # #1167: validate before {key} -> manifest path (uncaught PathNotAllowed -> 500)
     # Try to load manifest — works for both official and community apps
     manifest = None
     is_community = False
@@ -2390,10 +2453,8 @@ class HealthPathRequest(BaseModel):
 @router.post("/{key}/probe-path")
 async def probe_health_path(key: str, req: HealthPathRequest) -> dict[str, Any]:
     """Test if a custom app responds to an HTTP health check path."""
-    from backend.core.url_guard_httpx import pinned_async_client
+    import httpx
     from backend.core.state import StateDB
-
-    from urllib.parse import urlparse
 
     with StateDB() as db:
         app = db.get_app(key)
@@ -2401,31 +2462,12 @@ async def probe_health_path(key: str, req: HealthPathRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="App not found or no port configured")
     path = req.path
     url = f"http://localhost:{app.host_port}{path}"
-    # SSRF guard: req.path is user-controlled and interpolated raw into the authority's
-    # tail. A crafted path ("@evil.com/", "//evil.com/") re-points the fetch to an
-    # arbitrary host via userinfo/scheme-relative injection. Re-parse the URL we are about
-    # to fetch and require it still targets the app's own localhost port (#1194).
     try:
-        _parsed = urlparse(url)
-        _authority_ok = _parsed.hostname == "localhost" and _parsed.port == app.host_port
-    except ValueError:
-        _authority_ok = False
-    if not _authority_ok:
-        raise HTTPException(
-            status_code=422,
-            detail="Invalid probe path — it must be a path on the app's local port.",
-        )
-    try:
-        async with pinned_async_client(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(url)
         return {"reachable": True, "status": r.status_code, "path": path}
     except Exception as e:
-        return {
-            "reachable": False,
-            "status": None,
-            "path": path,
-            "error": safe_detail(e, "Reachability check failed.", log=log),
-        }
+        return {"reachable": False, "status": None, "path": path, "error": str(e)}
 
 
 class EnhanceRequest(BaseModel):
@@ -2438,7 +2480,6 @@ class EnhanceRequest(BaseModel):
 @router.post("/{key}/enhance")
 def enhance_custom_app(key: str, req: EnhanceRequest) -> dict[str, Any]:
     """Promote a custom app to full monitoring by writing a minimal manifest."""
-    key = _safe_key(key)  # #1103: validate before {key} -> community manifest path
     from backend.core.state import StateDB
     from backend.core.config import config as cfg
     import yaml as _yaml
@@ -2485,9 +2526,7 @@ def enhance_custom_app(key: str, req: EnhanceRequest) -> dict[str, Any]:
         with open(manifest_path, "w") as f:
             _yaml.dump(manifest_content, f, default_flow_style=False, allow_unicode=True)
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=safe_detail(e, "Could not write manifest.", log=log)
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Could not write manifest: {e}") from e
 
     # Invalidate the manifest cache so the health cycle picks up the new
     # health checks on the next run rather than using the 5-minute-old cache.

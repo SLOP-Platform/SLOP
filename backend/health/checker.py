@@ -24,10 +24,10 @@ from typing import Any
 
 import httpx
 
+from backend.agent.scrub import scrub
+from backend.agent.scrub import is_external
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
-from backend.core.url_guard_httpx import pinned_async_client
-from backend.health import notifiers
 from backend.health.swallow_counter import record_swallow
 from backend.manifests.executor import (
     PERF_THRESHOLDS,
@@ -46,7 +46,6 @@ from backend.health.checker_llm import (
     _call_ollama as _call_ollama,
     _call_cloud_provider as _call_cloud_provider,
     _call_openai_compatible as _call_openai_compatible,
-    _dispatch_llm_call as _dispatch_llm_call,
     _maybe_rag_expand as _maybe_rag_expand,
     _track_llm_success as _track_llm_success,
     _classify_llm_error as _classify_llm_error,
@@ -57,10 +56,32 @@ from backend.health.checker_llm import (
 log = get_logger(__name__)
 
 
-# `_dispatch_llm_call` is the single canonical impl in checker_llm.py (re-exported
-# above). It is the ONE cloud-egress choke point — defined where the `_call_*`
-# helpers + `scrub` live so there is no per-module scrub-drift class (#1156).
-# `check_llm_outbound_scrubbed` (ADR-0021) AST-verifies that single def scrubs.
+async def _dispatch_llm_call(
+    client: httpx.AsyncClient,
+    prompt: str,
+    ollama_url: str,
+    provider: str,
+    api_key: str,
+    model: str,
+    cloud_providers: set[str],
+    *,
+    allow_raw: bool = False,
+) -> str:
+    """Dispatch the LLM call to ollama / cloud / openai-compatible by provider.
+
+    Defined here (not checker_llm) so patch.object(checker, '_call_cloud_provider')
+    works in tests — the function references checker-module names, not checker_llm.
+
+    allow_raw: when True, skip scrub() even for cloud providers (opt-out).
+    Default False means cloud-bound prompts are always scrubbed (ADR-0021).
+    """
+    if (is_external(provider) or provider in cloud_providers) and not allow_raw:
+        prompt = scrub(prompt)
+    if provider == "ollama":
+        return await _call_ollama(client, prompt, ollama_url, model)
+    if provider in cloud_providers:
+        return await _call_cloud_provider(client, prompt, provider, api_key, model)
+    return await _call_openai_compatible(client, prompt, ollama_url, api_key, model)
 
 
 def _build_diagnosis_prompt(app_key: str, check_result: Any, logs: str) -> str:
@@ -195,7 +216,7 @@ async def _check_http(
     url = f"{base_url.rstrip('/')}{path}"
     start = time.monotonic()
     try:
-        async with pinned_async_client(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url)
         elapsed_ms = (time.monotonic() - start) * 1000
         ok = resp.status_code == expect_status
@@ -327,18 +348,22 @@ async def _send_notification(
     ntfy_url: str = "http://ntfy:80",
     topic: str = "slop",
 ) -> bool:
-    """Send a push notification via the active notifier (ntfy by default).
-
-    Thin dispatcher over :mod:`backend.health.notifiers` (#989): the active
-    provider is selected by the ``notifier_provider`` setting, defaulting to
-    ntfy. The ``ntfy_url`` / ``topic`` params are honored by the (default) ntfy
-    provider, preserving the historical threaded-config behavior and this
-    function's pinned signature. Returns a bool so callers (health alerts, the
-    agent kill-switch audit) know whether delivery succeeded — a failure is
-    surfaced as ``False``, never swallowed.
-    """
-    sent = await notifiers.dispatch(title, message, priority, ntfy_url=ntfy_url, ntfy_topic=topic)
-    return bool(sent)
+    """Send an ntfy push notification. Returns True if sent."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.post(
+                f"{ntfy_url}/{topic}",
+                content=message.encode(),
+                headers={
+                    "Title": title,
+                    "Priority": priority,
+                    "Tags": "warning" if priority != "urgent" else "rotating_light",
+                },
+            )
+        return resp.status_code in (200, 201)
+    except Exception as e:
+        log.debug("ntfy notification failed: %s", e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1625,4 +1650,6 @@ def _persist_spine_advisories(findings: list[Any], db_factory: type) -> None:
                         ),
                     )
     except Exception as _e:
-        log.warning("spine_advisories persist failed: %s", _e)
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning("spine_advisories persist failed: %s", _e)

@@ -22,7 +22,7 @@ env:
   PGID: "${PGID}"
   TZ: "${TZ}"
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: files
 

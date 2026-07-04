@@ -22,13 +22,13 @@ The technical runtime uses `slop` as its package name (systemd unit: `slop.servi
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
+curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
 ```
 
 Or from a local checkout:
 
 ```bash
-git clone https://github.com/SLOP-Platform/SLOP.git
+git clone https://github.com/Nnyan/SLOP.git
 cd SLOP
 sudo ./install.sh --install-docker=yes
 ```

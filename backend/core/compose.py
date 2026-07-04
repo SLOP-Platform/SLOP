@@ -15,7 +15,11 @@ and always included. All other fragments are generated from manifests.
 
 from __future__ import annotations
 
+import asyncio
+import os
+import re as _re
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 import yaml
@@ -23,17 +27,51 @@ import yaml
 from backend.core.config import config
 from backend.core.logging import get_logger
 
-# Docker compose subprocess command helpers live in a sibling module to keep this file under the
-# production_code cap (#1302). Imported back + re-exported (redundant-alias idiom) so existing
-# callers — the infra providers' `from backend.core.compose import compose_up` etc. — keep resolving.
-from backend.core.compose_cli import (
-    compose_down as compose_down,
-    compose_pull as compose_pull,
-    compose_pull_stream as compose_pull_stream,
-    compose_up as compose_up,
-)
-
 log = get_logger(__name__)
+
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;]*[mGKHF]")
+_SPINNER_CHARS = frozenset("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+
+def _clean_compose_line(line: str) -> str:
+    """Strip ANSI codes and spinner chars from a single compose output line."""
+    line = _ANSI_RE.sub("", line).strip()
+    if not line or all(c in _SPINNER_CHARS for c in line):
+        return ""
+    return line
+
+
+async def compose_pull_stream(
+    frag_path: Path,
+    timeout: int = 600,
+) -> AsyncIterator[str]:
+    """Async generator: yields cleaned progress lines from docker compose pull."""
+    from backend.core.config import config as _cfg
+
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "compose",
+        "-f",
+        str(frag_path),
+        "--env-file",
+        str(_cfg.env_file),
+        "pull",
+        "--progress=plain",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env={**os.environ},
+    )
+    try:
+        async for raw in proc.stdout:  # type: ignore[union-attr]
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            clean = _clean_compose_line(line)
+            if clean:
+                yield clean
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        yield f"ERROR: pull timed out after {timeout}s"
+
 
 STACK_NETWORK = "slop"
 
@@ -73,6 +111,80 @@ _PROVIDER_ENV_VARS: dict[str, list[str]] = {
     "bunny": ["BUNNY_API_KEY"],
     "dnspod": ["DNSPOD_API_KEY", "DNSPOD_SECRET_ID"],
 }
+
+
+# ── Docker Compose command helper ─────────────────────────────────────────
+
+
+def compose_pull(frag_path: Path, timeout: int = 600) -> tuple[int, str]:
+    """Pull images declared in a fragment. Separate from compose_up so
+    large-image pulls get a long timeout without affecting container-start."""
+    import subprocess as _sp
+    from backend.core.config import config as _cfg
+
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(frag_path),
+        "--env-file",
+        str(_cfg.env_file),
+        "pull",
+    ]
+    r = _sp.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stderr or r.stdout).strip()
+
+
+def compose_up(frag_path: Path, pull: bool = False, timeout: int = 120) -> tuple[int, str]:
+    """Run `docker compose up -d` for a fragment, always passing the shared .env file.
+
+    Returns (returncode, error_output).
+    The --env-file flag ensures env vars (CF_DNS_API_TOKEN, etc.) resolve
+    correctly regardless of the working directory compose is called from.
+    """
+    import subprocess as _sp
+    from backend.core.config import config as _cfg
+
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(frag_path),
+        "--env-file",
+        str(_cfg.env_file),
+        "up",
+        "-d",
+    ]
+    if pull:
+        cmd += ["--pull", "missing"]
+    r = _sp.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stderr or r.stdout).strip()
+
+
+def compose_down(frag_path: Path, timeout: int = 60) -> tuple[int, str]:
+    """Run `docker compose down` for a fragment, always passing the shared .env file."""
+    import subprocess as _sp
+    from backend.core.config import config as _cfg
+
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(frag_path),
+        "--env-file",
+        str(_cfg.env_file),
+        "down",
+        # NO --remove-orphans here. Every app fragment lives in the same
+        # directory (data/compose/), so they all share compose's default
+        # project name (the dir basename). A single fragment only declares its
+        # own service, so `down --remove-orphans` scoped to that shared project
+        # treats EVERY other managed container — including the Traefik reverse
+        # proxy — as an orphan and deletes it. Removing one app must not tear
+        # down the rest of the stack. --remove-orphans is only safe on a compose
+        # file that represents the whole project.
+    ]
+    r = _sp.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stderr or r.stdout).strip()
 
 
 def build_traefik_fragment(
@@ -439,7 +551,7 @@ def build_service_fragment(
         f"slop.app-key={manifest_key}",
     ]
     _labels.extend(
-        _route_labels(
+        _traefik_labels(
             key=manifest_key,
             domain=domain,
             web_port=web_port,
@@ -469,7 +581,7 @@ def build_service_fragment(
     return fragment
 
 
-def _route_labels(
+def _traefik_labels(
     key: str,
     domain: str,
     web_port: int | None,
@@ -477,61 +589,45 @@ def _route_labels(
     lan_subnet: str | None,
     tinyauth_enabled: bool,
 ) -> list[str]:
-    """Per-app reverse-proxy route labels, emitted BY-REFERENCE through the active
-    reverse_proxy slot provider (#990 P2).
+    if not web_port:
+        return []
 
-    The provider (Traefik today) is the SOLE raw ``traefik.http.*`` per-app emitter —
-    this module no longer hardcodes those strings; it dispatches to
-    ``provider.emit_route_labels``. The lazy import breaks the compose↔infra module
-    cycle (the provider imports compose's deploy helpers at module load); the emission
-    is pure (no I/O) so fragment building stays side-effect-free.
+    subdomain = f"{key}.{domain}"
+    base = [
+        "traefik.enable=true",
+        f"traefik.http.services.{key}.loadbalancer.server.port={web_port}",
+        # TLS wildcard cert
+        f"traefik.http.routers.{key}.tls=true",
+        f"traefik.http.routers.{key}.tls.certresolver={cert_resolver}",
+        f"traefik.http.routers.{key}.tls.domains[0].main={domain}",
+        f"traefik.http.routers.{key}.tls.domains[0].sans=*.{domain}",
+    ]
 
-    reverse_proxy is one-active. The active provider key is resolved from the infra_slots
-    DB row (#1272 / #990 P3) — no longer hardcoded to ``traefik`` — degrading to ``traefik``
-    (the always-registered built-in floor) when the DB / slot row / configured key is
-    unavailable. This dispatcher is NOT pure (it reads the DB via ``_active_reverse_proxy_key``);
-    the per-app label STRINGS are still emitted purely by ``provider.emit_route_labels``. The
-    DB read is confined here so fragment building works without a slot row.
-    """
-    from backend.infra.registry import get_provider
+    if tinyauth_enabled and lan_subnet:
+        # Two-router pattern: LAN bypasses auth, internet hits Tinyauth
+        base += [
+            # LAN router (high priority, no auth)
+            f"traefik.http.routers.{key}-lan.rule=Host(`{subdomain}`) && ClientIP(`{lan_subnet}`)",
+            f"traefik.http.routers.{key}-lan.entrypoints=websecure",
+            f"traefik.http.routers.{key}-lan.priority=10",
+            f"traefik.http.routers.{key}-lan.tls=true",
+            f"traefik.http.routers.{key}-lan.tls.certresolver={cert_resolver}",
+            f"traefik.http.routers.{key}-lan.service={key}",
+            # Catch-all router (lower priority, Tinyauth middleware)
+            f"traefik.http.routers.{key}.rule=Host(`{subdomain}`)",
+            f"traefik.http.routers.{key}.entrypoints=websecure",
+            f"traefik.http.routers.{key}.priority=5",
+            f"traefik.http.routers.{key}.middlewares=tinyauth-auth@docker",
+            f"traefik.http.routers.{key}.service={key}",
+        ]
+    else:
+        base += [
+            f"traefik.http.routers.{key}.rule=Host(`{subdomain}`)",
+            f"traefik.http.routers.{key}.entrypoints=websecure",
+            f"traefik.http.routers.{key}.service={key}",
+        ]
 
-    key_ = _active_reverse_proxy_key()
-    try:
-        provider = get_provider("reverse_proxy", key_)
-    except KeyError:
-        # Configured provider not registered (e.g. a removed plugin) — degrade to Traefik
-        # rather than fail fragment building. Traefik itself is the built-in floor and is
-        # always registered (_ensure_providers_registered); a missing Traefik is a fatal
-        # misconfiguration that SHOULD surface loudly here, exactly as the pre-#1272 code
-        # (which called this same unconditional get_provider) would have.
-        provider = get_provider("reverse_proxy", "traefik")
-    return provider.emit_route_labels(
-        key, domain, web_port, cert_resolver, lan_subnet, tinyauth_enabled
-    )
-
-
-def _active_reverse_proxy_key() -> str:
-    """Resolve the configured active ``reverse_proxy`` provider key from the infra_slots DB.
-
-    Falls back to ``"traefik"`` (the sole provider today) on ANY failure: no DB, used
-    outside a context, missing/unseeded slot row, or an empty provider column. This keeps
-    ``build_service_fragment`` working without a slot row (mirrors the StateDB-read+fallback
-    pattern used for the Traefik image tag above). Validation that the key is *registered*
-    is done by the caller (it has the registry import), so a stale DB key still degrades
-    gracefully to Traefik.
-    """
-    try:
-        from backend.core.state import StateDB as _SDB
-
-        with _SDB() as _db:
-            key_ = _db.get_slot("reverse_proxy").provider
-    except Exception:
-        # Deliberately broad: this is a must-never-break-fragment-building path with a safe
-        # default, so a DB-unavailable env (no DB, outside-context, unseeded slot, locked
-        # file) degrades rather than aborts the install. Mirrors the identical bare-except +
-        # default in build_traefik_fragment above (the local idiom for DB-optional reads).
-        return "traefik"
-    return key_ or "traefik"
+    return base
 
 
 def _esc(value: str) -> str:
@@ -578,21 +674,13 @@ def _apply_managed_label(service_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def write_fragment(
-    key: str,
-    service_def: dict[str, Any],
-    network_name: str = STACK_NETWORK,
-    named_volumes: list[str] | None = None,
+    key: str, service_def: dict[str, Any], network_name: str = STACK_NETWORK
 ) -> Path:
     """Write a service compose fragment to disk.
 
     Includes a top-level networks: external declaration so each fragment can
     be run standalone with docker compose -f key.yaml up -d without Compose
     complaining that the network is undefined.
-
-    ``named_volumes`` — Docker named volumes the service references (e.g. a
-    managed DB's ``<svc>_data``). They are declared in a top-level ``volumes:``
-    block so compose can resolve them when the fragment runs standalone; without
-    the declaration compose errors on the undefined volume (#1203).
 
     Every service written here is normalised via _apply_managed_label so that
     slop.managed=true is always present (ADR 0017 §D), regardless of which
@@ -602,12 +690,10 @@ def write_fragment(
     fragment_dir.mkdir(parents=True, exist_ok=True)
 
     path = fragment_dir / f"{key}.yaml"
-    content: dict[str, Any] = {
+    content = {
         "services": {key: _apply_managed_label(service_def)},
         "networks": {network_name: {"external": True}},
     }
-    if named_volumes:
-        content["volumes"] = {vol: {} for vol in named_volumes}
     path.write_text(yaml.dump(content, default_flow_style=False, sort_keys=False))
     log.debug("Wrote compose fragment: %s", path)
     return path

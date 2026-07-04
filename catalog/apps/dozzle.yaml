@@ -19,7 +19,7 @@ volumes:
       container: /var/run/docker.sock
       readonly: true
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: dozzle
 

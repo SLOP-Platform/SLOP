@@ -9,17 +9,6 @@ This document covers the conventions that aren't already enforced by CI. For the
 - [ ] `mypy --strict` clean for any backend file you touched (Core Rule 5.20).
 - [ ] Commit subjects follow Conventional Commits 1.0 (Core Rule 7.1) — the commit-msg hook rejects malformed subjects.
 - [ ] If you introduced a new architectural constraint, codify it in `ms-coverage` as a rule entry (Core Rule 4.1).
-- [ ] Any example domain in docs/comments/test fixtures is an **RFC 2606 reserved** name — never a real registrable domain (see "Example domains in docs & comments" below).
-
-## Example domains in docs & comments
-
-For any placeholder domain in documentation, code comments, docstrings, or test fixtures, use a **reserved pseudo-TLD** name — i.e. one ending in `.example`, `.invalid`, `.test`, or `.localhost` (RFC 2606 / RFC 6761). For example: `myhost.example`, `api.invalid`.
-
-The public-publish gate `check_public_output` flags any domain on a **real TLD** (`.com`, `.net`, `.io`, …) that is not in the private publish allow-list, and turns the **Public Pipeline Gates RED** at publish time — the scrubber cannot tell an illustrative real domain from a genuine private-host leak. The reserved pseudo-TLDs above are **not real TLDs**, so the gate skips them and the convention alone is sufficient (no separate per-instance gate — CLAUDE.md §6 anti-accretion).
-
-Note the `example.<real-tld>` family (the RFC 2606 second-level reserved names) sits on a real TLD, so it passes the gate **only** if the operator has added it to the `allow:` › `domains:` list in `publish.identity.yaml`; prefer the pseudo-TLD forms above, which need no operator action. This recurred once as a real bug (an illustrative real domain in a docstring, #1127); the pseudo-TLD forms make it impossible.
-
-> This section deliberately writes **no** real-TLD example domain — doing so would itself be the bug it warns against.
 
 ## Snapshot tests (Core Rule 4.11)
 
@@ -68,18 +57,16 @@ A backlog of pre-existing order-dependent tests is tracked in [`docs/TODO_2026_0
 
 ## Commit conventions (Core Rule 7.1)
 
-Subjects follow **either** of two accepted forms:
+Subjects follow Conventional Commits 1.0:
 
 ```
-type(scope): subject ≤ 100 chars, no trailing period      (Conventional Commits 1.0)
-#NNNN[ qualifier]?: subject ≤ 100 chars, no trailing period   (ticket-ref form)
+type(scope): subject ≤ 100 chars, no trailing period
 ```
 
 Where:
-- `type` ∈ feat | fix | refactor | perf | test | docs | chore | ci | style | revert | build
-- `scope` is lowercase, underscores or hyphens (e.g. `api`, `health`, `manifests`). A **comma** is also permitted so a single commit addressing two tickets validates as a multi-ref scope (e.g. `docs(#1273,#1274): …`) — #1276 relax. Scopes stay lowercase; an uppercase scope (`feat(DTC):`) is still rejected.
-- **ticket-ref form** (`#1209`): `#` + ticket number, an optional space-led qualifier (a colon-free sub-task tag like `layer-2`, `COMPLETE`, `fix3`, `phase-1`), then `: subject`. This is the de-facto team-autonomous convention (#1209) — first-class alongside Conventional Commits, not a fallback.
-- The commit-msg hook (`tools/commit_msg_hook.py`) rejects subjects matching neither form.
+- `type` ∈ feat | fix | refactor | perf | test | docs | chore
+- `scope` is lowercase, underscores or hyphens (e.g. `api`, `health`, `manifests`)
+- The commit-msg hook (`tools/commit_msg_hook.py`) rejects malformed subjects.
 - `--no-verify` bypasses the hook but `tests/test_commit_format.py` catches the bypass on the next CI run.
 
 `ms-changelog` regenerates `CHANGELOG.md` from the trailing `git log` since the cutoff SHA. Run it on demand; do not hand-edit CHANGELOG.md.

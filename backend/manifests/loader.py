@@ -25,27 +25,6 @@ import yaml
 from backend.core.config import config
 from backend.core.logging import get_logger
 
-# The leaf manifest-schema dataclasses + VALID_* validation vocab live in a sibling module to keep
-# this file under the production_code cap (#1302). Imported back + re-exported (redundant-alias
-# idiom) so existing callers — AppManifest's annotations, loader_parsers' construction imports, and
-# the tests importing VolumeDef/DependencyDef from loader — keep resolving unchanged.
-from backend.manifests.loader_types import (
-    VALID_CATEGORIES as VALID_CATEGORIES,
-    VALID_CHECK_TYPES as VALID_CHECK_TYPES,
-    VALID_HEAL_ACTIONS as VALID_HEAL_ACTIONS,
-    VALID_STEP_TYPES as VALID_STEP_TYPES,
-    VALID_WIRE_DIRECTIONS as VALID_WIRE_DIRECTIONS,
-    DependencyDef as DependencyDef,
-    GpuDef as GpuDef,
-    HealthCheckDef as HealthCheckDef,
-    InstallPromptDef as InstallPromptDef,
-    PortDef as PortDef,
-    PostDeployStep as PostDeployStep,
-    SelfHealDef as SelfHealDef,
-    VolumeDef as VolumeDef,
-    WireDef as WireDef,
-)
-
 log = get_logger(__name__)
 
 
@@ -61,6 +40,88 @@ class ManifestError(Exception):
         self.path = path
         self.message = message
         super().__init__(f"{path.name}: {message}")
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PortDef:
+    internal: int
+    protocol: str = "tcp"
+    name: str = ""
+
+
+@dataclass
+class VolumeDef:
+    host_path: str  # relative to config_root or absolute
+    container_path: str
+    readonly: bool = False
+    prompt_key: str = ""  # non-empty when host_path is a sentinel "<prompt:{key}>"
+
+
+@dataclass
+class InstallPromptDef:
+    key: str
+    label: str
+    description: str
+    prompt_type: str = "string"  # "path" | "string"
+    required: bool = False
+    default: str = ""
+
+
+@dataclass
+class WireDef:
+    wire_type: str  # indexer | notification | library | ...
+    peer: str  # key of the other app
+    direction: str  # accepts | connects_to
+    description: str = ""
+    optional: bool = False
+
+
+@dataclass
+class PostDeployStep:
+    step_type: str  # wait_healthy | api_ready | wire | custom
+    timeout: int = 60
+    path: str = ""  # for api_ready
+    target: str = ""  # for wire
+    wire_type: str = ""
+
+
+@dataclass
+class HealthCheckDef:
+    name: str
+    check_type: str  # http | tcp | process | custom
+    path: str = ""
+    expect_status: int = 200
+    interval: int = 30
+    port: int = 0  # for tcp checks: override port (defaults to app host_port)
+
+
+@dataclass
+class SelfHealDef:
+    condition: str  # matches a health check name
+    action: str  # restart | rewire | notify
+    max_attempts: int = 3
+    cooldown: int = 60
+
+
+@dataclass
+class GpuDef:
+    optional: bool = True
+    warn_if_absent: bool = True
+    nvidia: bool = True
+    amd: bool = False
+
+
+@dataclass
+class DependencyDef:
+    postgres: bool = False
+    redis: bool = False
+    mariadb: bool = False
+    apps: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -96,19 +157,6 @@ class AppManifest:
     # field so a probe/test can inject an explicit absolute path when needed.
     backup_supported: bool = False
     backup_dir: str = ""  # runtime-resolved; empty = derive from config_root
-    # Per-app restore-verify sentinel (docs/BACKUP-PRODUCT-868-DESIGN.md §4). Selects the
-    # per-class invariant `ms-backup --verify` applies after restoring this app's artifact to
-    # scratch — the plug-point of the `backend.platform.backup_ops.Invariant` seam:
-    #   ""            → generic invariant (tar extracts + ≥1 real file restored); the default.
-    #   "sqlite:<rel>"→ the restored file at <rel> opens + passes PRAGMA integrity_check
-    #                   (e.g. "sqlite:app.db" for an app whose state is a SQLite DB).
-    #   "path:<rel>"  → the restored backup must contain <rel> (a declared sentinel file).
-    # An unrecognised value falls back to the generic invariant (never a silent skip of verify).
-    backup_verify: str = ""
-    # backup_offhost opts an app into REQUIRING an off-host copy (design §13 / #1283): the recovery
-    # probe then REFUSES VERIFIED while the latest restore-verify scope is only local-plaintext (a
-    # local-only verify never proves the off-host copy decrypts). Default false = local-only.
-    backup_offhost: bool = False
 
     # ── Environment ───────────────────────────────────────────────────────
     env: dict[str, str] = field(default_factory=dict)
@@ -230,7 +278,6 @@ class AppManifest:
             "dependencies": {
                 "postgres": self.dependencies.postgres,
                 "redis": self.dependencies.redis,
-                "mariadb": self.dependencies.mariadb,
                 "apps": self.dependencies.apps,
             },
             "install_prompts": list(self.install_prompts),
@@ -240,6 +287,25 @@ class AppManifest:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
+
+
+VALID_CATEGORIES = {
+    "arr",
+    "media",
+    "downloader",
+    "requests",
+    "tools",
+    "ai",
+    "monitoring",
+    "productivity",
+    "infra",
+    "agent",  # reserved for tier-0 system components (SLOP Agent etc.)
+}
+
+VALID_STEP_TYPES = {"wait_healthy", "api_ready", "wire", "custom"}
+VALID_CHECK_TYPES = {"http", "tcp", "process", "custom"}
+VALID_HEAL_ACTIONS = {"restart", "rewire", "notify"}
+VALID_WIRE_DIRECTIONS = {"accepts", "connects_to"}
 
 
 # Parser helpers — extracted to loader_parsers.py (file-size discipline).
@@ -260,49 +326,6 @@ from backend.manifests.loader_parsers import (  # noqa: E402
     _SAFE_CAPABILITIES,  # noqa: F401  # re-exported for test and external callers
     _HEALTH_REQUIRED_TIERS,  # noqa: F401  # re-exported for test and external callers
 )
-
-
-def _resolve_proxy_config(data: dict[str, Any], key: str) -> dict[str, Any]:
-    """#1263 (#990 residual): resolve the abstract reverse-proxy config block.
-
-    `reverse_proxy:` / `proxy:` are the canonical de-Traefik keys; `traefik:` is a
-    deprecated backward-compat ALIAS. Only the YAML KEY is de-Traefik-ized — the
-    AppManifest fields keep their traefik_* names (renaming those is the #990
-    reverse_proxy SlotContract's job, not this cosmetic alias). Canonical wins on
-    conflict; a lone deprecated `traefik:` key is accepted but warned."""
-    proxy_raw = data.get("reverse_proxy")
-    if proxy_raw is None:
-        proxy_raw = data.get("proxy")
-    if "traefik" in data:
-        if proxy_raw is not None:
-            # A real misconfiguration (both a canonical key AND the legacy alias) —
-            # worth a per-manifest WARNING so it isn't silently merged.
-            log.warning(
-                "Manifest %r sets a canonical reverse-proxy key AND the deprecated "
-                "'traefik:' key — using the canonical key, ignoring 'traefik:'.",
-                key,
-            )
-        else:
-            # Lone legacy `traefik:` — accepted SILENTLY. A per-manifest deprecation
-            # warning would add one WARNING per catalog app (~86) to every
-            # load_all_manifests() at startup, and the #990 DToC explicitly DEFERRED
-            # catalog migration, so the nudge isn't yet actionable. The
-            # migration-nudge warning belongs with the scheduled catalog migration
-            # (mechanical traefik:→reverse_proxy: sweep) / the #990 slot land.
-            proxy_raw = data.get("traefik")
-    # Harden against a malformed block (e.g. `reverse_proxy: [..]` / a scalar): the
-    # downstream `traefik_raw.get(...)` would crash on a non-mapping. The old code
-    # (`data.get("traefik", {}) or {}`) had this same latent crash; here we coerce a
-    # non-dict to {} (warned) so a bad community manifest degrades to defaults, never
-    # a parse crash. A falsy/None value coalesces to {} silently (unchanged).
-    if proxy_raw and not isinstance(proxy_raw, dict):
-        log.warning(
-            "Manifest %r reverse-proxy config is not a mapping (got %s) — ignoring.",
-            key,
-            type(proxy_raw).__name__,
-        )
-        return {}
-    return proxy_raw or {}
 
 
 def parse_manifest(path: Path) -> AppManifest:
@@ -371,7 +394,7 @@ def parse_manifest(path: Path) -> AppManifest:
 
     _validate_wire_types(key, post_deploy)
 
-    traefik_raw = _resolve_proxy_config(data, key)
+    traefik_raw = data.get("traefik", {}) or {}
 
     env_raw = data.get("env", {}) or {}
     env = {str(k): str(v) for k, v in env_raw.items()}
@@ -396,8 +419,6 @@ def parse_manifest(path: Path) -> AppManifest:
         custom_volumes=custom_vols,
         backup_supported=bool(data.get("backup_supported", False)),
         backup_dir=str(data.get("backup_dir", "") or ""),
-        backup_verify=str(data.get("backup_verify", "") or ""),
-        backup_offhost=bool(data.get("backup_offhost", False)),
         env=env,
         dependencies=deps,
         traefik_enabled=bool(traefik_raw.get("enabled", True)),
@@ -454,13 +475,12 @@ def load_manifest(key: str, force_reload: bool = False) -> AppManifest:
     """Load a single manifest by app key.
 
     Checks catalog/apps/<key>.yaml first, then catalog/community/<key>.yaml.
-    Caches; force_reload=True picks up changes (e.g. after a community install).
-    Raises ManifestError (invalid), KeyError (not found), or PathNotAllowed — the
-    last is the traversal guard at the common {key}->path seam (#1041).
-    """
-    from backend.core.path_guard import safe_component
+    Caches result — use force_reload=True to pick up changes (e.g. during
+    development or after a registry/community install).
 
-    safe_component(key, field="app key")
+    Raises ManifestError if not found or invalid.
+    Raises KeyError if the key doesn't exist in either catalog location.
+    """
     if key in _cache and not force_reload:
         return _cache[key]
 

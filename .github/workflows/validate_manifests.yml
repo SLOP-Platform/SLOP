@@ -1,11 +1,5 @@
 name: Validate Manifests
 
-# Cancel superseded runs per workflow+ref so rapid pushes don't pile up;
-# ref-keyed so tag/release runs are isolated from branch CI (#966).
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 on:
   push:
     paths:
@@ -20,7 +14,6 @@ env:
 
 jobs:
   validate:
-    # Public CI runs on free GitHub-hosted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

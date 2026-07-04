@@ -65,7 +65,7 @@ env:
   VOLUMES: "0"
 
 # Must be on a network that Traefik can reach
-reverse_proxy:
+traefik:
   enabled: false # This service doesn't need Traefik routing
 
 health:

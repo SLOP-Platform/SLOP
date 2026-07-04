@@ -72,16 +72,6 @@ def _extract_prompt_key(host_val: str) -> str:
     return m.group(1) if m else ""
 
 
-# Valid per-volume backup classes (design §14). An unknown/absent value coerces to "config" —
-# the fail-safe direction (back up rather than silently exclude irreplaceable data, constraint 5).
-_VOLUME_BACKUP_CLASSES = frozenset({"config", "media", "exclude"})
-
-
-def _coerce_backup_class(raw: Any) -> str:
-    val = str(raw or "").strip().lower()
-    return val if val in _VOLUME_BACKUP_CLASSES else "config"
-
-
 def _parse_volumes(data: dict[str, Any], path: Path) -> tuple[str, str | None, list[Any]]:
     from backend.manifests.loader import ManifestError, VolumeDef
 
@@ -100,7 +90,6 @@ def _parse_volumes(data: dict[str, Any], path: Path) -> tuple[str, str | None, l
                     container_path=v["container"],
                     readonly=bool(v.get("readonly", False)),
                     prompt_key=prompt_key,
-                    backup_class=_coerce_backup_class(v.get("backup_class")),
                 )
             )
         except KeyError as e:

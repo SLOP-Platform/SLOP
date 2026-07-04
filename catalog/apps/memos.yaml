@@ -19,7 +19,7 @@ ports:
 volumes:
   config: /var/opt/memos
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: memos
 

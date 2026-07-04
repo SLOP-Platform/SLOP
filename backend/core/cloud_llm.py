@@ -393,7 +393,7 @@ async def _call_openai_compatible(
     base_url: str, api_key: str, model: str, prompt: str, timeout: int = 30
 ) -> tuple[str, int, int]:
     """Call any OpenAI-compatible endpoint. Returns (response_text, in_tokens, out_tokens)."""
-    from backend.core.url_guard_httpx import pinned_async_client
+    import httpx
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -405,7 +405,7 @@ async def _call_openai_compatible(
         "max_tokens": 500,
         "temperature": 0.1,
     }
-    async with pinned_async_client(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()

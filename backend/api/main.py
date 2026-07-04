@@ -19,15 +19,14 @@ from pathlib import Path
 
 import os
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend import __version__
 from backend.api import catalog as catalog_router
-from backend.api import control_plane as control_plane_router
 from backend.api import health as health_router
 from backend.api import settings as settings_router
 from backend.api import registry as registry_router
@@ -36,7 +35,6 @@ from backend.api import storage as storage_router
 from backend.api import models as models_router
 from backend.api import platform as platform_router
 from backend.api import quickstart as quickstart_router
-from backend.api.auth_policy import control_plane_guard  # #976 control-plane guard
 from backend.api.middleware import (
     AuditLogMiddleware,
     CorrelationIdMiddleware,
@@ -278,17 +276,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     ensure_agent_registered()
 
-    # #976 Phase-B: generate-if-absent the control-plane auth token into .env so enforce
-    # mode (#1251) always has a real token to check. Single cross-path seam (deploy.sh seeds
-    # it directly; the Python installer + existing-install upgrades land here). Idempotent —
-    # writes only on first boot when no token is configured; never clobbers an operator value.
-    from backend.api.settings import ensure_control_plane_token_provisioned
-
-    try:
-        ensure_control_plane_token_provisioned()
-    except Exception as exc:  # provisioning must never block startup
-        log.warning("control-plane token provisioning skipped: %s", exc)
-
     # Mark any in-flight installs as failed.
     # If the server restarted mid-install the __done__ sentinel was never written,
     # leaving the progress poller stuck. Clean those up on startup.
@@ -458,22 +445,6 @@ async def _record_unhandled_error(
     raise exc
 
 
-@app.exception_handler(OverflowError)
-async def _overflow_to_400(request: Request, exc: OverflowError) -> JSONResponse:
-    """An ``OverflowError`` reaching a request handler is always caused by an oversize
-    client-supplied number — e.g. an int path/query param past SQLite's signed-64-bit
-    range bound into a query (``OverflowError: Python int too large to convert to SQLite
-    INTEGER``). Map the whole class to a 400 so no endpoint 5xx's on it (#1197), rather
-    than guarding every individual int param. More specific than the ``Exception`` handler
-    above, so Starlette dispatches here first (MRO-based dispatch).
-
-    CAVEAT (review #1197): this is a CATCH-ALL — it cannot tell a client-input overflow
-    from a genuine server-side one. There are no server-side ``OverflowError`` sources
-    today (no ``struct.pack``/bit-shift/computed-arithmetic that can overflow), but if you
-    ADD one, catch + handle it LOCALLY so a real server bug is not masqueraded as a 400."""
-    return JSONResponse(status_code=400, content={"detail": "Numeric value out of range."})
-
-
 # ── API routes (ALL must be registered BEFORE the SPA catch-all) ─────────
 
 
@@ -484,24 +455,9 @@ def _mount(router_module: Any, name: str, tag: str) -> None:
     """Register `router_module.router` at both /api/v1/<name> and /api/<name>.
     The legacy /api/<name> mount carries a `deprecated` tag so Swagger
     UI groups it separately; the deprecation middleware below adds the
-    `Deprecation: true` response header to unversioned requests.
-
-    #976: the control_plane_guard is attached HERE — _mount is the sole
-    include_router call site for area routers, so wiring the guard once covers
-    every mounted area (incl. backend/agent/api.py) at BOTH dual-mounts. Default
-    mode `off` makes the guard a no-op (zero behaviour change)."""
-    app.include_router(
-        router_module.router,
-        prefix=f"/api/v1/{name}",
-        tags=[tag],
-        dependencies=[Depends(control_plane_guard)],
-    )
-    app.include_router(
-        router_module.router,
-        prefix=f"/api/{name}",
-        tags=[tag, "deprecated"],
-        dependencies=[Depends(control_plane_guard)],
-    )
+    `Deprecation: true` response header to unversioned requests."""
+    app.include_router(router_module.router, prefix=f"/api/v1/{name}", tags=[tag])
+    app.include_router(router_module.router, prefix=f"/api/{name}", tags=[tag, "deprecated"])
 
 
 _mount(platform_router, "platform", "Platform")
@@ -512,7 +468,6 @@ _mount(health_router, "health", "Health")
 _mount(settings_router, "settings", "Settings")
 _mount(routing_router, "routing", "Routing")
 _mount(storage_router, "storage/sources", "Storage")
-_mount(control_plane_router, "control-plane", "ControlPlane")  # #976 Phase-C posture badge
 
 # Step 4 followup: quickstart.py's APIRouter carries its own
 # `prefix="/quickstart"`, so the parent prefix is just `/api/v1` (or
@@ -523,13 +478,11 @@ app.include_router(
     quickstart_router.router,
     prefix="/api/v1",
     tags=["QuickStart"],
-    dependencies=[Depends(control_plane_guard)],  # #976
 )
 app.include_router(
     quickstart_router.router,
     prefix="/api",
     tags=["QuickStart", "deprecated"],
-    dependencies=[Depends(control_plane_guard)],  # #976
 )
 
 # Late imports — these modules import the executor which in turn imports docker,
@@ -586,9 +539,7 @@ def ping() -> dict[str, Any]:
     return {"status": "ok", "version": __version__}
 
 
-@app.get(
-    "/api/coverage", dependencies=[Depends(control_plane_guard)]
-)  # #976: @app-level exec surface
+@app.get("/api/coverage")
 def get_coverage_map() -> dict[str, Any]:
     """Return the latest coverage map generated by ms-coverage.
 

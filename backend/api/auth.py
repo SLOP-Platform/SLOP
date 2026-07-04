@@ -94,9 +94,7 @@ def require_scope(scope: Scope):  # type: ignore[no-untyped-def]
 
         if configured:
             if not _token_matches(presented, configured):
-                raise HTTPException(
-                    status_code=401, detail="invalid or missing control-plane token"
-                )
+                raise HTTPException(status_code=401, detail="invalid or missing control-plane token")
             return scope
 
         # No token configured.
@@ -118,35 +116,9 @@ require_read = Depends(require_scope(Scope.READ))
 require_act = Depends(require_scope(Scope.ACT))
 
 
-# Audit-actor labels (NOT access decisions — see resolve_actor).
-ACTOR_CONTROL_PLANE = "control-plane"
-ACTOR_LOCAL = "local"
-
-
-def resolve_actor(authorization: str | None, x_api_key: str | None) -> str:
-    """Best-effort principal label for the audit log (#978) — NOT an access decision.
-
-    Returns ``ACTOR_CONTROL_PLANE`` when the request presents a token matching the
-    configured control-plane token, else ``ACTOR_LOCAL`` (the unauthenticated
-    local-deployment actor, the prior hardcoded default). The granularity is binary
-    by design: A0 has no per-user identity — finer per-principal attribution is
-    deferred to the #976 SameSite-session follow-up. This is deliberately decoupled
-    from ``require_scope`` so the audit middleware can attribute EVERY mutating
-    request (most routes are not yet wired to the dependency), reusing the same
-    constant-time token check (no access control, no secret logged — only the label).
-    """
-    configured = _configured_token()
-    if configured and _token_matches(_present_token(authorization, x_api_key), configured):
-        return ACTOR_CONTROL_PLANE
-    return ACTOR_LOCAL
-
-
 __all__ = [
-    "ACTOR_CONTROL_PLANE",
-    "ACTOR_LOCAL",
     "Scope",
     "require_act",
     "require_read",
     "require_scope",
-    "resolve_actor",
 ]

@@ -22,7 +22,7 @@ volumes:
 env:
   TZ: "${TZ}"
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: freshrss
 

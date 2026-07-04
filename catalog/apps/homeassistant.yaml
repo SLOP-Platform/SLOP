@@ -20,7 +20,7 @@ volumes:
 
 network_mode: host
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: homeassistant
 

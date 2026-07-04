@@ -3,7 +3,7 @@
 ## Update model
 
 The SLOP install directory (`/opt/slop`) is an **HTTPS git clone** of
-`SLOP-Platform/SLOP`, owned by the **service user `slop`**. Updates pull from
+`Nnyan/SLOP`, owned by the **service user `slop`**. Updates pull from
 `origin/main` using `ms-update` or `deploy.sh --update`; there is no manual
 `scp`/`rsync` copy step.
 

@@ -73,7 +73,7 @@ gpu:
   nvidia: true
   amd: true
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: plex
 

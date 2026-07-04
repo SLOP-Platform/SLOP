@@ -208,8 +208,11 @@ function isActive(to: string) {
 
 async function loadHealthSummary() {
   try {
-    const d = await healthApi.summary()
-    healthCounts.value = { ok: d.ok ?? 0, warning: d.warning ?? 0, error: d.error ?? 0 }
+    const res = await fetch('/api/v1/health/summary')
+    if (res.ok) {
+      const d = await res.json()
+      healthCounts.value = { ok: d.ok ?? 0, warning: d.warning ?? 0, error: d.error ?? 0 }
+    }
   } catch { /* offline */ }
 }
 

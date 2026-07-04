@@ -18,7 +18,7 @@ volumes:
   config: /config
   media: /downloads
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: sabnzbd
   auth: true

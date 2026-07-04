@@ -29,10 +29,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.agent.registry import invoke_action, list_actions, tier_for
+from backend.api.auth import Scope, require_scope
 from backend.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -157,9 +158,7 @@ def _status_reply(app_key: str | None) -> ChatReply:
                 app_key=app_key,
             )
         names = ", ".join(a.key for a in apps) or "(none installed)"
-        return ChatReply(
-            reply=f"I'm managing: {names}. Ask about a specific app for detail.", kind="answer"
-        )
+        return ChatReply(reply=f"I'm managing: {names}. Ask about a specific app for detail.", kind="answer")
     except Exception as exc:
         log.warning("chat: status reply failed: %s", exc)
         return ChatReply(reply="I couldn't read the current status right now.", kind="answer")
@@ -181,7 +180,7 @@ def _list_actions_reply() -> ChatReply:
 
 
 @router.post("", response_model=ChatReply)
-def chat(req: ChatRequest) -> ChatReply:
+def chat(req: ChatRequest, _scope: Scope = Depends(require_scope(Scope.ACT))) -> ChatReply:
     """Operator chat. Bound to ACT scope (it can dispatch actions); read-only
     intents simply never reach a mutation. Action dispatch goes ONLY through
     ``registry.invoke_action`` (the shared gate) — never a direct handler call.

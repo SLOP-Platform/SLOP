@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 8888
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: unmanic
 

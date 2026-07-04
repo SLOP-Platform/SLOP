@@ -145,51 +145,6 @@ class Decision:
 
 
 # ---------------------------------------------------------------------------
-# Slot-proposal type (AGENT-FUNC spine seam — #1329).
-# ---------------------------------------------------------------------------
-# An agent performing AI-driven provider onboarding (#991) emits proposals
-# through the advisory spine.  A ``SlotProposal`` is the structured type that
-# represents "for slot X, propose provider Y with this wiring."  Like
-# ``Decision`` it is advisory-only — no action is wired.  A future gated-acting
-# implementation would CONSUME a verified Proposal and route it through the
-# conformance gate + OperationalLevel before registering.
-#
-# The type lives here in the spine contract so it is importable by every
-# stratum without pulling in slot or provider code.
-
-
-@dataclass(frozen=True)
-class SlotProposal:
-    """Advisory-only slot provider proposal emitted by the agent spine.
-
-    Describes the wiring a future AI-driven onboarding agent (#991) WOULD
-    propose for a slot, with no action wired.  ``rationale`` records the
-    agent's reasoning; ``conformance_expected`` is a human-readability field
-    (the actual conformance check runs at registration time, not in the
-    proposal)."""
-
-    slot: str
-    provider_key: str
-    rationale: str = ""
-    conformance_expected: str = "unverified — advisory proposal only"
-
-
-def propose_slot(slot: str, provider_key: str, *, rationale: str = "") -> SlotProposal:
-    """Create an advisory-only slot provider proposal.
-
-    The PINNED seam for agent-driven provider onboarding (#991).  Returns a
-    ``SlotProposal`` that describes the proposed wiring; the proposal is
-    advisory and unverified.  A future gated-acting path would run conformance
-    BEFORE registering — this seam is the advisory half.
-    """
-    return SlotProposal(
-        slot=slot,
-        provider_key=provider_key,
-        rationale=rationale,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Protocol seam signatures (the three reusable seams)
 # ---------------------------------------------------------------------------
 
@@ -199,8 +154,6 @@ Reconciler = Callable[[], "list[Finding]"]
 Interpreter = Callable[["list[Finding]"], "list[Finding]"]
 # A remediator maps findings to advisory-only Decisions.
 Remediator = Callable[["list[Finding]"], "list[Decision]"]
-# A proposer emits advisory-only SlotProposals for provider onboarding (#991).
-Proposer = Callable[[str, str], "SlotProposal"]
 
 
 def interpret(findings: list[Finding]) -> list[Finding]:
@@ -307,13 +260,10 @@ __all__ = [
     "Decision",
     "Finding",
     "Interpreter",
-    "Proposer",
     "Reconciler",
     "Remediator",
-    "SlotProposal",
     "Verdict",
     "interpret",
     "persist_findings",
-    "propose_slot",
     "run_self_audit_cycle",
 ]

@@ -31,7 +31,7 @@ env:
   INSTALL_BOOK_AND_ADVANCED_HTML_OPS: "false"
   LANGS: "en_GB"
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: stirling
 

@@ -385,11 +385,6 @@ import type { InfraSlot } from '../api/client'
 
 const toast = useToast()
 
-// Curated UI ordering — intentionally a 5-of-6 subset of the backend's deployable_slots().
-// `reverse_proxy` (#990) is a deployable slot in the API but is DELIBERATELY not surfaced in
-// the infra strip during the additive P1 stage: exposing a deploy/swap control for Traefik
-// (the edge router every app routes through) is an operator footgun until P2 inverts compose
-// label-emission to go through the slot provider. Add it here when P2 makes the slot meaningful.
 const SLOT_ORDER = ['auth', 'tunnel', 'vpn', 'dashboard', 'management']
 const SLOT_ICONS: Record<string, string> = { auth: '🔐', tunnel: '🌐', dashboard: '📊', management: '🐋', vpn: '🛡️' }
 const PROVIDER_ICONS: Record<string, string> = {
@@ -526,7 +521,8 @@ async function deploy() {
 async function verifyTunnel(providerKey: string) {
   verifying.value = providerKey
   try {
-    const { data: d } = await infra.tunnelVerify(providerKey)
+    const r = await fetch(`/api/v1/infra/tunnel/verify?provider_key=${providerKey}`, { method: 'POST' })
+    const d = await r.json()
     verifyResults.value[providerKey] = { ok: d.ok, message: d.message }
     toast[d.ok ? 'success' : 'error'](d.message)
   } catch (e) {
@@ -540,7 +536,8 @@ async function removeTunnel(providerKey: string) {
   if (!confirm(`Remove ${providerKey} tunnel?`)) return
   removingTunnel.value = providerKey
   try {
-    const { data: d } = await infra.tunnelRemove(providerKey)
+    const r = await fetch(`/api/v1/infra/tunnel/remove?provider_key=${providerKey}`, { method: 'POST' })
+    const d = await r.json()
     if (d.ok) {
       toast.success(`${providerKey} tunnel removed.`)
       slots.value = await infra.slots()
@@ -558,9 +555,11 @@ async function verify(slot: string) {
   verifying.value = slot
   verifyResults.value[slot] = { ok: false, message: 'Checking…' }
   try {
-    const { ok: httpOk, status, data } = await infra.slotVerify(slot)
-    const ok = data.ok ?? httpOk
-    const msg = data.message ?? (httpOk ? 'Provider is running.' : `Error: ${status}`)
+    const r = await fetch(`/api/v1/infra/${slot}/verify`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' } })
+    const data = await r.json()
+    const ok = data.ok ?? r.ok
+    const msg = data.message ?? (r.ok ? 'Provider is running.' : `Error: ${r.status}`)
     verifyResults.value[slot] = { ok, message: msg }
     if (ok) toast.success(`${slot}: ${msg}`)
     else toast.error(`${slot} verify failed.`, msg)

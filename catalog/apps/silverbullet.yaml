@@ -19,7 +19,7 @@ volumes:
 env:
   SB_SHELL_BACKEND: deno
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: silverbullet
 

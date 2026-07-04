@@ -9,7 +9,7 @@ list_hostnames.
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar
+from typing import Any
 
 import httpx
 
@@ -19,54 +19,18 @@ from backend.core.config import config
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.infra.base import InfraProvider, ProviderResult
-from backend.infra.registry import register
 
 log = get_logger(__name__)
 
 CONTAINER_NAME = "cloudflared"
-IMAGE = (
-    "cloudflare/cloudflared:latest"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
-)
+IMAGE = "cloudflare/cloudflared:latest"
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
 
 
-@register
 class CloudflareTunnelProvider(InfraProvider):
     slot = "tunnel"
     key = "cloudflared"
     display_name = "Cloudflare Tunnel"
-
-    # MANIFEST-LESS infra provider (no catalog/apps/cloudflared.yaml) — `fields`
-    # is hand-authored from this provider's own deploy() config knowledge
-    # (tunnel_token/domain/auto_register). Judgment-class gap: an infra slot
-    # provider with no catalog manifest has no manifest SSOT for its UI schema
-    # (see #975 follow-up).
-    fields: ClassVar[list[dict[str, Any]]] = [
-        {
-            "key": "tunnel_token",
-            "label": "Cloudflare Tunnel token",
-            "type": "text",
-            "secret": True,
-            "required": True,
-            "help": "From Cloudflare Zero Trust -> Networks -> Tunnels -> your tunnel.",
-        },
-        {
-            "key": "domain",
-            "label": "Base domain",
-            "type": "text",
-            "placeholder": "example.com",
-            "required": True,
-            "help": "The Cloudflare-managed domain apps are published under.",
-        },
-        {
-            "key": "auto_register",
-            "label": "Auto-register hostnames",
-            "type": "checkbox",
-            "required": False,
-            "help": "Automatically register app hostnames in the tunnel on install.",
-        },
-    ]
-    category = "networking"
 
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
         """Deploy the Cloudflare Tunnel container.
@@ -129,9 +93,9 @@ class CloudflareTunnelProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "cloudflared",
-                    display_name=self.display_name,
+                    display_name="Cloudflare Tunnel",
                     tier=0,  # tier 0 = infrastructure layer
-                    category=self.category,
+                    category="networking",
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

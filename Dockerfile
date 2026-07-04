@@ -18,32 +18,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Docker CLI source image ───────────────────────────────────────────────────
-# Tag-pinned to the multi-arch `docker:29-cli` (tracking id=846; bumped #1149). The
-# prior docker:28.0.1-cli base carried 7 CRITICAL + 94 HIGH CVEs (Go stdlib/containerd/
-# docker/buildkit modules built on Go 1.23.6); 29-cli cleared all 7 CRITICAL.
-# SHIPPED SURFACE (#1221, trivy 0.71.0 re-scan 2026-06-21): only the `docker` +
-# `docker-compose` Go binaries are COPYed into the final image (below) — builder-stage
-# OS pkgs and the `docker-buildx` plugin do NOT ship. Per shipped binary: `docker` CLI
-# = 0 CVE (clean); `docker-compose` plugin = 6 HIGH (containerd/v2, docker/docker, Go
-# stdlib). The gate scans the whole `docker:29-cli` FROM image so it ALSO flags buildx
-# (4 HIGH) + the alpine OS pkgs, which are NOT in the shipped artifact set.
-# The 6 shipped docker-compose HIGHs now HAVE upstream fixes (containerd 2.3.2, docker
-# 29.3.1, Go stdlib 1.26.4) — but no rebuilt docker:*-cli or docker/compose-bin image
-# has absorbed them yet (compose-bin:latest is identically 6 HIGH; docker:cli=4 HIGH,
-# docker:28-cli=21 — no tag is green; node:22/24/lts-slim each red on a fresh npm HIGH).
-# No base bump remediates today; surfaced (non-blocking) by the trivy base-image CVE
-# gate in .github/workflows/security-lint.yml (#1149/#836). RE-EVAL TRIGGER: re-scan +
-# bump when a docker:*-cli tag ships docker>=29.3.1 + containerd>=2.3.2 + Go>=1.26.4.
-# NOTE: kept a TAG, not a digest, because the docker.yml publish workflow builds linux/amd64+arm64
-# and a platform-specific digest would break the arm64 leg; the original 28.0.1-cli pin
-# was a tag for the same reason. id=846's digest-pin TODO remains open pending a
-# confirmed multi-arch INDEX digest.
-FROM docker:29-cli AS docker-cli
+# Pinned to a concrete version tag (tracking id=846).
+# TODO: upgrade to digest-pinned form once registry access is confirmed:
+#   docker:28.0.1-cli@sha256:<digest>
+FROM docker:28.0.1-cli AS docker-cli
 
 # ── Runtime image ────────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# hadolint ignore=DL3008  # justified: pinning these system pkgs on the MOVING python:3.12-slim base is brittle (a base bump can drop a pinned version → build break); the base is the version anchor. Registered in tools/suppression_ledger.json (#1134).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates rsync sqlite3 \
     && rm -rf /var/lib/apt/lists/*
@@ -62,12 +44,9 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 # `trivy image` to scan managed app images + SLOP's own image for HIGH/CRITICAL
 # vulnerabilities and emit health.cve findings. The probe degrades to INDETERMINATE
 # (loud, never a false VERIFIED) when trivy is absent.
-# NOTE: bundling the trivy static binary is DECLINED — id=869 GROUND-measured the real
-# delta on the self-hosted test runner (docker 29.5.2): the trivy 0.71 binary is ~161 MiB uncompressed
-# (~58 MiB compressed), ~40% above the old +100 MB estimate, ~doubling SLOP's lean image.
-# host-trivy + loud-INDETERMINATE is the standing control (ADR 0024 FROM-audit posture).
-# See docs/AGENT-869-TRIVY-BUNDLE-SIZE-CONFIRM.md. If ever revisited, budget ~161 MiB
-# uncompressed and add a COPY --from of a version-pinned aquasec/trivy image (pin tag/digest).
+# NOTE: bundling the trivy static binary (+~100 MB) is DEFERRED pending a measured
+# image-size diff — see tracking id=869. To enable, add a COPY --from of a
+# version-pinned aquasec/trivy image (pin the tag/digest, not a mutable channel).
 
 # Python packages + uvicorn from builder
 COPY --from=python-builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
@@ -82,11 +61,6 @@ COPY catalog/ ./catalog/
 COPY migrations/ ./migrations/
 COPY --from=frontend-builder /app/backend/static/ ./backend/static/
 COPY docker-entrypoint.sh /entrypoint.sh
-
-ARG BUILD_DATE
-ARG VCS_REF
-LABEL org.opencontainers.image.created=$BUILD_DATE \
-      org.opencontainers.image.revision=$VCS_REF
 
 # Runtime environment
 ENV PYTHONPATH=/app

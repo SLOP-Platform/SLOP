@@ -37,7 +37,3 @@ slowapi>=0.1.9
 # 8.0.0 (only 8.x release) crashes on Starlette 1.x (route.path on an
 # _IncludedRouter raises AttributeError → 500 on every request).
 prometheus-client>=0.25
-
-# MCP SDK — stdio transport for agent-action MCP server.
-# v1.x floor; previously pulled transitively via semgrep — now explicit.
-mcp>=1

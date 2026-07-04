@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 9001
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: thelounge
 

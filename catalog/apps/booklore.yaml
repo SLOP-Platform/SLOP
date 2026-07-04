@@ -21,22 +21,10 @@ volumes:
     - host: "{config_root}/booklore/bookdrop"
       container: /bookdrop
 
-env:
-  # Connects to the SLOP-managed mariadb service (#1203). Host = the managed
-  # container_name `mariadb`; credentials match _ensure_managed_service's env
-  # (MARIADB_PASSWORD is auto-generated on first provision; USER/DATABASE default
-  # to `booklore` via the same ${..:-booklore} defaults the managed fragment uses).
-  DATABASE_URL: "jdbc:mariadb://mariadb:3306/${MARIADB_DATABASE:-booklore}"
-  DATABASE_USERNAME: "${MARIADB_USER:-booklore}"
-  DATABASE_PASSWORD: "${MARIADB_PASSWORD}"
-  USER_ID: "${PUID}"
-  GROUP_ID: "${PGID}"
-  SWAGGER_ENABLED: "false"
-
 dependencies:
   mariadb: true
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: booklore
 

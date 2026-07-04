@@ -48,7 +48,7 @@ docker --version   # should print 24+
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/SLOP-Platform/SLOP.git
+git clone https://github.com/Nnyan/SLOP.git
 cd slop
 ```
 

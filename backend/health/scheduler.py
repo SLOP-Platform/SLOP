@@ -17,18 +17,9 @@ Design constraints:
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
-from backend.agent.registry import register_probe  # #980: probe self-registration
 from backend.core.logging import get_logger
-from backend.health import probe_backoff
-
-# Auto-apply governance cluster extracted to scheduler_autoapply.py (#1302 drain).
-# Re-imported here so _POST_CYCLE_PROBES and existing callers/tests
-# (backend.health.scheduler._maybe_auto_apply_safe_fixes) resolve unchanged; the
-# import also fires its @register_probe("auto_fixes") registration.
-from backend.health.scheduler_autoapply import _maybe_auto_apply_safe_fixes
 from backend.health.swallow_counter import record_swallow
 
 import asyncio
@@ -41,23 +32,12 @@ log = get_logger(__name__)
 # Tracks the running scheduler task so the lifespan can cancel it
 _scheduler_task: asyncio.Task[None] | None = None
 
+# Module-level probe failure counters — reset on success, increment on exception
+_probe_fail_counts: dict[str, int] = {}
+
 DEFAULT_INTERVAL = 60  # seconds between full check cycles
 PLATFORM_READY_POLL = 5  # seconds between platform-ready checks on startup
 MAX_STARTUP_WAIT = 300  # give up waiting for platform after 5 minutes
-# Per-probe ceilings for the ambient post-cycle phase (#825). A probe that hangs
-# (e.g. a docker SDK call against a wedged daemon with no inner timeout) would
-# otherwise block asyncio.gather forever and stall the next cycle. Two budgets,
-# because the probes are not uniform:
-#   * PROBE_TIMEOUT_SECONDS  -- fast probes (daemon/traefik/disk/wiring) finish in
-#     seconds; a tight ceiling cuts a wedged one responsively.
-#   * LONG_PROBE_TIMEOUT_SECONDS -- the scan/apply probes (cve, image, source-scan,
-#     smart, toolkit, auto-fixes) legitimately run minutes and already cap their
-#     OWN inner calls (e.g. trivy at 300s/image over every managed app). A tight
-#     outer ceiling would FALSELY fail a healthy-but-slow scan, so theirs is a
-#     pure last-resort circuit-breaker, sized far above any realistic real run.
-# Both are finite, so an indefinite wedge can no longer stall the scheduler.
-PROBE_TIMEOUT_SECONDS = 120
-LONG_PROBE_TIMEOUT_SECONDS = 3600
 
 
 async def _wait_for_platform() -> bool:
@@ -178,7 +158,6 @@ async def _execute_cycle(cfg: dict[str, Any]) -> None:
         record_swallow("scheduler.cycle_summary_persist")
 
 
-@register_probe("docker_daemon", description="Docker daemon reachability/health")
 def _check_docker_daemon_health() -> None:
     """Probe `docker ps` latency; persist a daemon-slow indicator when slow."""
     import time as _t
@@ -201,19 +180,8 @@ def _check_docker_daemon_health() -> None:
         _set_setting_silently("docker_daemon_slow_ms", "0")
 
 
-@register_probe("traefik", description="Traefik reverse-proxy liveness (platform restart)")
 def _check_and_restart_traefik() -> None:
-    """If Traefik is not running, attempt one compose-up restart.
-
-    DELIBERATE governance carve-out (#977 F2 — NOT a bypass of
-    `agent.governance.authorize`): traefik is SLOP's OWN reverse-proxy ingress, not a
-    catalog app. Keeping SLOP itself reachable is the agent's primary continuity duty
-    (CLAUDE.md "SLOP AI Agent" — its job is ensuring SLOP runs), a platform-continuity
-    regime distinct from autonomous app-remediation. One bounded compose-up attempt;
-    platform-critical (no traefik ⇒ SLOP unreachable, including the approval UI a gate
-    would route to). This carve-out is the single documented exception to the
-    chokepoint invariant guarded by tests/test_agent_authorize_chokepoint.py.
-    """
+    """If Traefik is not running, attempt one compose-up restart."""
     try:
         from backend.core import docker_client as _dc
 
@@ -241,7 +209,6 @@ def _check_and_restart_traefik() -> None:
         log.debug("Traefik health check failed: %s", _te)
 
 
-@register_probe("managed_services", description="Managed service-unit health")
 def _check_managed_services_health() -> None:
     """Run check_managed_services and warn on each unhealthy service."""
     try:
@@ -255,7 +222,6 @@ def _check_managed_services_health() -> None:
         log.debug("Managed service check failed: %s", _mse)
 
 
-@register_probe("disk_space", description="Host disk-space headroom")
 def _check_disk_space() -> None:
     """Log a warning when the data dir is over 80% full (error over 95%)."""
     try:
@@ -272,7 +238,6 @@ def _check_disk_space() -> None:
         pass
 
 
-@register_probe("source_scan", description="Source/version drift scan (long)")
 def _maybe_start_source_scan() -> None:
     """Schedule a weekly source-availability scan in the background if overdue."""
     try:
@@ -288,7 +253,232 @@ def _maybe_start_source_scan() -> None:
         record_swallow("scheduler.source_scan_start")
 
 
-@register_probe("host_probes", description="Host-level reconcilers")
+def _read_autoapply_gate() -> tuple[float, str | None] | None:
+    """Read the auto-apply gate config, fail-closed.
+
+    Returns ``(min_confidence_threshold, operational_level_raw)`` when auto-apply
+    should proceed, or ``None`` to skip this cycle because:
+      * the scheduler is PAUSED (scheduler/pause sets the
+        ``scheduler_paused`` StateDB flag — the global kill switch);
+      * auto-apply is not enabled;
+      * the config/kill-switch could not be read (ANY error ⇒ do NOT act).
+    """
+    try:
+        from backend.core.state import StateDB as _SDB
+
+        with _SDB() as _db:
+            paused_raw = _db.get_setting("scheduler_paused")
+            enabled_raw = _db.get_setting("agent_autofix_enabled")
+            conf_raw = _db.get_setting("agent_autofix_min_confidence")
+            level_raw = _db.get_setting("agent_operational_level")
+    except Exception as cfg_err:
+        log.debug("_read_autoapply_gate: config read failed (skipping): %s", cfg_err)
+        return None
+
+    if str(paused_raw).lower() in ("1", "true", "yes"):
+        log.info("auto-apply gate: scheduler is PAUSED (kill switch) — skipping this cycle")
+        return None
+    if not (str(enabled_raw).lower() in ("1", "true", "yes") if enabled_raw else False):
+        return None
+    try:
+        threshold = float(conf_raw) if conf_raw else 0.9
+    except (TypeError, ValueError):
+        threshold = 0.9
+    return threshold, level_raw
+
+
+def _filter_preapproved_rows(rows: list[Any]) -> list[Any] | None:
+    """Keep only rows whose action-tier is pre-approved for their app (N5 policy).
+
+    The scheduler may autonomously apply a fix ONLY if its action's tier is
+    pre-approved for that app. A non-pre-approved row is dropped from the
+    autonomous path (it still surfaces in chat, where the operator's typed
+    "do it" is the per-action approval). Fail-closed:
+      * a per-row resolution error drops that row;
+      * an inability to load the policy at all returns ``None`` so the caller
+        skips the cycle entirely (ask, never act).
+    """
+    try:
+        from backend.agent.apply import get_fix_type
+        from backend.agent.policy import load_policy
+        from backend.agent.registry import tier_for
+    except Exception as imp_err:  # fail-closed: no policy machinery ⇒ skip cycle
+        log.warning("auto-apply gate: pre-approval policy unavailable (skipping cycle): %s", imp_err)
+        return None
+
+    policy = load_policy()
+    out: list[Any] = []
+    for row in rows:
+        try:
+            dc = row["diagnosis_class"] if hasattr(row, "__getitem__") else getattr(row, "diagnosis_class", "")
+            app_key = row["app_key"] if hasattr(row, "__getitem__") else getattr(row, "app_key", "")
+            fix_type = get_fix_type(dc)
+            tier = tier_for(fix_type)
+            if policy.is_pre_approved(tier, app_key):
+                out.append(row)
+            else:
+                log.info(
+                    "auto-apply gate: tier %d for %s/%s not pre-approved — skipping (chat-only)",
+                    int(tier),
+                    fix_type,
+                    app_key,
+                )
+        except Exception as row_err:  # fail-closed per row
+            log.debug("auto-apply gate: policy check failed for a row (dropping): %s", row_err)
+    return out
+
+
+def _filter_app_circuit_rows(rows: list[Any]) -> list[Any]:
+    """Drop rows for apps whose per-app circuit breaker is closed (5 fixes/app/hour).
+
+    One flapping app cannot exhaust the global budget for the whole fleet. The
+    global cap is enforced by the caller; this only applies the per-app cap.
+    """
+    from backend.agent.circuit_breaker import check_app_circuit as _check_app_circuit
+
+    _app_cb_cache: dict[str, bool] = {}
+    _filtered_rows = []
+    for _row in rows:
+        _ak = _row["app_key"] if hasattr(_row, "__getitem__") else getattr(_row, "app_key", "")
+        if _ak not in _app_cb_cache:
+            _acb = _check_app_circuit(_ak, cap=5)
+            _app_cb_cache[_ak] = _acb.open
+            if not _acb.open:
+                log.warning(
+                    "autofix per-app circuit open for %s: %d/%d fixes in last hour",
+                    _ak,
+                    _acb.fixes_last_hour,
+                    _acb.cap,
+                )
+        if _app_cb_cache[_ak]:
+            _filtered_rows.append(_row)
+    return _filtered_rows
+
+
+def _filter_governance_rows(rows: list[Any], op_level: Any) -> list[Any] | None:
+    """Invariant 9: route every would-be mutation through the SHARED governance
+    gate so the scheduler is metered through the SAME accounting as chat / MCP.
+
+    A row the gate denies (tier/policy/budget) is dropped here BEFORE apply — the
+    scheduler is never an unmetered bypass. Fail-closed: if the shared gate cannot
+    be consulted at all, return ``None`` so the caller skips execution this cycle.
+    """
+    try:
+        from backend.agent.apply import get_fix_type as _get_fix_type
+        from backend.agent.governance import authorize as _authorize
+        from backend.agent.registry import tier_for as _tier_for
+
+        _gated_rows = []
+        for _row in rows:
+            _ak = _row["app_key"] if hasattr(_row, "__getitem__") else getattr(_row, "app_key", "")
+            _dc = (
+                _row["diagnosis_class"]
+                if hasattr(_row, "__getitem__")
+                else getattr(_row, "diagnosis_class", "")
+            )
+            _aid = _get_fix_type(_dc)
+            _gov = _authorize(
+                action_id=_aid,
+                app_key=_ak,
+                tier=_tier_for(_aid),
+                operational_level=op_level,
+                pre_approved=True,  # the scheduler's authority is the AUTONOMOUS policy
+            )
+            if _gov.allow:
+                _gated_rows.append(_row)
+            else:
+                log.info(
+                    "autofix governance gate: skip fix_id=%s app=%s action=%s — %s",
+                    _row["id"] if hasattr(_row, "__getitem__") else getattr(_row, "id", "?"),
+                    _ak,
+                    _aid,
+                    _gov.reason,
+                )
+        return _gated_rows
+    except Exception as _gov_err:
+        # Fail-closed: if the shared gate cannot be consulted, do not execute.
+        log.warning("autofix governance gate unavailable — skipping execution: %s", _gov_err)
+        return None
+
+
+def _maybe_auto_apply_safe_fixes() -> None:
+    """If agent_autofix_enabled, auto-apply eligible safe-tier pending fixes via
+    apply_eligible_fixes (which enforces the confirmation gate + backoff + verify).
+    Off by default. Never raises.
+
+    Operational level is read from ``agent_operational_level`` setting:
+      supervised (default) — dry_run=True gate; caller must opt in per invocation.
+      autonomous           — gate bypassed; fixes execute when enabled=true.
+    """
+    # Kill switch + enabled + threshold (fail-closed; None ⇒ skip this cycle).
+    _gate = _read_autoapply_gate()
+    if _gate is None:
+        return
+    _threshold, _level_raw = _gate
+
+    from backend.agent.circuit_breaker import check_circuit as _check_circuit
+
+    _cb = _check_circuit(cap=10)
+    if not _cb.open:
+        log.warning(
+            "autofix circuit open: %d/%d fixes in last hour",
+            _cb.fixes_last_hour,
+            _cb.cap,
+        )
+        return
+
+    try:
+        from backend.agent.autofix import select_auto_applicable, apply_eligible_fixes
+        from backend.agent.types import OperationalLevel
+
+        _rows = select_auto_applicable(min_confidence=_threshold)
+    except Exception as _sel_err:
+        log.debug("_maybe_auto_apply_safe_fixes: select failed: %s", _sel_err)
+        return
+
+    # Per-app circuit breaker: filter out fixes for apps that have hit their
+    # per-app cap (5 fixes/app/hour). The global cap above remains intact.
+    _rows = _filter_app_circuit_rows(_rows)
+
+    # N5 pre-approval policy (tier x scope) — fail-closed; None signals "skip cycle".
+    _preapproved = _filter_preapproved_rows(_rows)
+    if _preapproved is None:
+        return
+    _rows = _preapproved
+
+    _op_level = OperationalLevel.from_setting(_level_raw)
+    # Gate: only AUTONOMOUS bypasses dry_run; SUPERVISED (default) keeps gate ON.
+    _dry_run = _op_level is not OperationalLevel.AUTONOMOUS
+
+    # Invariant 9: route every would-be mutation through the SHARED governance gate
+    # so the scheduler is metered through the SAME accounting as chat / MCP. Only
+    # filter for real (non-dry-run) execution; dry-run rows are advisory and left
+    # intact for the report. Fail-closed: None ⇒ skip execution this cycle.
+    if not _dry_run:
+        _gated = _filter_governance_rows(_rows, _op_level)
+        if _gated is None:
+            return
+        _rows = _gated
+
+    _results = apply_eligible_fixes(_rows, dry_run=_dry_run, operational_level=_op_level)
+    for _res in _results:
+        if _res.get("dry_run"):
+            log.info(
+                "autofix gate: DRY-RUN fix_id=%s app=%s — %s",
+                _res["fix_id"],
+                _res["app_key"],
+                _res["message"],
+            )
+        else:
+            log.info(
+                "AUTO-applied fix_id=%s app=%s ok=%s: %s",
+                _res["fix_id"],
+                _res["app_key"],
+                _res.get("ok"),
+                _res.get("message", ""),
+            )
+
+
 def _run_host_probes() -> None:
     """Run host substrate probes. Keeps its own error isolation."""
     try:
@@ -302,7 +492,6 @@ def _run_host_probes() -> None:
         log.debug("host substrate probes failed: %s", _host_err)
 
 
-@register_probe("recovery_probes", description="Recovery reconcilers")
 def _run_recovery_probes() -> None:
     """Run recoverability probes. Keeps its own error isolation."""
     try:
@@ -327,7 +516,6 @@ def _run_recovery_probes() -> None:
         log.debug("recoverability probes failed: %s", _rec_err)
 
 
-@register_probe("cve_probes", description="CVE audit/auto-heal scan (long)")
 def _run_cve_probes() -> None:
     """Run CVE remediation probes. Keeps its own error isolation.
 
@@ -348,7 +536,6 @@ def _run_cve_probes() -> None:
         log.debug("cve probes failed: %s", _cve_err)
 
 
-@register_probe("container_probes", description="Container-state reconcilers")
 def _run_container_probes() -> None:
     """Run container substrate probes. Keeps its own error isolation."""
     try:
@@ -362,7 +549,6 @@ def _run_container_probes() -> None:
         log.debug("container substrate probes failed: %s", _cont_err)
 
 
-@register_probe("image_probes", description="Image freshness/pin reconcilers (long)")
 def _run_image_probes() -> None:
     """Run image drift probes. Keeps its own error isolation."""
     try:
@@ -378,7 +564,6 @@ def _run_image_probes() -> None:
         log.debug("image drift probes failed: %s", _img_err)
 
 
-@register_probe("scrub_probe", description="Secret-scrub reconciler")
 def _run_scrub_probe() -> None:
     """Run scrub-effectiveness probe. Keeps its own error isolation."""
     try:
@@ -392,7 +577,6 @@ def _run_scrub_probe() -> None:
         log.debug("scrub-effectiveness probe failed: %s", _scrub_err)
 
 
-@register_probe("smart_probes", description="SMART disk-health probes (long)")
 def _run_smart_probes() -> None:
     """Run SMART / SnapRAID parity probes. Keeps its own error isolation."""
     try:
@@ -406,7 +590,6 @@ def _run_smart_probes() -> None:
         log.debug("smart/parity probes failed: %s", _smart_err)
 
 
-@register_probe("ms_toolkit_probe", description="ms-toolkit health probe (long)")
 def _run_ms_toolkit_probe() -> None:
     """Run the platform self-check toolkit (ms-check --json) as a GROUND probe and
     persist its checks as Findings. Keeps its own error isolation."""
@@ -421,7 +604,6 @@ def _run_ms_toolkit_probe() -> None:
         log.debug("platform self-check probe failed: %s", _tk_err)
 
 
-@register_probe("pending_wiring", description="Deferred wiring retry")
 def _run_pending_wiring() -> None:
     """Retry pending wiring rows on each scheduler cycle (added at A+C merge)."""
     try:
@@ -433,47 +615,23 @@ def _run_pending_wiring() -> None:
 
 
 # Ordered names matching the asyncio.gather() call in _scheduler_loop
-# Post-cycle ambient probes, in dispatch order: (name, sync-callable, timeout
-# ceiling). Single SSOT — the dispatch loop, the name↔result mapping, and the
-# per-probe backoff (#1144) all derive from this one list (no parallel name
-# list to drift). Scan/apply probes legitimately run long and cap their own
-# inner calls, so they get the generous LONG ceiling; the rest get the tight
-# default.
-_POST_CYCLE_PROBES: list[tuple[str, Callable[[], Any], float]] = [
-    ("docker_daemon", _check_docker_daemon_health, PROBE_TIMEOUT_SECONDS),
-    ("traefik", _check_and_restart_traefik, PROBE_TIMEOUT_SECONDS),
-    ("managed_services", _check_managed_services_health, PROBE_TIMEOUT_SECONDS),
-    ("disk_space", _check_disk_space, PROBE_TIMEOUT_SECONDS),
-    ("source_scan", _maybe_start_source_scan, LONG_PROBE_TIMEOUT_SECONDS),
-    ("auto_fixes", _maybe_auto_apply_safe_fixes, LONG_PROBE_TIMEOUT_SECONDS),
-    ("host_probes", _run_host_probes, PROBE_TIMEOUT_SECONDS),
-    ("recovery_probes", _run_recovery_probes, PROBE_TIMEOUT_SECONDS),
-    ("cve_probes", _run_cve_probes, LONG_PROBE_TIMEOUT_SECONDS),
-    ("container_probes", _run_container_probes, PROBE_TIMEOUT_SECONDS),
-    ("image_probes", _run_image_probes, LONG_PROBE_TIMEOUT_SECONDS),
-    ("scrub_probe", _run_scrub_probe, PROBE_TIMEOUT_SECONDS),
-    ("smart_probes", _run_smart_probes, LONG_PROBE_TIMEOUT_SECONDS),
-    ("ms_toolkit_probe", _run_ms_toolkit_probe, LONG_PROBE_TIMEOUT_SECONDS),
-    ("pending_wiring", _run_pending_wiring, PROBE_TIMEOUT_SECONDS),
+_PROBE_NAMES = [
+    "docker_daemon",
+    "traefik",
+    "managed_services",
+    "disk_space",
+    "source_scan",
+    "auto_fixes",
+    "host_probes",
+    "recovery_probes",
+    "cve_probes",
+    "container_probes",
+    "image_probes",
+    "scrub_probe",
+    "smart_probes",
+    "ms_toolkit_probe",
+    "pending_wiring",
 ]
-
-
-def _pt(func: Callable[[], Any], timeout: float = PROBE_TIMEOUT_SECONDS) -> Awaitable[Any]:
-    """Run a sync post-cycle probe in a worker thread under a hard timeout (#825).
-
-    A hung probe (e.g. a wedged docker SDK call with no inner timeout) would
-    otherwise block `asyncio.gather` indefinitely and stall the post-cycle phase
-    plus the next cycle. `asyncio.wait_for` bounds the await; a timeout surfaces
-    as `TimeoutError`, which `probe_backoff.record_result` counts as a probe
-    failure. Pass `timeout=LONG_PROBE_TIMEOUT_SECONDS` for scan/apply probes
-    that legitimately run long, else a healthy slow scan is falsely failed.
-    Caveat: asyncio cannot kill the orphaned worker thread (it parks until its
-    blocking call returns), but the scheduler is no longer held hostage. A
-    chronically-hung probe would still leak one parked thread per cycle — so
-    `probe_backoff` SKIPS a probe that has timed out N consecutive cycles for a
-    backoff window (#1144, the deferred remainder of #825).
-    """
-    return asyncio.wait_for(asyncio.to_thread(func), timeout=timeout)
 
 
 async def _scheduler_loop() -> None:
@@ -518,28 +676,47 @@ async def _scheduler_loop() -> None:
             cycle_running = False
 
         # Ambient post-cycle checks — run all probes concurrently; one failure
-        # never cancels others (return_exceptions=True). Each runs in a worker
-        # thread under its per-probe hard timeout (_pt, #825). A probe that has
-        # timed out PROBE_BACKOFF_THRESHOLD consecutive cycles is SKIPPED for a
-        # backoff window (#1144) — NOT dispatched — so a chronically-hung probe
-        # stops leaking one parked worker thread per cycle.
-        dispatched: list[tuple[str, Awaitable[Any]]] = []
-        backed_off: list[str] = []
-        for _name, _func, _timeout in _POST_CYCLE_PROBES:
-            if probe_backoff.due_for_dispatch(_name):
-                dispatched.append((_name, _pt(_func, _timeout)))
+        # never cancels others (return_exceptions=True).
+        _probe_results = await asyncio.gather(
+            asyncio.to_thread(_check_docker_daemon_health),
+            asyncio.to_thread(_check_and_restart_traefik),
+            asyncio.to_thread(_check_managed_services_health),
+            asyncio.to_thread(_check_disk_space),
+            asyncio.to_thread(_maybe_start_source_scan),
+            asyncio.to_thread(_maybe_auto_apply_safe_fixes),
+            asyncio.to_thread(_run_host_probes),
+            asyncio.to_thread(_run_recovery_probes),
+            asyncio.to_thread(_run_cve_probes),
+            asyncio.to_thread(_run_container_probes),
+            asyncio.to_thread(_run_image_probes),
+            asyncio.to_thread(_run_scrub_probe),
+            asyncio.to_thread(_run_smart_probes),
+            asyncio.to_thread(_run_ms_toolkit_probe),  # platform self-check toolkit
+            asyncio.to_thread(_run_pending_wiring),  # retry deferred wiring rows (C)
+            return_exceptions=True,  # one failure never cancels others
+        )
+
+        # Track consecutive probe failures; warn and persist at threshold
+        for name, result in zip(_PROBE_NAMES, _probe_results, strict=True):
+            if isinstance(result, Exception):
+                _probe_fail_counts[name] = _probe_fail_counts.get(name, 0) + 1
+                count = _probe_fail_counts[name]
+                if count >= 5:
+                    log.warning(
+                        "Probe '%s' has failed %d consecutive times: %s", name, count, result
+                    )
+                    # Persist to DB
+                    try:
+                        from backend.core.state import StateDB
+
+                        with StateDB() as db:
+                            db.write_probe_failure(name, count, str(result))
+                    except (
+                        Exception
+                    ):  # best-effort DB write; counter stays in memory if DB unavailable
+                        record_swallow("scheduler.probe_failure_db_write")
             else:
-                backed_off.append(_name)
-        if backed_off:
-            log.info(
-                "Post-cycle probes skipped this cycle (thread-leak backoff #1144): %s",
-                ", ".join(backed_off),
-            )
-        _probe_results = await asyncio.gather(*(aw for _, aw in dispatched), return_exceptions=True)
-        # Update per-probe counters + arm/clear the thread-leak backoff; the
-        # consecutive-failure warn+persist lives in probe_backoff.record_result.
-        for (name, _aw), result in zip(dispatched, _probe_results, strict=True):
-            probe_backoff.record_result(name, result)
+                _probe_fail_counts.pop(name, None)  # reset on success
 
         try:
             await asyncio.sleep(cfg["interval"])
@@ -603,7 +780,7 @@ async def _maybe_run_weekly_summary() -> None:
             from backend.health.checker import _llm_state
 
             if _llm_state.get("status") == "ready":
-                from backend.core.url_guard_httpx import pinned_async_client
+                import httpx
 
                 with SDB() as db:
                     _wcfg_raw = db.get_setting("llm_agent_config")
@@ -615,7 +792,7 @@ async def _maybe_run_weekly_summary() -> None:
                 else:
                     ollama_url = _wcfg.get("ollama_url", "http://ollama:11434")
                 model = _wcfg.get("ollama_model") or "phi4-mini"
-                async with pinned_async_client(timeout=60) as client:
+                async with httpx.AsyncClient(timeout=60) as client:
                     resp = await client.post(
                         f"{ollama_url}/api/generate",
                         json={"model": model, "prompt": prompt, "stream": False},
@@ -649,11 +826,6 @@ def start_scheduler() -> None:
     if _scheduler_task and not _scheduler_task.done():
         log.debug("Health scheduler already running.")
         return
-    # Clean-slate the per-probe backoff state on a FRESH start (#1144). The
-    # supervisor's auto-restarts reuse _scheduler_task and do NOT re-enter here,
-    # so a chronic-hang record correctly survives a transient crash; only a
-    # genuine (re)start clears it.
-    probe_backoff.reset()
     from backend.core.supervisor import RestartPolicy, spawn_supervised
 
     # The scheduler is core infrastructure — auto-restart with backoff so a

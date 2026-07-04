@@ -9,9 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/ --max-warnings 0",
-    "format": "prettier --write \"src/**/*.{ts,vue,js,json,css}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,vue,js,json,css}\""
+    "lint": "eslint src/ --max-warnings 0"
   },
   "dependencies": {
     "@vueuse/core": "^11.0.0",

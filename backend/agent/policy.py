@@ -135,9 +135,7 @@ def parse_policy(raw: str | None) -> PreApprovalPolicy:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError) as exc:
-        log.warning(
-            "policy: stored pre-approval policy is malformed (%s) — using safe default", exc
-        )
+        log.warning("policy: stored pre-approval policy is malformed (%s) — using safe default", exc)
         return default_policy()
     if not isinstance(data, dict):
         return default_policy()

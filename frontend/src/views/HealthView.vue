@@ -197,9 +197,6 @@
           {{ integrityStatus.summary }}
         </p>
       </div>
-
-      <!-- Spine advisories — LLM annotations alongside GROUND verdicts (#1213) -->
-      <AdvisoriesPanel />
     </div>
 
     <!-- AI Suggested Fixes — highest priority, show first -->
@@ -771,14 +768,11 @@ import { RouterLink } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 const toast = useToast()
 import { useAgentIntegrity } from '@/composables/useAgentIntegrity'
-import { useHealthFormatters } from '@/composables/useHealthFormatters'
-import AdvisoriesPanel from '@/components/AdvisoriesPanel.vue'
-import { health, models } from '../api/client'
+import { health } from '../api/client'
 import { healthCache, setHealthCache } from '../appCache'
 import type { HealthCheck, AgentHealthCheck } from '../api/client'
 
 const { integrityStatus, fetchIntegrity, integrityLabel, integrityColor } = useAgentIntegrity()
-const { formatAge, formatTimestamp, formatAgeTimestamp } = useHealthFormatters()
 const checks = ref<HealthCheck[]>(healthCache ?? [])
 const agentChecks = ref<AgentHealthCheck[]>([])
 const llmStatus = ref<{ status: string; description: string; configured_provider?: string; last_error_type?: string; last_error?: string; model_tried?: string } | null>(null)
@@ -842,6 +836,18 @@ function isCheckStale(check: HealthCheck): boolean {
 }
 
 // Format age in seconds to human-readable format
+function formatAge(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s ago`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
+}
+
+// Format timestamp for title attribute
+function formatTimestamp(seconds: number): string {
+  return formatAge(seconds)
+}
+
 // Get border color class based on action priority
 function actionBorderColor(priority: string): string {
   switch (priority) {
@@ -857,11 +863,16 @@ function actionBorderColor(priority: string): string {
 async function applyFix(check: any) {
   applying.value = check.check_name
   try {
-    const data = await health.applyFix({
-      app_key: check.app_key ?? 'unknown',
-      action_type: (check as any).action_type ?? 'restart_container',
-      suggested_fix: (check as any).suggested_fix ?? '', problem: (check as any).detail ?? '',
+    const res = await fetch('/api/v1/health/apply-fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_key: check.app_key ?? 'unknown',
+        action_type: (check as any).action_type ?? 'restart_container',
+        suggested_fix: (check as any).suggested_fix ?? '',
+      }),
     })
+    const data = await res.json()
     if (data.executed) toast.success(`Fix applied: ${data.message}`)
     else if (data.requires_approval) toast.info(`Requires approval: ${data.message}`)
     else toast.warn(data.message ?? 'Fix could not be applied.')
@@ -886,27 +897,28 @@ function actionColor(action: string): string {
 
 async function loadPendingFixes() {
   try {
-    pendingFixes.value = await health.pendingFixes()
+    const r = await fetch('/api/v1/health/pending-fixes')
+    if (r.ok) pendingFixes.value = await r.json()
   } catch { /* intentional: non-fatal data load */ }
 }
 
 async function approveFix(fix: any) {
   approvingFix.value = fix.id
   try {
-    const d = await health.approvePendingFix(fix.id)
+    const r = await fetch(`/api/v1/health/pending-fixes/${fix.id}/approve`, { method: 'POST' })
+    const d = await r.json()
     if (d.executed) toast.success(`Applied: ${d.message}`)
     else if (d.requires_approval) toast.info(`${d.message}`)
     else toast.warn(d.message ?? 'Fix could not be applied.')
     await loadPendingFixes()
   } catch (e) {
     toast.error('Could not apply fix.', String(e))
-    await loadPendingFixes()  // refresh on error too (request() now throws on !ok; e.g. a 404 stale fix should drop)
   } finally { approvingFix.value = null }
 }
 
 async function rejectFix(fix: any) {
   try {
-    await health.rejectPendingFix(fix.id)
+    await fetch(`/api/v1/health/pending-fixes/${fix.id}/reject`, { method: 'POST' })
     toast.info('Fix rejected.')
     await loadPendingFixes()
   } catch { /* intentional: non-fatal rejection */ }
@@ -915,7 +927,12 @@ async function rejectFix(fix: any) {
 async function escalateFix(fix: any) {
   escalatingFix.value = fix.id
   try {
-    const d = await health.escalateFix({ app_key: fix.app_key, check_name: fix.check_name, problem: fix.problem, logs: '', context: '' })
+    const r = await fetch('/api/v1/health/escalate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_key: fix.app_key, check_name: fix.check_name, problem: fix.problem, logs: '', context: '' }),
+    })
+    const d = await r.json()
     escalationResults.value[fix.id] = d
     if (!d.escalated_to) toast.warn('No cloud provider configured — add an API key in Settings → AI.')
   } catch (e) {
@@ -926,32 +943,44 @@ async function escalateFix(fix: any) {
 async function approveEscalated(fix: any, escalated: any) {
   approvingFix.value = fix.id
   try {
-    const d = await health.applyFix({
-      app_key: fix.app_key,
-      action_type: escalated.action ?? fix.action_type,
-      suggested_fix: escalated.suggested_fix, problem: fix.problem ?? '',
+    const r = await fetch('/api/v1/health/apply-fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_key: fix.app_key,
+        action_type: escalated.action ?? fix.action_type,
+        suggested_fix: escalated.suggested_fix,
+      }),
     })
+    const d = await r.json()
     toast.success(d.executed ? `Cloud fix applied: ${d.message}` : d.message)
     delete escalationResults.value[fix.id]
     await loadPendingFixes()
   } catch (e) {
     toast.error('Could not apply fix.', String(e))
-    await loadPendingFixes()  // refresh on error too (request() now throws on !ok)
   } finally { approvingFix.value = null }
 }
 
 // Existing formatAge for Unix timestamps (different from age in seconds)
+function formatAgeTimestamp(ts: number): string {
+  const diff = Math.floor(Date.now() / 1000) - ts
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
 
 async function loadSources() {
   try {
-    sources.value = await health.sources()
+    const r = await fetch('/api/v1/health/sources')
+    if (r.ok) sources.value = await r.json()
   } catch { /* intentional: non-fatal data load */ }
 }
 
 async function triggerSourceScan() {
   scanningSource.value = true
   try {
-    await health.scanSources()
+    await fetch('/api/v1/health/sources/scan', { method: 'POST' })
     toast.success('Source scan started — results in ~1 minute.')
     _sourceRefreshTimer = setTimeout(loadSources, 5000)
   } catch (e) {
@@ -962,7 +991,12 @@ async function triggerSourceScan() {
 async function findReplacement(item: any) {
   replacements.value[item.url] = { loading: true }
   try {
-    const d = await health.findSourceReplacement({ source_type: item.source_type, resource_key: item.resource_key, url: item.url })
+    const r = await fetch('/api/v1/health/sources/find-replacement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_type: item.source_type, resource_key: item.resource_key, url: item.url }),
+    })
+    const d = await r.json()
     replacements.value[item.url] = { ...d, loading: false }
   } catch (e) {
     replacements.value[item.url] = { loading: false, reason: String(e), suggested_url: '', confidence: 0 }
@@ -972,7 +1006,12 @@ async function findReplacement(item: any) {
 async function applyReplacement(item: any, newUrl: string) {
   applyingReplacement.value = item.url
   try {
-    const d = await health.applySourceReplacement({ source_type: item.source_type, resource_key: item.resource_key, old_url: item.url, new_url: newUrl })
+    const r = await fetch('/api/v1/health/sources/apply-replacement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_type: item.source_type, resource_key: item.resource_key, old_url: item.url, new_url: newUrl }),
+    })
+    const d = await r.json()
     if (d.ok) { toast.success(d.message); delete replacements.value[item.url]; await loadSources() }
     else toast.error(d.message)
   } catch (e) {
@@ -983,7 +1022,8 @@ async function applyReplacement(item: any, newUrl: string) {
 
 async function loadMaintenanceWindows() {
   try {
-    maintenanceWindows.value = await health.maintenanceWindows()
+    const r = await fetch('/api/v1/health/maintenance-windows')
+    if (r.ok) maintenanceWindows.value = await r.json()
   } catch { /* intentional: non-fatal data load */ }
 }
 
@@ -992,19 +1032,25 @@ async function createMaintenanceWindow(a: any) {
   const hStart = a.typical_hour ?? 0
   const hEnd = hStart + 2
   try {
-    await health.createMaintenanceWindow({ app_key: a.app_key, check_name: a.check_name, label, day_of_week: a.typical_day ?? null, hour_start: hStart, hour_end: hEnd })
-    toast.success(`Maintenance window set for ${a.app_key}`)
-    await loadMaintenanceWindows()
-    await loadSources()
-    await loadPendingFixes()
-    const an = await health.anomalies()
-    anomalies.value = Array.isArray(an) ? an : []
+    const r = await fetch('/api/v1/health/maintenance-windows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_key: a.app_key, check_name: a.check_name, label, day_of_week: a.typical_day ?? null, hour_start: hStart, hour_end: hEnd }),
+    })
+    if (r.ok) {
+      toast.success(`Maintenance window set for ${a.app_key}`)
+      await loadMaintenanceWindows()
+      await loadSources()
+      await loadPendingFixes()
+      const ar = await fetch('/api/v1/health/anomalies')
+      if (ar.ok) anomalies.value = Array.isArray(await ar.json()) ? await ar.clone().json() : []
+    }
   } catch (e) { toast.error('Could not create maintenance window.', String(e)) }
 }
 
 async function deleteMaintenanceWindow(id: number) {
   try {
-    await health.deleteMaintenanceWindow(id)
+    await fetch(`/api/v1/health/maintenance-windows/${id}`, { method: 'DELETE' })
     await loadMaintenanceWindows()
     await loadSources()
     await loadPendingFixes()
@@ -1013,16 +1059,24 @@ async function deleteMaintenanceWindow(id: number) {
 
 async function snoozeAnomaly(a: any) {
   try {
-    const data = await health.snoozeAnomaly(a.app_key, a.check_name, { app_key: a.app_key, check_name: a.check_name, hours: 72 })
-    anomalies.value = anomalies.value.filter(x => !(x.app_key === a.app_key && x.check_name === a.check_name))
-    toast.info(data.message)
+    const r = await fetch(`/api/v1/health/anomalies/${a.app_key}/${a.check_name}/snooze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_key: a.app_key, check_name: a.check_name, hours: 72 }),
+    })
+    const data = await r.json()
+    if (r.ok) {
+      anomalies.value = anomalies.value.filter(x => !(x.app_key === a.app_key && x.check_name === a.check_name))
+      toast.info(data.message)
+    }
   } catch (e) { toast.error('Could not snooze anomaly.', String(e)) }
 }
 
 async function loadWeeklySummary() {
   loadingSummary.value = true
   try {
-    weeklySummary.value = await health.weeklySummary()
+    const res = await fetch('/api/v1/health/weekly-summary')
+    weeklySummary.value = await res.json()
   } catch (e) { toast.error('Could not generate summary.', String(e)) }
   finally { loadingSummary.value = false }
 }
@@ -1030,12 +1084,16 @@ async function loadWeeklySummary() {
 async function thumbsFeedback(check: any, value: number) {
   thumbs.value[check.check_name] = value
   try {
-    await models.recordFixOutcome({
-      app_key: check.app_key ?? 'unknown',
-      error_type: check.check_name,
-      context: check.summary ?? '',
-      suggested_fix: check.suggested_fix ?? '',
-      outcome: value === 1 ? 'success' : 'failure',
+    await fetch('/api/v1/models/fix-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_key: check.app_key ?? 'unknown',
+        error_type: check.check_name,
+        context: check.summary ?? '',
+        suggested_fix: check.suggested_fix ?? '',
+        outcome: value === 1 ? 'success' : 'failure',
+      }),
     })
     if (value === 1) toast.success('Thanks — helps the AI improve.')
     else toast.info('Noted — suggestion will be deprioritised.')
@@ -1094,13 +1152,14 @@ onUnmounted(() => {
 
 onMounted(async () => {
   try {
-    schedulerStatus.value = await health.scheduler()
+    const r = await fetch('/api/v1/health/scheduler')
+    schedulerStatus.value = await r.json()
   } catch { /* intentional: scheduler status missing is non-fatal */ }
 
   const [c, l, a, ag, hs, pa] = await Promise.allSettled([
     health.allApps(),
     health.llmAgent(),
-    health.anomalies(),
+    fetch('/api/v1/health/anomalies').then(r => r.json()),
     health.agentChecks(),
     health.summary(),
     health.pendingActions(),
@@ -1120,7 +1179,8 @@ onMounted(async () => {
   
   // Auto-load weekly summary only if it already exists (not force-generate)
   try {
-    const d = await health.weeklySummary()
+    const res = await fetch('/api/v1/health/weekly-summary')
+    const d = await res.json()
     if (d.has_summary) weeklySummary.value = d
   } catch { /* intentional: weekly summary missing is non-fatal */ }
 })

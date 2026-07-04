@@ -278,7 +278,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { observability as observabilityApi } from '../api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -339,9 +338,10 @@ async function loadAuditLog() {
     const params = new URLSearchParams({ limit: '200' })
     if (auditActor.value) params.set('actor', auditActor.value)
     if (auditAction.value) params.set('action', auditAction.value)
-    const r = await observabilityApi.audit(params.toString())
+    const r = await fetch(`/api/v1/audit?${params}`)
     if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`)
-    auditRows.value = r.data.rows ?? []
+    const data = await r.json()
+    auditRows.value = data.rows ?? []
   } catch (e) {
     auditError.value = `Could not load audit log: ${e instanceof Error ? e.message : String(e)}`
   } finally {
@@ -405,9 +405,10 @@ async function loadTimeline() {
   try {
     const params = new URLSearchParams({ limit: '200' })
     if (timelineTypeFilter.value) params.set('types', timelineTypeFilter.value)
-    const r = await observabilityApi.timeline(params.toString())
+    const r = await fetch(`/api/v1/timeline?${params}`)
     if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`)
-    timelineEvents.value = r.data.events ?? []
+    const data = await r.json()
+    timelineEvents.value = data.events ?? []
     timelineLoaded.value = true
   } catch (e) {
     timelineError.value = `Could not load timeline: ${e instanceof Error ? e.message : String(e)}`

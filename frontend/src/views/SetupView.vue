@@ -1412,7 +1412,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { usePlatformStore } from '../stores/platform'
-import { platform as platformApi, catalog as catalogApi, settings as settingsApi, health as healthApi, apps as appsApi, storage as storageApi } from '../api/client'
+import { platform as platformApi } from '../api/client'
 import { useToast } from '@/composables/useToast'
 
 const platformStore = usePlatformStore()
@@ -1577,22 +1577,21 @@ async function nextStage() {
       secretsValidating.value = true
       secretsValidationResult.value = null
       try {
-        const { ok, data } = await platformApi.validateSecretsRaw({
-          checks: toValidate,
-          vpn_type: form.secrets['VPN_TYPE'],
-          vpn_provider: form.secrets['VPN_SERVICE_PROVIDER'],
-          vpn_key: form.secrets['WIREGUARD_PRIVATE_KEY'] || form.secrets['OPENVPN_USER'],
-          cf_tunnel_token: form.secrets['CF_TUNNEL_TOKEN'],
-          tailscale_key: form.secrets['TAILSCALE_AUTH_KEY'],
-          cf_dns_token: form.secrets['CF_DNS_API_TOKEN'],
-          dns_provider: form.dns_provider,
+        const r = await fetch('/api/v1/platform/wizard/validate-secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            checks: toValidate,
+            vpn_type: form.secrets['VPN_TYPE'],
+            vpn_provider: form.secrets['VPN_SERVICE_PROVIDER'],
+            vpn_key: form.secrets['WIREGUARD_PRIVATE_KEY'] || form.secrets['OPENVPN_USER'],
+            cf_tunnel_token: form.secrets['CF_TUNNEL_TOKEN'],
+            tailscale_key: form.secrets['TAILSCALE_AUTH_KEY'],
+            cf_dns_token: form.secrets['CF_DNS_API_TOKEN'],
+            dns_provider: form.dns_provider,
+          }),
         })
-        // net-vs-http: HTTP-non-ok → fallbackA; a null body on ok (unparseable 200) or a
-        // network error (→ catch below) → the same "proceed anyway" fallback the raw
-        // `await r.json()` throw produced. Preserves the two distinct fallbacks exactly.
-        const result = ok
-          ? (data ?? { ok: true, warnings: ['Could not validate — proceeding anyway'] })
-          : { ok: false, warnings: ['Validation endpoint not reachable'] }
+        const result = r.ok ? await r.json() : { ok: false, warnings: ['Validation endpoint not reachable'] }
         secretsValidationResult.value = result
         // Block on hard failures, warn on soft failures
         if (result.errors?.length) {
@@ -1611,9 +1610,16 @@ async function nextStage() {
     const pass = form.secrets['TINYAUTH_PASSWORD']?.trim()
     if (pass) {
       try {
-        const d = await platformApi.bcryptUsers({ username: user, password: pass })
-        form.secrets['TINYAUTH_AUTH_USERS'] = d.users
-        form.secrets['TINYAUTH_USERNAME'] = user
+        const r = await fetch('/api/v1/platform/wizard/bcrypt-users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        })
+        if (r.ok) {
+          const d = await r.json()
+          form.secrets['TINYAUTH_AUTH_USERS'] = d.users
+          form.secrets['TINYAUTH_USERNAME'] = user
+        }
       } catch { /* intentional: non-fatal */ }
     }
   }
@@ -1622,7 +1628,11 @@ async function nextStage() {
   if (currentStage.value === 5) {
     const appsToPrefetch = stackAppsToInstall.value
     if (appsToPrefetch.length > 0) {
-      appsApi.batchPrefetch(appsToPrefetch).catch(() => {})
+      fetch('/api/v1/apps/batch/prefetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: appsToPrefetch }),
+      }).catch(() => {})
     }
   }
 
@@ -1644,13 +1654,17 @@ async function finish() {
   // Save NFS storage if configured
   if (form.nfs_enabled && form.nfs_server && form.nfs_export) {
     try {
-      await storageApi.add({
-        name: 'NFS Media',
-        type: 'nfs',
-        host: form.nfs_server,
-        path: form.nfs_export,
-        mount_point: form.media_root,
-        enabled: true,
+      await fetch('/api/v1/storage/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'NFS Media',
+          type: 'nfs',
+          host: form.nfs_server,
+          path: form.nfs_export,
+          mount_point: form.media_root,
+          enabled: true,
+        }),
       })
     } catch { /* intentional: non-fatal */ }
   }
@@ -1713,7 +1727,8 @@ async function runPrereqChecks() {
   prereqRunning.value = true
   prereqError.value = ''
   try {
-    const data = await platformApi.prereqs(true)
+    const res = await fetch('/api/v1/platform/prereqs?force=1')
+    const data = await res.json()
     prereqChecks.value = data.checks || []
     // Auto-fill Stage 1 values from real system data regardless of check pass/fail
     // (some checks may warn but values are still valid)
@@ -2003,10 +2018,13 @@ let certPollInterval: ReturnType<typeof setInterval> | null = null
 
 async function pollCertStatus() {
   try {
-    certStatus.value = await platformApi.certStatus()
-    if (certStatus.value?.cert_found && certPollInterval) {
-      clearInterval(certPollInterval)
-      certPollInterval = null
+    const r = await fetch('/api/v1/platform/cert-status')
+    if (r.ok) {
+      certStatus.value = await r.json()
+      if (certStatus.value?.cert_found && certPollInterval) {
+        clearInterval(certPollInterval)
+        certPollInterval = null
+      }
     }
   } catch { /* intentional: non-fatal */ }
 }
@@ -2020,7 +2038,8 @@ async function runWizard() {
   // If platform is already marked ready from a previous run, reset first
   // so the wizard can re-run (user clicked Deploy from the setup flow)
   try {
-    const statusData = await platformApi.status()
+    const statusRes = await fetch('/api/v1/platform/status')
+    const statusData = await statusRes.json()
     if (statusData.status === 'ready') {
       // Route through the typed client so the required ?confirm=RESET_PLATFORM
       // token is always sent (raw fetch omitted it → silent 400 in production).
@@ -2050,7 +2069,6 @@ async function runWizard() {
       selected_stacks: form.selectedStacks,
     }
     // Start async wizard job — backend runs steps in background thread
-    // eslint-disable-next-line no-restricted-syntax -- raw-response: body err.detail + status, returns without polling
     const startRes = await fetch('/api/v1/platform/wizard/run-async', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2066,7 +2084,8 @@ async function runWizard() {
     const result = await new Promise<any>((resolve, reject) => {
       const poll = setInterval(async () => {
         try {
-          const { data: status } = await platformApi.wizardStatusRaw(job_id)
+          const r = await fetch(`/api/v1/platform/wizard/status/${job_id}`)
+          const status = await r.json()
           // Update steps in real time as they come in
           stepResults.value = status.steps || []
           if (status.done) {
@@ -2152,7 +2171,8 @@ async function installStacks() {
   appInstallProgress.value = {}
   appInstallSteps.value = {}
 
-  const data = await platformApi.stackAppKeys(form.selectedStacks)
+  const res = await fetch(`/api/v1/platform/wizard/stack-app-keys?stack_ids=${form.selectedStacks.join(',')}`)
+  const data = await res.json()
   const keys: string[] = [...new Set([...(data.keys || []), ...form.individualApps])]
 
   if (keys.length === 0) {
@@ -2172,10 +2192,20 @@ async function installStacks() {
     // Thread install_prompts values into the request body (id=816)
     const userVolumePaths = form.installPromptValues[key] ?? {}
     try {
-      await appsApi.install(key, Object.keys(userVolumePaths).length > 0 ? { user_volume_paths: userVolumePaths } : {})
+      const r = await fetch(`/api/v1/apps/${key}/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.keys(userVolumePaths).length > 0 ? { user_volume_paths: userVolumePaths } : {}),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        appInstallStatus[key] = 'error'
+        appInstallError[key] = err.detail || `HTTP ${r.status}`
+        appInstallProgress.value[key] = ''
+      }
     } catch (e) {
       appInstallStatus[key] = 'error'
-      appInstallError[key] = e instanceof Error ? e.message : String(e)
+      appInstallError[key] = String(e)
       appInstallProgress.value[key] = ''
     }
   }))
@@ -2183,7 +2213,7 @@ async function installStacks() {
   // Poll the bulk progress endpoint to update all app statuses from a single request.
   // Falls back to N individual EventSource connections if the bulk endpoint returns 404
   // (backward compatibility with older backend versions).
-  const probeRes = await appsApi.installsProgressRaw().catch(() => null)
+  const probeRes = await fetch('/api/v1/apps/installs/progress').catch(() => null)
   if (!probeRes || probeRes.status === 404) {
     // Fallback: N EventSource connections (one per app)
     await _installStacksViaEventSources(keys)
@@ -2211,10 +2241,11 @@ async function installStacks() {
       }
 
       try {
-        const pr = await appsApi.installsProgressRaw()
+        const pr = await fetch('/api/v1/apps/installs/progress')
         if (!pr.ok) return
         pollFailureCount = 0  // reset on success
-        const appsData: Record<string, any> = pr.data?.apps ?? {}
+        const pdata = await pr.json()
+        const appsData: Record<string, any> = pdata.apps ?? {}
 
         for (const key of keys) {
           const info = appsData[key]
@@ -2235,7 +2266,8 @@ async function installStacks() {
               // Health-timeout race: check if container is actually running
               let resolved = false
               try {
-                const hd = await healthApi.containerStatus(key)
+                const hc = await fetch(`/api/v1/health/apps/${key}/container-status`)
+                const hd = await hc.json()
                 if (hd.ready) {
                   appInstallStatus[key] = 'ok'
                   appInstallProgress.value[key] = 'Running (health check passed)'
@@ -2287,7 +2319,8 @@ async function _installStacksViaEventSources(keys: string[]) {
           appInstallProgress.value[key] = ''
         } else {
           try {
-            const hd = await healthApi.containerStatus(key)
+            const hc = await fetch(`/api/v1/health/apps/${key}/container-status`)
+            const hd = await hc.json()
             if (hd.ready) {
               appInstallStatus[key] = 'ok'
               appInstallProgress.value[key] = 'Running (health check passed)'
@@ -2319,14 +2352,15 @@ async function _installStacksViaEventSources(keys: string[]) {
         es.close()
         const poll = setInterval(async () => {
           try {
-            const { data: pdata } = await appsApi.installProgressRaw(key)
+            const prog = await fetch(`/api/v1/apps/${key}/install/progress`)
+            const pdata = await prog.json()
             const steps: any[] = pdata.steps || []
             appInstallSteps.value[key] = steps
             const runningStep = steps.filter((s: any) => s.status !== 'skipped').slice(-1)[0]
             if (runningStep) appInstallProgress.value[key] = runningStep.message || runningStep.step
             if (pdata.done) {
               clearInterval(poll)
-              await handleDone(pdata.ok as boolean, pdata.error || '')
+              await handleDone(pdata.ok, pdata.error || '')
             }
           } catch (e) {
             clearInterval(poll)
@@ -2418,17 +2452,26 @@ const ollamaModelOptions = computed(() => {
 async function startOllamaSetup() {
   ollamaSetupJob.value = { phase: 'starting', progress: 0, message: 'Starting…', done: false, ok: false }
   try {
-    const d = await platformApi.setupOllama(form.ollama_model)
+    const r = await fetch('/api/v1/platform/wizard/setup-ollama', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: form.ollama_model }),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const d = await r.json()
     ollamaSetupJobId.value = d.job_id
     // Poll for progress
     if (ollamaSetupPoll) clearInterval(ollamaSetupPoll)
     ollamaSetupPoll = setInterval(async () => {
       try {
-        const status = await platformApi.ollamaStatus(d.job_id)
-        ollamaSetupJob.value = status
-        if (status.done) {
-          clearInterval(ollamaSetupPoll!)
-          ollamaSetupPoll = null
+        const r2 = await fetch(`/api/v1/platform/wizard/ollama-status/${d.job_id}`)
+        if (r2.ok) {
+          const status = await r2.json()
+          ollamaSetupJob.value = status
+          if (status.done) {
+            clearInterval(ollamaSetupPoll!)
+            ollamaSetupPoll = null
+          }
         }
       } catch { /* intentional: non-fatal */ }
     }, 1500)
@@ -2476,8 +2519,12 @@ watch(() => form.llm_provider, async (provider) => {
     ollamaFetchDone.value = false
     try {
       const ollamaBase = form.ollama_url || 'http://localhost:11434'
-      const data = await platformApi.ollamaModels(ollamaBase)
-      liveOllamaModels.value = data.live ? data.models : null
+      const url = encodeURIComponent(ollamaBase)
+      const r = await fetch(`/api/v1/platform/ollama-models?ollama_url=${url}`)
+      if (r.ok) {
+        const data = await r.json()
+        liveOllamaModels.value = data.live ? data.models : null
+      }
     } catch { /* fall back to static list */ }
     ollamaFetchDone.value = true
   }
@@ -2497,17 +2544,23 @@ async function retryFailedApps() {
     appInstallStatus[key] = 'running'
     appInstallProgress.value[key] = 'Starting…'
     try {
-      const r = await appsApi.installRaw(key, {}, true)
+      const r = await fetch(`/api/v1/apps/${key}/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
       if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
         appInstallStatus[key] = 'error'
-        appInstallError[key] = r.data?.detail || `HTTP ${r.status}`
+        appInstallError[key] = err.detail || `HTTP ${r.status}`
         appInstallProgress.value[key] = ''
         return
       }
       await new Promise<void>((resolve) => {
         const poll = setInterval(async () => {
           try {
-            const { data: pdata } = await appsApi.installProgressRaw(key)
+            const prog = await fetch(`/api/v1/apps/${key}/install/progress`)
+            const pdata = await prog.json()
             const steps: any[] = pdata.steps || []
             appInstallSteps.value[key] = steps
             const latest = steps.filter((s: any) => s.status !== 'skipped').slice(-1)[0]
@@ -2557,17 +2610,21 @@ async function saveLLMConfig() {
     : form.llm_provider === 'groq'    ? form.groq_api_key
     : undefined
   try {
-    await platformApi.saveLlm({
-      provider: form.llm_provider,
-      api_key: apiKey,
-      model: form.llm_provider === 'ollama' ? form.ollama_model
-           : form.llm_provider === 'llamacpp' ? form.llamacpp_model
-           : form.llm_provider === 'groq' ? form.groq_model
-           : form.llm_provider === 'awan' ? form.awan_model
-           : form.llm_provider === 'cerebras' ? form.cerebras_model
-           : form.llm_provider === 'openai' ? form.openai_model
-           : undefined,
-      llamacpp_url: form.llm_provider === 'llamacpp' ? form.llamacpp_url : undefined,
+    await fetch('/api/v1/platform/wizard/save-llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: form.llm_provider,
+        api_key: apiKey,
+        model: form.llm_provider === 'ollama' ? form.ollama_model
+             : form.llm_provider === 'llamacpp' ? form.llamacpp_model
+             : form.llm_provider === 'groq' ? form.groq_model
+             : form.llm_provider === 'awan' ? form.awan_model
+             : form.llm_provider === 'cerebras' ? form.cerebras_model
+             : form.llm_provider === 'openai' ? form.openai_model
+             : undefined,
+        llamacpp_url: form.llm_provider === 'llamacpp' ? form.llamacpp_url : undefined,
+      }),
     })
   } catch { /* intentional: non-fatal */ }
 }
@@ -2623,7 +2680,8 @@ async function doReset() {
 
 async function loadStacks() {
   try {
-    const d = await platformApi.stacks()
+    const r = await fetch('/api/v1/platform/stacks')
+    const d = await r.json()
     allStacks.value = d.stacks || []
   } catch { /* intentional: non-fatal */ }
 }
@@ -2635,7 +2693,8 @@ onMounted(async () => {
   // so we don't overwrite a partially-completed wizard session.
   if (forceSetup.value && !hasDraft.value) {
     try {
-      const d: any = await platformApi.status()
+      const r = await fetch('/api/v1/platform/status')
+      const d = await r.json()
       if (d.domain)        form.domain        = d.domain
       if (d.config_root)   form.config_root   = d.config_root
       if (d.data_dir)      form.config_root   = d.data_dir   // fallback field name
@@ -2651,15 +2710,18 @@ onMounted(async () => {
   // Load wizard supporting data unconditionally — needed by all stages regardless
   // of whether this is a fresh setup or a re-run via ?force=true from Settings.
   try {
-    const d = await catalogApi.all()
+    const r = await fetch('/api/v1/catalog')
+    const d = await r.json()
     catalogApps.value = Object.values(d).flat()
   } catch { /* intentional: non-fatal */ }
   try {
-    const d = await platformApi.timezones()
+    const r = await fetch('/api/v1/platform/timezones')
+    const d = await r.json()
     timezones.value = d.timezones || []
   } catch { /* intentional: non-fatal */ }
   try {
-    const d: Array<{ key: string; name: string; env: string[] }> = await platformApi.dnsProviders()
+    const r = await fetch('/api/v1/platform/dns-providers')
+    const d: Array<{ key: string; name: string; env: string[] }> = await r.json()
     if (Array.isArray(d) && d.length > 0) {
       const providers: Record<string, { label: string; vars: string[]; link: string }> = {}
       for (const p of d) {
@@ -2673,7 +2735,8 @@ onMounted(async () => {
     }
   } catch { /* intentional: non-fatal */ }
   try {
-    wizardLLMProviders.value = await healthApi.llmProviders()
+    const r = await fetch('/api/v1/health/llm-providers')
+    wizardLLMProviders.value = await r.json()
   } catch { /* intentional: non-fatal */ }
   // Always auto-run prereq checks on mount when starting at Stage 0 — this
   // covers both fresh setup and forceSetup re-runs. If checks pass, the user
@@ -2683,7 +2746,8 @@ onMounted(async () => {
   }
   // Load system profile for AI stage recommendations
   try {
-    const d: any = await settingsApi.system()
+    const r = await fetch('/api/v1/settings/system')
+    const d = await r.json()
     systemProfile.value = {
       ram_gb: Math.round((d.total_ram_mb || 0) / 1024),
       recommended_model: d.recommended_model || 'phi4-mini',

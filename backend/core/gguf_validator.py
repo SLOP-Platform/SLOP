@@ -250,20 +250,9 @@ def resolve_gguf_url(url_or_hf: str) -> str:
 
 
 def _assert_safe_url(url: str) -> None:
-    """Raise ValueError if url is unsafe to fetch. Keeps urlopen call sites branch-free.
-
-    GGUF downloads accept arbitrary direct hosts (no host allowlist), but the
-    shared SSRF guard still enforces https-only AND rejects private/loopback/
-    link-local IP literals (blocks internal-network scanning via a user URL).
-    With ``resolve_dns=True`` it ALSO resolves the host and rejects a hostname
-    that resolves to an internal address (DNS-rebinding-to-private, #1102) —
-    appropriate here because GGUF URLs come from arbitrary user input.
-    ``UrlNotAllowed`` is a ``ValueError`` subclass, so existing callers' broad
-    ``except ValueError`` handling is unchanged.
-    """
-    from backend.core.url_guard import assert_allowed_url
-
-    assert_allowed_url(url, allowed_hosts=None, resolve_dns=True)
+    """Raise ValueError if url is not https. Keeps urlopen call sites branch-free."""
+    if not url.startswith("https://"):
+        raise ValueError(f"Refusing non-https URL: {url!r}")
 
 
 def download_gguf(
@@ -286,8 +275,8 @@ def download_gguf(
     Or simpler — collect all yields:
         result = yield from download_gguf(...)
     """
+    import urllib.request
     import urllib.error
-    import urllib.parse
 
     try:
         url = resolve_gguf_url(url_or_hf)
@@ -316,18 +305,10 @@ def download_gguf(
     _assert_safe_url(url)  # local invariant: scheme is https before urlopen
     try:
         headers = {"User-Agent": "SLOP/3.0"}
-        # Exact-host check (not substring): a host like ``huggingface.co.evil.com``
-        # must NOT receive the bearer token. _assert_safe_url already validated url.
-        _host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
-        if hf_token and _host == "huggingface.co":
+        if hf_token and "huggingface.co" in url:
             headers["Authorization"] = f"Bearer {hf_token}"
-        # pinned_urlopen (url_guard) pins the validated PUBLIC IP through connect and
-        # re-validates every redirect hop — closing the resolve→connect DNS-rebinding
-        # TOCTOU that _assert_safe_url alone leaves open (#1150). https-only + proxy/
-        # http blocked by construction, so the prior S310/B310 SSRF concern is handled.
-        from backend.core.url_guard import pinned_urlopen
-
-        with pinned_urlopen(url, headers=headers, timeout=30) as resp:
+        req = urllib.request.Request(url, headers=headers)  # noqa: S310  # nosec B310  # https enforced by resolve_gguf_url + _assert_safe_url
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310  # https enforced by resolve_gguf_url + _assert_safe_url
             total = int(resp.headers.get("Content-Length", 0)) or None
             downloaded = 0
             chunk_size = 1_048_576  # 1 MB chunks

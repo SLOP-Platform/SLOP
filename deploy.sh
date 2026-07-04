@@ -263,12 +263,6 @@ CF_ZONE_ID=
 # ── Shared services ─────────────────────────────────────────────────────────
 POSTGRES_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
 
-# #976 control-plane auth token — auto-provisioned at install so enforce mode has a real
-# token to check. Masked in the Secrets UI (never returned in clear via the API); read the
-# value here from this file when enabling enforce mode. The app also generate-if-absents this
-# at startup, so existing installs get one on next restart; this seeds it visibly for new ones.
-SLOP_CONTROL_PLANE_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-
 # ── Optional ────────────────────────────────────────────────────────────────
 PLEX_CLAIM=
 KOMODO_JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -293,7 +287,7 @@ step "6 / 8 — Installing systemd service"
 $SUDO tee "$SERVICE_FILE" > /dev/null << SVCEOF
 [Unit]
 Description=SLOP v3 — Self-hosted media stack manager
-Documentation=https://github.com/SLOP-Platform/SLOP
+Documentation=https://github.com/Nnyan/SLOP
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -332,7 +326,7 @@ $SUDO systemctl restart slop
 ok "Service installed and started (running as $SERVICE_USER)"
 
 # ── Step 7: Install ms-update and ms-check ────────────────────────────────
-step "7 / 8 — Installing ms-update, ms-check, and ms commands"
+step "7 / 8 — Installing ms-update and ms-check commands"
 
 MS_UPDATE_SRC="$INSTALL_DIR/ms-update"
 MS_UPDATE_LINK="/usr/local/bin/ms-update"
@@ -346,18 +340,6 @@ MS_CHECK_LINK="/usr/local/bin/ms-check"
 if [[ -f "$MS_CHECK_SRC" ]]; then
   $SUDO ln -sf "$MS_CHECK_SRC" "$MS_CHECK_LINK"
   ok "Installed: ${CYAN}sudo ms-check${RESET}"
-fi
-
-# ms: the SLOP command-line client (cli/ms.py — a stdlib-only HTTP client to the
-# local API). Symlinking it into /usr/local/bin means a plain `git pull` /
-# `ms-update` auto-tracks the checkout (the link resolves to the freshly-pulled
-# file), same as the probe below. cli/ms.py is executable with a python3 shebang
-# and has no relative/backend imports, so it runs directly via the symlink.
-MS_CLI_SRC="$INSTALL_DIR/cli/ms.py"
-MS_CLI_LINK="/usr/local/bin/ms"
-if [[ -f "$MS_CLI_SRC" ]]; then
-  $SUDO ln -sf "$MS_CLI_SRC" "$MS_CLI_LINK"
-  ok "Installed: ${CYAN}ms${RESET} (SLOP CLI)"
 fi
 
 # slop-reality-probe: the host-side GROUND probe the dev-time doc-vs-reality

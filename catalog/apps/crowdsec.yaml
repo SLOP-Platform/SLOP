@@ -28,7 +28,7 @@ env:
   COLLECTIONS: "crowdsecurity/traefik crowdsecurity/http-cve"
   GID: "1000"
 
-reverse_proxy:
+traefik:
   # CrowdSec itself has no web UI — skip Traefik labels.
   # The cloud Console at app.crowdsec.net is managed by CrowdSec Inc (SaaS, not self-hosted).
   enabled: false

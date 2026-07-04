@@ -14,49 +14,32 @@ GET  /api/health/agent-audit         — recent agent action audit rows (#978)
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.api import health_proposals
+from backend.api.auth import Scope, require_scope
 from backend.api.rate_limit import limiter
-from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB, is_scheduler_paused, set_scheduler_paused
-from backend.core.url_guard import UrlNotAllowed, assert_not_metadata_url
-from backend.core.url_guard_httpx import pinned_async_client
 from backend.health.checker import _llm_state, run_health_cycle
-from backend.health.fix_verification import schedule_fix_verification
-
-# Pending-actions computation extracted to health_pending.py (#1302 linecount
-# drain). Re-export PendingAction (route response_model + tests). _env_cache moved
-# there too (its canonical home now; the test-isolation registry resets it there).
-from backend.api.health_pending import (
-    PendingAction as PendingAction,
-    compute_pending_actions,
-)
 
 log = get_logger(__name__)
 router = APIRouter()
-
-# LLM test-proposal endpoints live in a split-out sub-router (#1302 linecount
-# drain). Included at module load — before _mount() in main.py runs — so the
-# routes inherit the same prefix + control-plane guard as the rest of /health.
-router.include_router(health_proposals.router)
 
 # Strong references to fire-and-forget background tasks. Without this, asyncio
 # only holds a weak reference and the task can be garbage-collected mid-run.
 _background_tasks: set[Any] = set()
 
-
-@router.get("/pending-actions")
-def get_pending_actions() -> list[PendingAction]:
-    """Return outstanding platform issues, ordered by priority (see health_pending)."""
-    return compute_pending_actions()
+# Cache for .env file reads in get_pending_actions().
+# Keyed by mtime so a write triggers an immediate re-read; TTL guards against
+# stat() noise and ensures stale data ages out within 30s regardless.
+_env_cache: dict[str, Any] = {"data": None, "ts": 0.0, "mtime": 0.0}
 
 
 class AppHealthOut(BaseModel):
@@ -189,33 +172,6 @@ def get_agent_reality() -> dict[str, Any]:
     from backend.core.agent import get_reality_view
 
     return get_reality_view()
-
-
-@router.get("/agent/registry")
-@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # read-only registry surface (#982)
-def get_agent_registry(
-    request: Request,
-) -> dict[str, Any]:
-    """Return the Agent Action Registry as read-only views — the full action
-    vocabulary (id, tier, reversibility, executability, scopeability, rate limit,
-    diagnosis classes, description) the autonomous agent can dispatch.
-
-    Introspection surface for #982: the registry (``backend/agent/registry.py``)
-    was reachable only in-process (chat / MCP via ``list_actions``); this exposes
-    the same PINNED ``ActionView`` projection over HTTP. Lists EVERY declared
-    action — including declared-but-pending (non-executable) ones — so a client
-    sees the whole surface and its tiers. Carries no handler reference: read-only,
-    never mutates and never dispatches an action.
-
-    Gated by the READ control-plane scope to match the sibling agent-domain review
-    surfaces ``/agent-audit`` and ``/advisories``: open in the local no-token
-    model, enforced once a control-plane token is configured (fail-closed under
-    hardening)."""
-    from dataclasses import asdict
-
-    from backend.agent.registry import list_actions
-
-    return {"actions": [asdict(v) for v in list_actions()]}
 
 
 @router.get("/summary")
@@ -357,10 +313,6 @@ def get_llm_agent_status() -> LLMAgentStatus:
                 base_desc = f"Model '{model}' not found in Ollama. Run: ollama pull {model}"
             else:
                 base_desc = f"Model '{model}' not found in {_pname}."
-        elif err_type == "dns":
-            base_desc = f"DNS lookup failed for {url}. Check network connectivity and container name resolution."
-        elif err_type == "auth":
-            base_desc = f"Authentication to {_pname} failed. Verify API keys, tokens, and credentials."
         elif err_type == "timeout":
             base_desc = f"Model '{model}' took too long to respond. Try a smaller/faster model."
         elif err_type == "parse":
@@ -466,26 +418,10 @@ def get_probe_failures(request: Request) -> dict[str, Any]:
         return {"probe_failures": db.get_probe_failures()}
 
 
-@router.get("/advisories")
-@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # read-only advisory surface (#1089)
-def list_spine_advisories(
-    request: Request,
-    limit: int = 100,
-) -> dict[str, Any]:
-    """Return the store-only spine advisories — advisory LLM annotations persisted
-    alongside the GROUND verdicts for human review (the read surface for #1089;
-    the table was previously write-only). Newest first. Read-only: never mutates
-    and never triggers remediation. ``limit`` is clamped to 1..500.
-
-    Gated by the READ control-plane scope to match the sibling agent-domain review
-    surface ``/agent-audit``: open in the local no-token model, enforced once a
-    control-plane token is configured (fail-closed under hardening)."""
-    with StateDB() as db:
-        return {"advisories": db.get_spine_advisories(limit=min(max(limit, 1), 500))}
-
-
 @router.post("/scheduler/pause", tags=["Health"])
-def pause_scheduler() -> dict[str, Any]:
+def pause_scheduler(
+    _auth: Scope = Depends(require_scope(Scope.ACT)),
+) -> dict[str, Any]:
     """Engage the agent kill-switch — pause all autonomous scheduler mutations.
 
     The health-check loop continues to run and report findings; only
@@ -501,9 +437,7 @@ def pause_scheduler() -> dict[str, Any]:
     try:
         set_scheduler_paused(True)
     except Exception as e:  # pragma: no cover - flag setter is in-memory, but never 500 bare
-        raise HTTPException(
-            status_code=500, detail=safe_detail(e, "Failed to engage kill-switch.", log=log)
-        ) from e
+        raise HTTPException(status_code=500, detail=f"failed to engage kill-switch: {e}") from e
     log.info("scheduler kill-switch ENGAGED via API")
     return {
         "ok": True,
@@ -516,7 +450,9 @@ def pause_scheduler() -> dict[str, Any]:
 
 
 @router.post("/scheduler/unpause", tags=["Health"])
-def unpause_scheduler() -> dict[str, Any]:
+def unpause_scheduler(
+    _auth: Scope = Depends(require_scope(Scope.ACT)),
+) -> dict[str, Any]:
     """Release the agent kill-switch — allow autonomous scheduler mutations again.
 
     Requires the ACT control-plane scope.  No-op if the scheduler is not
@@ -526,9 +462,7 @@ def unpause_scheduler() -> dict[str, Any]:
         was_paused = is_scheduler_paused()
         set_scheduler_paused(False)
     except Exception as e:  # pragma: no cover - flag setter is in-memory, but never 500 bare
-        raise HTTPException(
-            status_code=500, detail=safe_detail(e, "Failed to release kill-switch.", log=log)
-        ) from e
+        raise HTTPException(status_code=500, detail=f"failed to release kill-switch: {e}") from e
     log.info("scheduler kill-switch RELEASED via API (was_paused=%s)", was_paused)
     return {
         "ok": True,
@@ -542,6 +476,7 @@ def unpause_scheduler() -> dict[str, Any]:
 def get_agent_audit(
     limit: int = 20,
     app_key: str | None = None,
+    _auth: Scope = Depends(require_scope(Scope.READ)),
 ) -> dict[str, Any]:
     """Return recent agent action audit rows (#978 / N7).
 
@@ -608,6 +543,262 @@ def update_health_settings(
 # ── Pending actions ────────────────────────────────────────────────────────
 
 
+class PendingAction(BaseModel):
+    priority: str  # error | warning | suggestion
+    title: str
+    description: str
+    action: str  # human-readable action to take
+    link: str | None = None  # UI route to navigate to
+    icon: str = ""
+
+
+@router.get("/pending-actions")
+def get_pending_actions() -> list[PendingAction]:
+    """Return outstanding platform issues, ordered by priority.
+
+    Sources: platform DB state, settings, installed apps, health results.
+    Errors first, then warnings, then suggestions.
+    """
+    from backend.core.state import StateDB
+    from backend.core.config import config as _cfg
+
+    actions: list[PendingAction] = []
+
+    with StateDB() as db:
+        platform = db.get_platform()
+        settings = {
+            "cf_token": db.get_setting("cf_auto_register_hostnames"),
+            "ntfy_url": db.get_setting("ntfy_url"),
+        }
+        apps = db.get_all_apps()
+        health_rows = (
+            db.execute(
+                "SELECT subject_key AS app_key, status, summary FROM health_checks "
+                "WHERE status IN ('error','warning') AND subject_type='app' "
+                "ORDER BY checked_at DESC LIMIT 50"
+            ).fetchall()
+            if _table_exists(db, "health_checks")
+            else []
+        )
+        # Wiring rows stuck in 'pending' for > 30 minutes signal a configuration stall
+        _wiring_stale_cutoff = int(time.time()) - 30 * 60
+        stale_wiring_rows = (
+            db.execute(
+                "SELECT w.id, w.wire_type, w.wired_at, "
+                "src.key AS source_key, tgt.key AS target_key "
+                "FROM wiring w "
+                "JOIN apps src ON src.id = w.source_app_id "
+                "JOIN apps tgt ON tgt.id = w.target_app_id "
+                "WHERE w.status = 'pending' AND w.wired_at IS NOT NULL "
+                "AND w.wired_at < ?",
+                (_wiring_stale_cutoff,),
+            ).fetchall()
+            if _table_exists(db, "wiring")
+            else []
+        )
+        # Probe failures with 5+ consecutive failures signal a broken scheduler probe
+        probe_failure_rows = (
+            db.execute(
+                "SELECT probe_name, fail_count, last_error, last_failed_at "
+                "FROM probe_failures WHERE fail_count >= 5 "
+                "ORDER BY last_failed_at DESC"
+            ).fetchall()
+            if _table_exists(db, "probe_failures")
+            else []
+        )
+
+    # ── Errors ──────────────────────────────────────────────────────────────
+
+    # Platform not configured
+    if platform.status == "pending":
+        actions.append(
+            PendingAction(
+                priority="error",
+                title="Platform setup incomplete",
+                description="The setup wizard has not been completed — Traefik and HTTPS are not configured.",
+                action="Run the setup wizard",
+                link="/setup",
+                icon="⚙️",
+            )
+        )
+
+    # CF_DNS_API_TOKEN missing — read .env with mtime-based cache (30s TTL)
+    env_vals: dict[str, str] = {}
+    if _cfg.env_file.exists():
+        try:
+            current_mtime = _cfg.env_file.stat().st_mtime
+        except OSError:
+            current_mtime = 0.0
+        now = time.monotonic()
+        if (
+            _env_cache["data"] is not None
+            and _env_cache["mtime"] == current_mtime
+            and now - _env_cache["ts"] < 30
+        ):
+            env_vals = _env_cache["data"]
+        else:
+            parsed: dict[str, str] = {}
+            for line in _cfg.env_file.read_text().splitlines():
+                if "=" in line and not line.strip().startswith("#"):
+                    k, _, v = line.partition("=")
+                    parsed[k.strip()] = v.strip()
+            _env_cache["data"] = parsed
+            _env_cache["ts"] = now
+            _env_cache["mtime"] = current_mtime
+            env_vals = parsed
+
+    if not env_vals.get("CF_DNS_API_TOKEN") and platform.status == "ready":
+        actions.append(
+            PendingAction(
+                priority="error",
+                title="Cloudflare API token missing",
+                description="CF_DNS_API_TOKEN is not set — wildcard certificates cannot be issued.",
+                action="Add it in Settings → Secrets",
+                link="/settings",
+                icon="🔑",
+            )
+        )
+
+    # Apps in error state
+    error_apps = [a for a in apps if getattr(a, "status", "") == "error"]
+    for app in error_apps[:3]:
+        actions.append(
+            PendingAction(
+                priority="error",
+                title=f"{app.display_name or app.key} is in error state",
+                description="Container failed to start or is unhealthy.",
+                action=f"Check logs: ms apps logs {app.key}",
+                link="/health",
+                icon="❌",
+            )
+        )
+
+    # ── Warnings ─────────────────────────────────────────────────────────────
+
+    # Auth infra slot empty
+    with StateDB() as db:
+        auth_slot = db.get_slot("auth")
+    if auth_slot and getattr(auth_slot, "status", "empty") == "empty":
+        actions.append(
+            PendingAction(
+                priority="warning",
+                title="No authentication deployed",
+                description="Apps are publicly accessible without a login screen.",
+                action="Deploy TinyAuth in Infrastructure",
+                link="/infra",
+                icon="🔐",
+            )
+        )
+
+    # No LLM model installed
+    models_dir = _cfg.data_dir / "models"
+    has_model = models_dir.exists() and any(models_dir.glob("*.gguf"))
+    if not has_model:
+        actions.append(
+            PendingAction(
+                priority="warning",
+                title="AI health monitoring inactive",
+                description="No LLM model installed — health issues won't have AI-powered diagnosis.",
+                action="Install Ollama and download a model (see /models)",
+                link="/models",
+                icon="🤖",
+            )
+        )
+
+    # Health check errors/warnings from recent cycle
+    seen_apps: set[str] = set()
+    for row in health_rows:
+        if row["app_key"] not in seen_apps:
+            seen_apps.add(row["app_key"])
+            if row["status"] == "warning":
+                actions.append(
+                    PendingAction(
+                        priority="warning",
+                        title=f"{row['app_key']} health warning",
+                        description=row["summary"] or "Health check returned a warning.",
+                        action="View details in Health Monitor",
+                        link="/health",
+                        icon="⚠️",
+                    )
+                )
+
+    # Wiring rows stuck pending > 30 min — configuration stalled
+    for wrow in stale_wiring_rows[:5]:  # cap at 5 to avoid flooding
+        age_min = int((time.time() - (wrow["wired_at"] or 0)) / 60)
+        actions.append(
+            PendingAction(
+                priority="warning",
+                title=f"Wiring stalled: {wrow['source_key']} → {wrow['target_key']}",
+                description=(
+                    f"Wire type '{wrow['wire_type']}' has been pending for {age_min} minutes. "
+                    "Both apps may need to be running and configured before wiring can complete."
+                ),
+                action="Check that both apps are running and their API keys are set",
+                link="/health",
+                icon="🔗",
+            )
+        )
+
+    # Probe failures with 5+ consecutive failures — scheduler probe broken
+    for pfrow in probe_failure_rows[:5]:  # cap at 5
+        actions.append(
+            PendingAction(
+                priority="warning",
+                title=f"Scheduler probe failing: {pfrow['probe_name']}",
+                description=(
+                    f"The '{pfrow['probe_name']}' probe has failed {pfrow['fail_count']} "
+                    f"consecutive times. Last error: {(pfrow['last_error'] or '')[:120]}"
+                ),
+                action="Check server logs for probe errors; restart SLOP if the issue persists",
+                link="/health",
+                icon="🔍",
+            )
+        )
+
+    # ── Suggestions ──────────────────────────────────────────────────────────
+
+    # No apps installed
+    running_apps = [a for a in apps if getattr(a, "status", "") == "running"]
+    if not running_apps and platform.status == "ready":
+        actions.append(
+            PendingAction(
+                priority="suggestion",
+                title="No apps installed yet",
+                description="The platform is ready — start by installing Sonarr, Radarr and Prowlarr.",
+                action="Browse the Catalog",
+                link="/catalog",
+                icon="📦",
+            )
+        )
+
+    # Notifications not configured
+    if not env_vals.get("NTFY_URL", "") and not (settings.get("ntfy_url") or ""):
+        actions.append(
+            PendingAction(
+                priority="suggestion",
+                title="Push notifications not configured",
+                description="Set up ntfy to receive alerts when apps go down or certs expire.",
+                action="Configure in Settings → Notifications",
+                link="/settings",
+                icon="🔔",
+            )
+        )
+
+    # Sort: errors → warnings → suggestions
+    order = {"error": 0, "warning": 1, "suggestion": 2}
+    actions.sort(key=lambda a: order.get(a.priority, 3))
+    return actions
+
+
+def _table_exists(db: Any, table_name: str) -> bool:
+    try:
+        # table_name is only ever passed hardcoded constants by callers, not user input
+        db.execute(f"SELECT 1 FROM {table_name} LIMIT 1")  # noqa: S608  # nosec B608
+        return True
+    except Exception:
+        return False
+
+
 # ── Anomaly detection ──────────────────────────────────────────────────────
 
 
@@ -638,9 +829,9 @@ async def run_platform_review() -> dict[str, Any]:
 
     # Get pending actions
     try:
-        actions = compute_pending_actions()
+        actions = get_pending_actions()
     except Exception as e:
-        return {"ok": False, "error": safe_detail(e, "Could not get pending actions.", log=log)}
+        return {"ok": False, "error": str(e)}
 
     if not actions:
         return {
@@ -698,11 +889,6 @@ class ApplyRequest(BaseModel):
     app_key: str
     action_type: str
     suggested_fix: str
-    # Diagnosed problem text (#1160). Optional for backward compatibility; when
-    # supplied it lets /apply-fix route the outcome through the record_fix_outcome
-    # seam with a real signature_hash (the error-text-keyed recipe the learning
-    # read path recomputes), instead of the signature-less pending bypass.
-    problem: str = ""
 
 
 @router.post("/apply-fix")
@@ -731,50 +917,25 @@ async def apply_suggested_fix(req: ApplyRequest) -> dict[str, Any]:
         caller_context="health_api_apply_fix",
     )
 
-    # Record in fix_history. With a diagnosed PROBLEM (#1160) the write routes
-    # through the single agent↔API seam (#822, record_fix_outcome) so it carries
-    # the error-text-keyed signature_hash/diagnosis_class the learning store keys
-    # on (a cache hit on the next identical failure). Without one, keep the
-    # deliberate bypass: a signature-less pending row (never counted) over noise.
+    # Record in fix_history
     try:
         from backend.core.state import StateDB
         import time as _time
 
-        if req.problem:
-            # Outcome mirrors approve_fix's derivation from the action result.
-            if result.get("executed"):
-                outcome = "success"
-            elif result.get("requires_approval"):
-                outcome = "user_approved_manual"
-            else:
-                outcome = "pending"
-            from backend.agent.fix_outcome import record_fix_outcome
-
-            with StateDB() as db:
-                record_fix_outcome(
-                    db,
-                    app_key=req.app_key,
-                    problem=req.problem,
-                    error_type=req.action_type,
-                    context=req.problem,
-                    suggested_fix=req.suggested_fix,
-                    outcome=outcome,
-                )
-        else:
-            with StateDB() as db:
-                db.execute(
-                    """INSERT INTO fix_history
-                       (app_key, error_type, context, suggested_fix, outcome, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        req.app_key,
-                        req.action_type,
-                        req.suggested_fix[:200],
-                        req.suggested_fix,
-                        "pending",
-                        int(_time.time()),
-                    ),
-                )
+        with StateDB() as db:
+            db.execute(
+                """INSERT INTO fix_history
+                   (app_key, error_type, context, suggested_fix, outcome, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    req.app_key,
+                    req.action_type,
+                    req.suggested_fix[:200],
+                    req.suggested_fix,
+                    "pending",
+                    int(_time.time()),
+                ),
+            )
     except Exception as e:
         log.debug("health API best-effort step skipped: %s", e)
 
@@ -915,9 +1076,7 @@ def handle_ghost_resource(req: GhostAction) -> dict[str, Any]:
                 subprocess.run(["docker", "rm", req.name], capture_output=True, timeout=15)
                 return {"ok": True, "message": f"Container '{req.name}' stopped and removed."}
             except Exception as e:
-                raise HTTPException(
-                    502, detail=safe_detail(e, "Could not stop or remove the container.", log=log)
-                ) from e
+                raise HTTPException(502, str(e)) from e
 
         elif req.resource_type == "fragment":
             frag = _cfg.compose_dir / req.name
@@ -1130,9 +1289,231 @@ def get_test_results() -> dict[str, Any]:
 
 
 # ── LLM test proposal system ──────────────────────────────────────────────
-# Endpoints (propose-tests / proposed-tests) live in health_proposals.py and
-# are mounted onto this router below via include_router (#1302 linecount drain),
-# so their paths + control-plane guard are unchanged.
+
+
+class TestProposalRequest(BaseModel):
+    fix_description: str = Field(..., description="What was fixed and why")
+    diff_summary: str = Field("", description="Optional: key lines changed")
+    bug_category: str = Field("", description="e.g. method_mismatch, field_not_wired")
+
+
+@router.post("/propose-tests")
+async def propose_tests(req: TestProposalRequest) -> dict[str, Any]:
+    """Ask the LLM to propose new test cases based on a recent bug fix.
+
+    The LLM analyzes the fix description and generates Python test code
+    following the project's existing test patterns. Tests are written to
+    tests/proposed/ — never to tests/ directly. A human must approve via
+    POST /health/proposed-tests/{id}/approve.
+
+    Safety: proposed tests are syntax-checked and dry-run collected
+    (pytest --collect-only) before being shown to the user.
+    """
+    import time as _time
+    import hashlib
+    from pathlib import Path
+
+    PROPOSED_DIR = Path("tests") / "proposed"
+    PROPOSED_DIR.mkdir(parents=True, exist_ok=True)
+
+    prompt = f"""You are a Python test engineer reviewing a bug fix in a FastAPI + Vue 3 homelab app called SLOP.
+
+Bug fix description:
+{req.fix_description}
+
+Diff summary:
+{req.diff_summary or "Not provided"}
+
+Bug category: {req.bug_category or "unknown"}
+
+Generate a focused pytest test class (2-5 test methods) that would have caught this bug BEFORE it was fixed.
+Follow these patterns from the existing test suite:
+- Use @pytest.fixture with scope="module" for db_path
+- Use fastapi.testclient.TestClient for API calls
+- Each test has a clear docstring explaining what it catches
+- Test names start with test_
+- Import from backend.* as needed
+- No mocks unless absolutely necessary — test the real behavior
+
+Return ONLY valid Python code. No markdown fences. No explanation outside the code.
+Start with: import pytest
+"""
+
+    # Try cloud LLM cascade
+    try:
+        from backend.core.cloud_llm import escalate_to_cloud
+
+        _esc = await escalate_to_cloud(prompt, app_key="", purpose="ai_test_generation")
+        proposed_code = _esc.response if _esc and _esc.ok else None
+    except Exception:
+        proposed_code = None
+
+    # Fallback to local LLM — branch on provider per 0eb5431 pattern
+    if not proposed_code:
+        try:
+            import httpx
+            import json as _json
+            from backend.core.state import StateDB
+
+            with StateDB() as db:
+                _agent_cfg_raw = db.get_setting("llm_agent_config")
+            _agent_cfg = (
+                _json.loads(_agent_cfg_raw)
+                if isinstance(_agent_cfg_raw, str)
+                else (_agent_cfg_raw or {})
+            )
+            _provider = _agent_cfg.get("provider", "ollama")
+            if _provider == "llamacpp":
+                ollama_url = _agent_cfg.get("llamacpp_url", "http://localhost:8081")
+            else:
+                ollama_url = _agent_cfg.get("ollama_url", "http://ollama:11434")
+            model = _agent_cfg.get("model", "phi4-mini")
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{ollama_url}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False},
+                )
+                proposed_code = resp.json().get("response", "")
+        except Exception as e:
+            return {"ok": False, "error": f"No LLM available: {e}"}
+
+    if not proposed_code or len(proposed_code) < 100:
+        return {"ok": False, "error": "LLM returned empty or too-short response"}
+
+    # Safety validation: must parse as Python
+    import ast as _ast
+
+    try:
+        _ast.parse(proposed_code)
+    except SyntaxError as e:
+        return {"ok": False, "error": f"LLM-generated code has syntax error: {e}"}
+
+    # Write to proposed/ with timestamp ID
+    proposal_id = hashlib.sha1(
+        f"{_time.time()}{req.fix_description}".encode(),
+        usedforsecurity=False,  # short non-security ID for the proposal filename
+    ).hexdigest()[:8]
+    filename = f"test_proposed_{proposal_id}.py"
+    proposal_path = PROPOSED_DIR / filename
+
+    header = f'''"""PROPOSED TEST — awaiting human review.
+
+Generated by LLM based on fix: {req.fix_description[:100]}
+Bug category: {req.bug_category or "unknown"}
+
+To approve: POST /api/health/proposed-tests/{proposal_id}/approve
+To discard: DELETE /api/health/proposed-tests/{proposal_id}
+
+DO NOT run in CI until approved.
+"""
+'''
+    proposal_path.write_text(header + proposed_code)
+
+    # Dry-run collect to check for import errors (not execution)
+    import sys
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "pytest",
+        str(proposal_path),
+        "--collect-only",
+        "-q",
+        "--tb=short",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(Path(".")),
+    )
+    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    collect_result_returncode = proc.returncode
+    collect_result_stdout = stdout.decode()
+    collection_ok = collect_result_returncode == 0
+
+    return {
+        "ok": True,
+        "proposal_id": proposal_id,
+        "filename": filename,
+        "collection_valid": collection_ok,
+        "collection_output": collect_result_stdout[:500] if not collection_ok else None,
+        "preview": proposed_code[:500],
+        "message": (
+            f"Test proposal saved to tests/proposed/{filename}. "
+            f"Review with GET /api/health/proposed-tests/{proposal_id}, "
+            f"then approve via POST /api/health/proposed-tests/{proposal_id}/approve"
+        ),
+    }
+
+
+@router.get("/proposed-tests")
+def list_proposed_tests() -> list[dict[str, Any]]:
+    """List all pending proposed tests awaiting review."""
+    from pathlib import Path
+
+    PROPOSED_DIR = Path("tests") / "proposed"
+    if not PROPOSED_DIR.exists():
+        return []
+    results = []
+    for f in sorted(PROPOSED_DIR.glob("test_proposed_*.py")):
+        src = f.read_text()
+        results.append(
+            {
+                "id": f.stem.replace("test_proposed_", ""),
+                "filename": f.name,
+                "size_bytes": f.stat().st_size,
+                "preview": src[src.find("import") : src.find("import") + 300]
+                if "import" in src
+                else src[:300],
+            }
+        )
+    return results
+
+
+@router.post("/proposed-tests/{proposal_id}/approve")
+def approve_proposed_test(proposal_id: str) -> dict[str, Any]:
+    """Promote a proposed test from tests/proposed/ to tests/.
+
+    Runs a final syntax check before promotion.
+    Rollback: git rm tests/test_proposed_{id}.py
+    """
+    from pathlib import Path
+    import ast as _ast
+
+    proposed = Path("tests") / "proposed" / f"test_proposed_{proposal_id}.py"
+    if not proposed.exists():
+        raise HTTPException(404, f"Proposal {proposal_id} not found.")
+
+    # Final syntax check
+    src = proposed.read_text()
+    try:
+        _ast.parse(src)
+    except SyntaxError as e:
+        raise HTTPException(422, f"Proposed test has syntax error: {e}") from e
+
+    # Remove the warning header comment before promoting
+    promoted_src = src[src.find("import pytest") :]  # strip header
+    dest = Path("tests") / f"test_proposed_{proposal_id}.py"
+    dest.write_text(promoted_src)
+    proposed.unlink()
+
+    return {
+        "ok": True,
+        "promoted_to": str(dest),
+        "message": f"Test promoted to tests/. Add to git: git add {dest}",
+        "rollback": f"git rm {dest}",
+    }
+
+
+@router.delete("/proposed-tests/{proposal_id}")
+@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # light mutation — proposed test discard (id=467)
+def discard_proposed_test(request: Request, proposal_id: str) -> dict[str, Any]:
+    """Discard a proposed test without promoting it."""
+    from pathlib import Path
+
+    proposed = Path("tests") / "proposed" / f"test_proposed_{proposal_id}.py"
+    if not proposed.exists():
+        raise HTTPException(404, f"Proposal {proposal_id} not found.")
+    proposed.unlink()
+    return {"ok": True, "discarded": proposal_id}
 
 
 # ── Anomaly suppression / snooze ──────────────────────────────────────────
@@ -1297,7 +1678,7 @@ async def ping_llm() -> dict[str, Any]:
         }
 
     try:
-        async with pinned_async_client(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5) as client:
             if provider == "ollama":
                 r = await client.get(f"{base_url}/api/tags")
                 if r.status_code != 200:
@@ -1386,15 +1767,9 @@ class MaintenanceWindowIn(BaseModel):
     app_key: str
     check_name: str
     label: str = "Scheduled task"
-    # Bounds reject out-of-domain ints at validation time (HTTP 422) instead of
-    # letting them reach the DB — an oversized hour (e.g. 2**63) overflows
-    # SQLite's signed-64-bit INTEGER → OverflowError → HTTP 500, and an
-    # out-of-range day_of_week would IndexError day_names[...] downstream. Both
-    # are adversarial-input 5xx (Core Rule: zero 500s on vetted-safe mutating
-    # endpoints). 0=Mon … 6=Sun; None=every day. hour_end -1 = hour_start + 2.
-    day_of_week: int | None = Field(None, ge=0, le=6)
-    hour_start: int = Field(0, ge=0, le=23)
-    hour_end: int = Field(-1, ge=-1, le=23)
+    day_of_week: int | None = None  # 0=Mon … 6=Sun, None=every day
+    hour_start: int = 0
+    hour_end: int = -1  # -1 = hour_start + 2
 
 
 @router.post("/maintenance-windows")
@@ -1492,8 +1867,7 @@ def get_source_availability() -> dict[str, Any]:
 
 
 @router.post("/sources/scan")
-@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; triggers external source-availability fetches (#1205 external-fetch tier)
-async def trigger_source_scan(request: Request) -> dict[str, Any]:
+async def trigger_source_scan() -> dict[str, Any]:
     """Trigger an immediate source availability scan (async, non-blocking)."""
     import asyncio
     from backend.health.source_checker import run_source_scan
@@ -1514,8 +1888,7 @@ class ReplacementRequest(BaseModel):
 
 
 @router.post("/sources/find-replacement")
-@limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; LLM replacement-lookup external call, heaviest (#1205 external-fetch tier)
-async def find_source_replacement(request: Request, req: ReplacementRequest) -> dict[str, Any]:
+async def find_source_replacement(req: ReplacementRequest) -> dict[str, Any]:
     """Ask the LLM to find a replacement for a missing/broken source URL.
 
     Returns a suggestion with confidence score. Never auto-applies —
@@ -1538,8 +1911,7 @@ class ApplyReplacementRequest(BaseModel):
 
 
 @router.post("/sources/apply-replacement")
-@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; applies a confirmed replacement, DB mutation (#1205 mutation tier)
-def apply_source_replacement(request: Request, req: ApplyReplacementRequest) -> dict[str, Any]:
+def apply_source_replacement(req: ApplyReplacementRequest) -> dict[str, Any]:
     """Apply a confirmed URL replacement.
 
     For docker_image: updates the apps table image + image_tag.
@@ -1689,49 +2061,85 @@ async def approve_fix(fix_id: int) -> dict[str, Any]:
             f"Manual action required — run this command:\n{fix.get('suggested_fix', '')}"
         )
 
-    # Record the outcome through the single agent↔API seam (#822) so it carries
-    # the signature_hash/diagnosis_class the learning store keys on (the same
-    # recipe the next identical failure recomputes for a cache hit).
-    from backend.agent.fix_outcome import record_fix_outcome
+    # Compute pattern-library hash so the next identical failure hits the cache.
+    from backend.agent.classifier import classify_offline, compute_signature_hash as _compute_sig
+
+    _err_class = classify_offline(fix["problem"])
+    _sig_hash = _compute_sig(_err_class, fix["problem"], fix["app_key"])
+    _diag_class = _err_class.value
 
     with StateDB() as db:
-        # Insert fix_history FIRST, then record its id on the pending_fixes row —
-        # the #822 referential link (so verification stamps the right row by id).
-        fix_history_id = record_fix_outcome(
-            db,
-            app_key=fix["app_key"],
-            problem=fix["problem"],
-            error_type=fix["action_type"],
-            context=fix["problem"],
-            suggested_fix=fix["suggested_fix"],
-            outcome=outcome,
+        db.execute(
+            "UPDATE pending_fixes SET status='approved', resolved_at=? WHERE id=?",
+            (int(_t.time()), fix_id),
         )
         db.execute(
-            "UPDATE pending_fixes SET status='approved', resolved_at=?, fix_history_id=? WHERE id=?",
-            (int(_t.time()), fix_history_id, fix_id),
+            """INSERT INTO fix_history
+               (app_key, error_type, context, suggested_fix, outcome, created_at,
+                diagnosis_class, signature_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                fix["app_key"],
+                fix["action_type"],
+                fix["problem"],
+                fix["suggested_fix"],
+                outcome,
+                int(_t.time()),
+                _diag_class,
+                _sig_hash,
+            ),
         )
-    # Post-fix verification: re-check the container after a delay. Runs as a
-    # SUPERVISED asyncio task (#996 — replaces an unjoinable daemon thread that
-    # slept + ran a real docker inspect unobservably). It stamps the LINKED
-    # fix_history row by id (#822 Unit B). See backend.health.fix_verification.
+    # Post-fix verification: re-check via docker inspect 60s later.
+    # Uses subprocess (not asyncio-in-thread) to avoid event loop conflicts.
     if result.get("executed"):
-        schedule_fix_verification(fix["app_key"], fix_history_id)
+        import threading as _th
+        import subprocess as _subp
+        import time as _vt2
+
+        _app_key_snap = fix["app_key"]
+
+        def _verify_after_delay() -> None:
+            _vt2.sleep(60)
+            try:
+                from backend.core.state import StateDB as _VDB2
+
+                _r = _subp.run(
+                    ["docker", "inspect", "--format", "{{.State.Status}}", _app_key_snap],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                _still_failing = _r.returncode != 0 or _r.stdout.strip() not in ("running",)
+                import logging as _vlog2
+
+                _vlog2.getLogger(__name__).info(
+                    "Post-fix verification for %s: %s",
+                    _app_key_snap,
+                    "recovered" if not _still_failing else "still failing",
+                )
+                with _VDB2() as _vdb2:
+                    _vdb2.execute(
+                        """UPDATE fix_history SET outcome=?
+                           WHERE app_key=?
+                           AND created_at=(SELECT MAX(created_at) FROM fix_history WHERE app_key=?)""",
+                        (
+                            "success" if not _still_failing else "failed_verification",
+                            _app_key_snap,
+                            _app_key_snap,
+                        ),
+                    )
+                    # NOTE: StateDB auto-commits on __exit__ — _vdb2.commit() removed (Core Rule 4.4)
+            except Exception as e:
+                log.debug("health API best-effort step skipped: %s", e)
+
+        _th.Thread(target=_verify_after_delay, daemon=True).start()
 
     return result
 
 
 @router.post("/pending-fixes/{fix_id}/reject")
-def reject_fix(
-    fix_id: int, reason: str | None = None,
-) -> dict[str, Any]:
-    """Reject a pending AI fix. Returns 404 if fix not found.
-
-    A rejection is recorded through the #822 seam as outcome='failure' (it IS
-    negative learning signal — it demotes the fix's score via learning_outcome_tally).
-    An optional free-text ``reason`` is captured in ``fix_history.rejection_reason``
-    and fed to the LLM via ``context_assembler._section_fix_history`` so the agent
-    can learn from user feedback (#1164 rejection-learning).
-    """
+def reject_fix(fix_id: int, reason: str = "") -> dict[str, Any]:
+    """Reject a pending AI fix. Returns 404 if fix not found."""
     from backend.core.state import StateDB
     import time as _t
 
@@ -1748,26 +2156,16 @@ def reject_fix(
             (int(_t.time()), fix_id),
         )
         try:
-            # A rejection IS learning signal (the suggestion was judged wrong) —
-            # record it through the seam (#822) so it carries signature_hash and
-            # is visible to learning_outcome_tally. The prior inline INSERT left
-            # signature_hash NULL, so every rejection was invisible to learning.
-            from backend.agent.fix_outcome import record_fix_outcome
-
-            fix_history_id = record_fix_outcome(
-                db,
-                app_key=fix["app_key"],
-                problem=fix["problem"],
-                error_type=fix["action_type"],
-                context=fix["problem"],
-                suggested_fix=fix["suggested_fix"],
-                outcome="failure",
-                rejection_reason=reason or "",
-            )
-            # #822 referential link: record which fix_history row this reject produced.
             db.execute(
-                "UPDATE pending_fixes SET fix_history_id=? WHERE id=?",
-                (fix_history_id, fix_id),
+                """INSERT INTO fix_history (app_key, error_type, context, suggested_fix, outcome, created_at)
+                   VALUES (?, ?, ?, ?, 'failure', ?)""",
+                (
+                    fix["app_key"],
+                    fix["action_type"],
+                    fix["problem"],
+                    fix["suggested_fix"],
+                    int(_t.time()),
+                ),
             )
         except Exception as e:
             log.debug("health API best-effort step skipped: %s", e)
@@ -1828,7 +2226,7 @@ Provide a thorough diagnosis. Respond ONLY with JSON:
                     url,
                     headers={
                         "Authorization": f"Bearer {api_key}",
-                        "HTTP-Referer": "https://github.com/SLOP-Platform/SLOP",
+                        "HTTP-Referer": "https://github.com/Nnyan/SLOP",
                         "X-Title": "SLOP Health Agent Escalation",
                     },
                     json={
@@ -1867,12 +2265,12 @@ class LLMTestRequest(BaseModel):
 
 
 @router.post("/llm-test")
-@limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; external LLM call to a user-supplied URL (#1205 external-fetch tier)
-async def llm_test(request: Request, req: LLMTestRequest) -> dict[str, Any]:
+async def llm_test(req: LLMTestRequest) -> dict[str, Any]:
     """Test an LLM provider config with a minimal prompt.
     Returns latency, model used, and whether the response was valid JSON.
     """
     import time as _time
+    import httpx as _httpx
 
     provider = req.provider
     api_key = req.api_key
@@ -1887,18 +2285,7 @@ async def llm_test(request: Request, req: LLMTestRequest) -> dict[str, Any]:
     start = _time.monotonic()
     try:
         if provider == "ollama":
-            # SSRF floor (#1193 — this site was missed): ollama_url is user-supplied, so a
-            # hostile value could aim this server-side fetch at cloud-metadata (169.254.169.254)
-            # or link-local. Literal-only (httpx resolves at connect; same as registry/models).
-            try:
-                assert_not_metadata_url(ollama_url, resolve_dns=False)
-            except UrlNotAllowed:
-                return {
-                    "ok": False,
-                    "error": "ollama_url points at a disallowed address (cloud-metadata/link-local).",
-                    "latency_ms": 0,
-                }
-            async with pinned_async_client(timeout=15) as client:
+            async with _httpx.AsyncClient(timeout=15) as client:
                 r = await client.post(
                     f"{ollama_url}/api/generate",
                     json={
@@ -1918,14 +2305,14 @@ async def llm_test(request: Request, req: LLMTestRequest) -> dict[str, Any]:
                 return {"ok": False, "error": f"Unknown provider: {provider}", "latency_ms": 0}
             hdrs = {
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/SLOP-Platform/SLOP",
+                "HTTP-Referer": "https://github.com/Nnyan/SLOP",
                 "X-Title": "SLOP LLM Test",
             }
             if provider == "anthropic":
                 hdrs["anthropic-version"] = "2023-06-01"
             m = model or p.get("default_model", "")
             rf = {} if provider == "anthropic" else {"response_format": {"type": "json_object"}}
-            async with pinned_async_client(timeout=20) as client:
+            async with _httpx.AsyncClient(timeout=20) as client:
                 r = await client.post(
                     f"{base}/chat/completions",
                     headers=hdrs,
@@ -1964,7 +2351,7 @@ async def llm_test(request: Request, req: LLMTestRequest) -> dict[str, Any]:
             "latency_ms": int((_time.monotonic() - start) * 1000),
             "model": model,
             "raw": "",
-            "error": safe_detail(e, "LLM probe failed.", log=log),
+            "error": str(e)[:200],
         }
 
 
@@ -2075,10 +2462,4 @@ def get_container_status(key: str) -> dict[str, Any]:
             "ready": ready,
         }
     except Exception as e:
-        return {
-            "key": key,
-            "status": "error",
-            "health": "unknown",
-            "ready": False,
-            "error": safe_detail(e, "Could not read container status.", log=log),
-        }
+        return {"key": key, "status": "error", "health": "unknown", "ready": False, "error": str(e)}

@@ -22,7 +22,6 @@ import re
 import time
 
 from backend.core.logging import get_logger
-from backend.core.url_guard_httpx import pinned_async_client
 
 import httpx
 
@@ -98,7 +97,7 @@ async def _dockerhub_auth_header(name: str) -> str:
     public images). Returns the full `Bearer <token>` header or empty
     string on any failure — caller proceeds without auth."""
     try:
-        async with pinned_async_client(timeout=_REGISTRY_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_REGISTRY_TIMEOUT) as client:
             tr = await client.get(
                 f"https://auth.docker.io/token?service=registry.docker.io"
                 f"&scope=repository:{name}:pull",
@@ -135,7 +134,7 @@ async def _retry_with_bearer_challenge(
         params.append(f"scope={scope.group(1)}")
     if params:
         token_url += "?" + "&".join(params)
-    async with pinned_async_client(timeout=_REGISTRY_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=_REGISTRY_TIMEOUT) as client:
         tr2 = await client.get(token_url)
         if tr2.status_code != 200:
             return None
@@ -169,7 +168,7 @@ async def _check_docker_image(image: str) -> tuple[str, int | None, str]:
 
     url = f"https://{registry}/v2/{name}/manifests/{tag}"
     try:
-        async with pinned_async_client(timeout=_REGISTRY_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_REGISTRY_TIMEOUT) as client:
             r = await client.head(url, headers=headers)
         if r.status_code == 200:
             return "ok", 200, ""
@@ -199,12 +198,11 @@ async def _check_hf_url(url: str, hf_token: str = "") -> tuple[str, int | None, 
     if hf_token:
         headers["Authorization"] = f"Bearer {hf_token}"
     try:
-        # SSRF-pinned client (#1193). It deliberately does NOT follow redirects (a
-        # redirect must never pivot the connection to an internal host), so the HF
-        # 302/307 to its CDN is returned, not followed — and is already treated as
-        # "ok" below (an existing HF resolve 302 means the file exists; HF returns a
-        # direct 404 for a missing file).
-        async with pinned_async_client(timeout=_HF_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=_HF_TIMEOUT,
+            follow_redirects=True,
+            max_redirects=5,
+        ) as client:
             r = await client.head(url, headers=headers)
         if r.status_code in (200, 302, 307):
             return "ok", r.status_code, ""
@@ -396,7 +394,7 @@ Respond ONLY with the JSON object, no other text."""
     timeout = 30.0
 
     try:
-        async with pinned_async_client(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             if provider == "ollama":
                 from backend.core.llm_router import best_model_for
 

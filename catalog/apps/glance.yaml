@@ -40,7 +40,7 @@ seed_config:
                 - type: clock
                 - type: calendar
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: glance
 

@@ -22,7 +22,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.api.rate_limit import limiter
-from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.platform.storage import (
     StorageSource,
@@ -172,9 +171,7 @@ def add_storage_source(req: AddSourceRequest) -> SourceOut:
                 status_code=409,
                 detail=f"A storage source named '{req.name}' or at '{req.mount_point}' already exists.",
             ) from e
-        raise HTTPException(
-            status_code=500, detail=safe_detail(e, "Could not create storage source.", log=log)
-        ) from e
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     return _source_to_out(source)
 
@@ -335,6 +332,4 @@ def list_source_files(source_id: int, path: str = "") -> dict[str, Any]:
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=f"Permission denied reading {target}") from e
     except OSError as e:
-        raise HTTPException(
-            status_code=500, detail=safe_detail(e, "Could not read directory.", log=log)
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Could not read directory: {e}") from e

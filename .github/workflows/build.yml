@@ -1,11 +1,5 @@
 name: Build Frontend
 
-# Cancel superseded runs per workflow+ref so rapid pushes don't pile up;
-# ref-keyed so tag/release runs are isolated from branch CI (#966).
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 on:
   push:
     branches: [main]
@@ -21,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, 4-lom]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:

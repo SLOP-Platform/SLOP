@@ -400,7 +400,7 @@ CREATE TABLE IF NOT EXISTS manifest_registry (
 );
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
-    ('registry_url', 'https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/catalog/registry.json'),
+    ('registry_url', 'https://raw.githubusercontent.com/Nnyan/SLOP/main/catalog/registry.json'),
     ('registry_last_sync', '0'),
     ('registry_auto_sync', 'true'),
     ('registry_sync_interval_hours', '24');

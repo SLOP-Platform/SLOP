@@ -12,7 +12,7 @@ image_tag: latest
 ports:
   web: 9117
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: jackett
 

@@ -232,16 +232,8 @@ async def check_agent_connectivity() -> str:
     api_key = (cfg.get("api_key", "") or "").strip()
     headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-    from backend.core.url_guard import UrlNotAllowed, assert_not_metadata_url
-    from backend.core.url_guard_httpx import pinned_async_client
-
     try:
-        # SSRF floor (#1193): ollama_url/llamacpp_url are operator-settable, and this
-        # probe runs unattended on every health cycle (checker.py) — refuse a
-        # cloud-metadata/link-local target before the auto-fetch reaches it. The pinned
-        # client also closes the connect-time DNS-rebind TOCTOU (layer-2, #1193).
-        assert_not_metadata_url(base_url, resolve_dns=False)
-        async with pinned_async_client(timeout=5.0) as client:
+        async with _httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(f"{base_url}{probe_path}", headers=headers)
         if r.status_code == 200:
             _write_agent_health(
@@ -256,13 +248,6 @@ async def check_agent_connectivity() -> str:
         )
         return "error"
 
-    except UrlNotAllowed:
-        _write_agent_health(
-            "error",
-            f"Refusing to probe {provider}: {base_url} targets a cloud-metadata/link-local "
-            "address (SSRF floor). Point ollama_url/llamacpp_url at a real LLM endpoint.",
-        )
-        return "error"
     except _httpx.ConnectError:
         _write_agent_health(
             "error",

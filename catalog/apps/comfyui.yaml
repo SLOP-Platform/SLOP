@@ -14,7 +14,7 @@ ports:
 volumes:
   config: /workspace
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: comfyui
 

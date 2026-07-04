@@ -38,7 +38,7 @@ companions:
       LISTEN: "/var/run/beszel-agent.sock"
       EXTRA_FILESYSTEMS: "sda,sdb"
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: beszel
 

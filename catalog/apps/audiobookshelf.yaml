@@ -33,7 +33,7 @@ env:
   PUID: "${PUID}"
   PGID: "${PGID}"
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: abs
 

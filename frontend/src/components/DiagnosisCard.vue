@@ -79,7 +79,6 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { agent as agentApi } from '../api/client'
 
 interface DiagnosisCardProps {
   id: number
@@ -119,7 +118,7 @@ async function handleApply() {
   applying.value = true
   applyBanner.value = ''
   try {
-    const res = await agentApi.applyFix(props.id)
+    const res = await fetch(`/api/v1/agent/fixes/${props.id}/apply`, { method: 'POST' })
     if (res.status === 501) {
       applyBanner.value = 'Auto-apply not yet available — this feature is coming in the next release.'
     } else if (!res.ok) {

@@ -73,7 +73,6 @@
 
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
-import { chat as chatApi } from '../api/client'
 
 interface ChatMsg {
   role: 'user' | 'agent'
@@ -102,11 +101,15 @@ async function postChat(message: string, approvalToken?: string, appKey?: string
   const body: Record<string, unknown> = { message }
   if (approvalToken) body.approval_token = approvalToken
   if (appKey) body.app_key = appKey
-  const res = await chatApi.post(body)
+  const res = await fetch('/api/v1/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (res.status === 401 || res.status === 403) {
     return { reply: 'The control plane is locked — set a control-plane token to act.', kind: 'denied' }
   }
-  return res.data
+  return res.json()
 }
 
 async function send(rawMessage?: string, approvalToken?: string, appKey?: string) {

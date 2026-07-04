@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from backend.core import docker_client
 from backend.core.compose import compose_up, write_fragment
@@ -20,7 +20,7 @@ from backend.infra.base import InfraProvider, ProviderResult
 from backend.infra.registry import register
 
 CONTAINER_NAME = "homepage"
-IMAGE = "ghcr.io/gethomepage/homepage:latest"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
+IMAGE = "ghcr.io/gethomepage/homepage:latest"
 INTERNAL_PORT = 3000
 
 
@@ -29,30 +29,6 @@ class HomepageProvider(InfraProvider):
     slot = "dashboard"
     key = "homepage"
     display_name = "Homepage"
-
-    # MANIFEST-LESS infra provider (no catalog/apps/homepage.yaml) — `fields` is
-    # hand-authored from this provider's own deploy() config knowledge
-    # (domain/port). Judgment-class gap: an infra slot provider with no catalog
-    # manifest has no manifest SSOT for its UI schema (see #975 follow-up).
-    fields: ClassVar[list[dict[str, Any]]] = [
-        {
-            "key": "domain",
-            "label": "Public domain",
-            "type": "text",
-            "placeholder": "example.com",
-            "required": True,
-            "help": "Base domain — Homepage is published at homepage.<domain>.",
-        },
-        {
-            "key": "port",
-            "label": "Host port",
-            "type": "number",
-            "placeholder": "3000",
-            "required": False,
-            "help": "Host port to publish the UI on (container port is 3000).",
-        },
-    ]
-    category = "dashboard"
 
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
         """Deploy Homepage dashboard.
@@ -124,9 +100,9 @@ class HomepageProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "homepage",
-                    display_name=self.display_name,
+                    display_name="Homepage",
                     tier=0,  # tier 0 = infrastructure layer
-                    category=self.category,
+                    category="dashboard",
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

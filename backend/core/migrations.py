@@ -409,27 +409,7 @@ def _run_migrations_inner(
         result.stamped_baseline = True
 
     # --- 4. Validate checksums of already-applied migrations -------------
-    # The baseline (genesis) migration is a REGENERABLE snapshot, not an
-    # immutable incremental: it is legitimately re-cut (e.g. 1e60af2 rewrote
-    # example-domain *comments* in 001_baseline.sql — "the cleaned baseline as
-    # genesis, no historical checksum to preserve, per operator"). An existing
-    # install that recorded the OLD baseline checksum must still upgrade
-    # cleanly, so the baseline is EXEMPT from the immutability check (#880
-    # deliverable-2 / #1052 root-cause-2: validating it raised
-    # MigrationChecksumError on every post-1e60af2 upgrade-from-old-baseline).
-    # `baseline` is `all_migrations[0]` (the lowest-versioned/genesis file —
-    # always 001 in this repo), so the predicate exempts *the genesis itself*,
-    # not a hardcoded number: if the genesis ever shipped as a higher version
-    # that higher version is the snapshot to exempt. Only incremental migrations
-    # (v2+) carry the immutable-after-merge guarantee; their schema corrections
-    # apply on top of any baseline variant.
-    # ASSUMPTION (load-bearing): a baseline re-cut is comment/non-schema only —
-    # a SCHEMA-changing edit belongs in an incremental migration, never in the
-    # baseline, else exempting it would silently mask a divergent starting
-    # schema on old-baseline DBs (#880 review caveat; follow-up: schema-sync gate).
     for version, (filename, recorded_checksum) in applied.items():
-        if version == baseline.version:
-            continue
         mig_file = next((m for m in all_migrations if m.version == version), None)
         if mig_file is None:
             # File was deleted — log a warning but don't hard-fail

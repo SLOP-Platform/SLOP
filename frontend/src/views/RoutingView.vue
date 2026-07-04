@@ -397,7 +397,6 @@ import { ref, reactive, onMounted } from 'vue'
 
 import { routing as routingApi } from '../api/client'
 import type { RoutingConfig } from '../api/client'
-import { useToast } from '@/composables/useToast'
 
 function mediaTypeIconUrl(type: string): string {
   const map: Record<string, string> = {
@@ -413,7 +412,6 @@ const TYPE_ICONS: Record<string, string> = {
   comics: '🦸', audiobooks: '🎧', adult: '🔞',
 }
 
-const toast = useToast()
 const routes = ref<RoutingConfig[]>([])
 const allInstances = ref<any[]>([])
 const expanded = ref<string | null>(null)
@@ -471,9 +469,7 @@ async function saveRouting(type: string) {
     savedRoute.value = type
     setTimeout(() => { savedRoute.value = null }, 2500)
     await loadRoutes()
-  } catch (e) {
-    toast.error('Could not save routing for ' + type + '.', e instanceof Error ? e.message : String(e))
-  } finally {
+  } catch { /* intentional: route save failure handled by toast before throw */ } finally {
     savingRoute.value = null
   }
 }

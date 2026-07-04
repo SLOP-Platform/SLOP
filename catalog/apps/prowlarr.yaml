@@ -21,7 +21,7 @@ ports:
 volumes:
   config: /config
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: prowlarr
 

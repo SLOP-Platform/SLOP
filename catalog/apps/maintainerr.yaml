@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 6246
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: maintainerr
 

@@ -21,28 +21,12 @@ from installer import state as _state_mod
 from installer._defaults import DEFAULT_INSTALL_DIR as _DEFAULT_INSTALL_DIR
 from installer._run import run_required
 from installer.state import StateFile, StateFileCorruptedError, StateFileNewerSchemaError
-from installer.uninstall_output import _clean_prompt, _print_clean_output
 
 _SYSTEMD_UNIT = "/etc/systemd/system/slop.service"
-# #868 P3 scheduled-backup units (advisory; may be absent on installs predating the timer or
-# when its install best-effort-failed). Removed idempotently — see Step 4b.
-_BACKUP_TIMER_UNIT = "/etc/systemd/system/ms-backup.timer"
-_BACKUP_SERVICE_UNIT = "/etc/systemd/system/ms-backup.service"
 _MS_USER = "slop"
 _SYSTEM_UID_CEILING = 1000
 _EXPECTED_SHELL = "/usr/sbin/nologin"
 _EXPECTED_HOME = "/nonexistent"
-
-# Directory into which deploy.sh symlinks the managed commands. Kept as a module
-# constant (not hardcoded inline) so tests can redirect it away from the real
-# system path — mirrors how _SYSTEMD_UNIT is patched in the test suite.
-_LOCAL_BIN_DIR = "/usr/local/bin"
-
-# The commands deploy.sh symlinks into _LOCAL_BIN_DIR (its Step 7 `ln -sf` blocks
-# are the source of truth — keep this list in sync with deploy.sh §"Step 7").
-# On uninstall/purge these symlinks would otherwise dangle (their targets vanish
-# with the install dir). Defined ONCE here; the removal step and U8 both read it.
-_MANAGED_SYMLINKS = ("ms-update", "ms-check", "slop-reality-probe", "ms")
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -232,15 +216,6 @@ def _run_removal_pipeline(
     # Step 4: disable service (idempotent; ignore exit code)
     run(["systemctl", "disable", "slop.service"])
 
-    # Step 4b: tear down the #868 P3 scheduled-backup units (idempotent, best-effort).
-    # Advisory units that may be absent (installs predating the timer, or a best-effort
-    # install-time failure); every step ignores its exit code so a missing unit is a no-op.
-    print_fn("Removing scheduled-backup timer (ms-backup.timer)...")
-    run(["systemctl", "stop", "ms-backup.timer"])
-    run(["systemctl", "disable", "ms-backup.timer"])
-    run(["rm", "-f", _BACKUP_TIMER_UNIT])
-    run(["rm", "-f", _BACKUP_SERVICE_UNIT])
-
     # Step 5: remove unit file + daemon-reload (U2)
     print_fn(f"Removing systemd unit {_SYSTEMD_UNIT}...")
     result = run(["rm", "-f", _SYSTEMD_UNIT])
@@ -252,14 +227,6 @@ def _run_removal_pipeline(
         )
         return 1  # U2 fail → pipeline stops
     run(["systemctl", "daemon-reload"])  # Best-effort; continue regardless
-
-    # Step 5b: remove the /usr/local/bin command symlinks deploy.sh created (U8).
-    # These point INTO the install dir, so once Step 6 removes it they would
-    # dangle. Remove them here so no uninstall path leaves a broken link. Each is
-    # removed only if it IS a symlink (`test -L` — true even for a dangling link,
-    # unlike `test -e`); a real file of the same name is left untouched. Absent =
-    # no-op (idempotent). `rm -f` failure is a late failure (U8), not fatal.
-    _remove_managed_symlinks(run, print_fn, late_failures)
 
     # Step 6: remove install dir (U3)
     print_fn(f"Removing install directory {install_dir}...")
@@ -408,34 +375,6 @@ def _run_removal_pipeline(
     return 0
 
 
-def _remove_managed_symlinks(
-    run: Callable,
-    print_fn: Callable,
-    late_failures: list,
-) -> None:
-    """Remove deploy.sh's /usr/local/bin command symlinks (U8); idempotent.
-
-    Only removes a path that IS a symlink (`test -L`) so a real file of the same
-    name is never clobbered; absent or non-symlink paths are skipped. An `rm`
-    failure appends "U8" to late_failures (reported at pipeline end, non-fatal).
-    Source of truth for the name list is _MANAGED_SYMLINKS / deploy.sh Step 7.
-    """
-    print_fn(f"Removing managed command symlinks in {_LOCAL_BIN_DIR}...")
-    for name in _MANAGED_SYMLINKS:
-        link = f"{_LOCAL_BIN_DIR}/{name}"
-        if run(["test", "-L", link]).returncode != 0:
-            continue  # Not a symlink (absent, or a real file we must not touch)
-        if run(["rm", "-f", link]).returncode != 0:
-            err_msg = (
-                f"The managed symlink {link} could not be removed. The path may be\n"
-                "on a read-only mount or held by another tool.\n"
-                f"Diagnostic: `ls -la {link}`"
-            )
-            print_fn(err_msg)
-            if "U8" not in late_failures:
-                late_failures.append("U8")
-
-
 def _enumerate_docker_objects(
     run: Callable,
     cmd: list,
@@ -515,7 +454,6 @@ def verify_removed(
         "U5b": f"lsof +D {data_dir} && mount | grep {data_dir}",
         "U6": "docker ps -a --filter label=slop.managed=true",
         "U7": "docker volume ls --filter label=slop.managed=true",
-        "U8": f"ls -la {' '.join(_LOCAL_BIN_DIR + '/' + n for n in _MANAGED_SYMLINKS)}",
     }
 
     # U1: service inactive or unknown
@@ -607,15 +545,6 @@ def verify_removed(
         )
         predicates["U7"] = result.returncode == 0 and not result.stdout.strip()
 
-    # U8 (uninstall and purge): none of deploy.sh's /usr/local/bin command
-    # symlinks remain. Excluded from clean mode, which leaves the install dir (and
-    # thus the still-valid symlinks) in place. A real file of the same name does
-    # not violate U8 — only a lingering SYMLINK does (that is what would dangle).
-    if mode in ("uninstall", "purge"):
-        predicates["U8"] = not any(
-            Path(f"{_LOCAL_BIN_DIR}/{name}").is_symlink() for name in _MANAGED_SYMLINKS
-        )
-
     return RemovalVerification(
         mode=mode,
         predicates=predicates,
@@ -693,6 +622,102 @@ def _api_remove_app(key: str, port: int) -> dict:
             "steps": [],
             "error": str(exc),
         }
+
+
+# ── Clean: §C.5/§C.6 aggregation and output ──────────────────────────────────
+
+
+def _app_row_status(result: dict) -> tuple[str, str]:
+    """Return (status, detail) for §C.6 output row."""
+    ok = result.get("ok", False)
+    steps = result.get("steps", [])
+    error = result.get("error", "")
+
+    if not ok:
+        failed = [s for s in steps if s.get("status") == "error"]
+        if failed:
+            fs = failed[0]
+            detail = f"{fs['name']} failed: {fs['message']}"
+        else:
+            detail = error or "unknown failure"
+        return "failed", f"({detail})"
+
+    warnings = [s for s in steps if s.get("status") == "warning"]
+    if warnings:
+        w = warnings[0]
+        detail = f"removed; {w['name']} warning — see logs"
+        return "warning", f"({detail})"
+
+    return "ok", "(stopped, unwired, removed)"
+
+
+def _print_clean_output(
+    results: list[tuple[str, dict]],
+    orphans: list[str],
+    print_fn: Callable,
+) -> int:
+    """Print §C.6 per-app fidelity output. Returns exit code per §C.5."""
+    print_fn("\nCleaning managed apps...\n")
+
+    n_ok = n_warn = n_fail = 0
+    for key, result in results:
+        status, detail = _app_row_status(result)
+        print_fn(f"  {key:<20} {status:<8} {detail}")
+        if status == "ok":
+            n_ok += 1
+        elif status == "warning":
+            n_warn += 1
+        else:
+            n_fail += 1
+
+    if orphans:
+        print_fn("\nOrphans (managed label without app-key):")
+        for name in orphans:
+            print_fn(f"  {name:<20} inspect with: docker inspect {name}")
+
+    parts = []
+    if n_ok:
+        parts.append(f"{n_ok} ok")
+    if n_warn:
+        parts.append(f"{n_warn} warning")
+    if n_fail:
+        parts.append(f"{n_fail} failed")
+    if orphans:
+        parts.append(f"{len(orphans)} orphan")
+    print_fn(f"\nSummary: {', '.join(parts)}")
+
+    return 1 if n_fail > 0 else 0
+
+
+# ── §C.7 clean confirmation prompt ───────────────────────────────────────────
+
+
+def _clean_prompt(
+    app_keys: list[str],
+    orphans: list[str],
+    hostname: str,
+    port: int,
+    data_dir: Path,
+) -> str:
+    lines = [f"About to reset all managed slop apps on {hostname}:\n"]
+    for k in app_keys:
+        lines.append(f"  - {k}")
+    lines.append(
+        "\nFor each app:\n"
+        "  - Container will be stopped and removed\n"
+        "  - Compose fragment will be removed\n"
+        f"  - Per-app config under {data_dir}/config/<app>/ will be REMOVED\n"
+        "    (delete_config=True; --keep-configs is not available in v5.0)\n\n"
+        "SLOP itself will continue running. The wizard remains accessible\n"
+        f"at http://{hostname}:{port}/ after 'clean' completes."
+    )
+    if orphans:
+        lines.append(
+            f"\n  Plus {len(orphans)} orphan container(s) (managed label without app-key)\n"
+            "  that cannot be cleaned automatically — will be reported for manual inspection."
+        )
+    lines.append("\n\nContinue? [y/N]: ")
+    return "\n".join(lines)
 
 
 # ── Public entry points ───────────────────────────────────────────────────────

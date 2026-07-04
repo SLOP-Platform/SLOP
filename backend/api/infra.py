@@ -25,12 +25,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 import backend.infra.providers  # noqa: F401 — triggers @register
 from backend.api.infra_schemas import PROVIDER_CONFIG_SCHEMAS
-from backend.infra.slots import deployable_slots
 from backend.infra.registry import (
     get_provider,
     list_providers,
@@ -99,7 +97,7 @@ class VerifyOut(BaseModel):
 
 @router.get("/slots", response_model=list[SlotOut])
 def get_slots() -> list[SlotOut]:
-    """Return the current state of all deployable infrastructure slots."""
+    """Return the current state of all five infrastructure slots."""
     with StateDB() as db:
         slots = db.get_all_slots()
         tunnel_providers = db.get_tunnel_providers()
@@ -191,8 +189,7 @@ def deploy_provider(slot: str, req: DeployRequest) -> VerifyOut:
                 detail=f"Tunnel provider '{req.provider}' is already active.",
             )
     else:
-        # All deployable single-provider slots (tunnel is multi-provider, handled above).
-        VALID_SLOTS = set(deployable_slots()) - {"tunnel"}
+        VALID_SLOTS = {"auth", "vpn", "dashboard", "management"}
         if slot not in VALID_SLOTS:
             raise HTTPException(
                 status_code=404,
@@ -211,10 +208,7 @@ def deploy_provider(slot: str, req: DeployRequest) -> VerifyOut:
     try:
         provider = get_provider(slot, req.provider)
     except KeyError as e:
-        raise HTTPException(
-            status_code=404,
-            detail=safe_detail(e, f"No registered provider for slot '{slot}'.", log=log),
-        ) from e
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     result = provider.deploy(req.config)
     return VerifyOut(ok=result.ok, message=result.message, detail=result.detail)
@@ -267,7 +261,7 @@ def verify_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
 
     For tunnel slot, verifies all active providers or a specific one via ?provider_key=.
     """
-    _valid_slots = set(deployable_slots())
+    _valid_slots = {"auth", "tunnel", "vpn", "dashboard", "management"}
     if slot not in _valid_slots:
         raise HTTPException(
             status_code=404, detail=f"Unknown slot '{slot}'. Valid: {sorted(_valid_slots)}"
@@ -290,10 +284,7 @@ def verify_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
         try:
             provider = get_provider("tunnel", target["provider"])
         except KeyError as e:
-            raise HTTPException(
-                status_code=404,
-                detail=safe_detail(e, f"No registered provider for slot '{slot}'.", log=log),
-            ) from e
+            raise HTTPException(status_code=404, detail=str(e)) from e
         result = provider.verify()
         return VerifyOut(ok=result.ok, message=result.message, detail=result.detail)
 
@@ -304,10 +295,7 @@ def verify_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
     try:
         provider = get_provider(slot, current.provider)
     except KeyError as e:
-        raise HTTPException(
-            status_code=404,
-            detail=safe_detail(e, f"No registered provider for slot '{slot}'.", log=log),
-        ) from e
+        raise HTTPException(status_code=404, detail=str(e)) from e
     result = provider.verify()
     return VerifyOut(ok=result.ok, message=result.message, detail=result.detail)
 
@@ -318,7 +306,7 @@ def remove_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
 
     For tunnel slot, requires provider_key query param to specify which tunnel to remove.
     """
-    _valid_slots = set(deployable_slots())
+    _valid_slots = {"auth", "tunnel", "vpn", "dashboard", "management"}
     if slot not in _valid_slots:
         raise HTTPException(
             status_code=404, detail=f"Unknown slot '{slot}'. Valid: {sorted(_valid_slots)}"
@@ -338,10 +326,7 @@ def remove_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
         try:
             provider = get_provider("tunnel", provider_key)
         except KeyError as e:
-            raise HTTPException(
-                status_code=404,
-                detail=safe_detail(e, f"No registered provider for slot '{slot}'.", log=log),
-            ) from e
+            raise HTTPException(status_code=404, detail=str(e)) from e
         result = provider.remove()
         return VerifyOut(ok=result.ok, message=result.message, detail=result.detail)
 
@@ -352,10 +337,7 @@ def remove_provider(slot: str, provider_key: str | None = None) -> VerifyOut:
     try:
         provider = get_provider(slot, current.provider)
     except KeyError as e:
-        raise HTTPException(
-            status_code=404,
-            detail=safe_detail(e, f"No registered provider for slot '{slot}'.", log=log),
-        ) from e
+        raise HTTPException(status_code=404, detail=str(e)) from e
     result = provider.remove()
     return VerifyOut(ok=result.ok, message=result.message, detail=result.detail)
 

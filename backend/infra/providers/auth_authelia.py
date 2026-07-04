@@ -15,7 +15,6 @@ from backend.core.config import config
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.infra.base import InfraProvider, ProviderResult
-from backend.infra.registry import register
 
 log = get_logger(__name__)
 CONTAINER_NAME = "authelia"
@@ -49,12 +48,10 @@ def _load_users_doc() -> dict[str, Any]:
     return doc
 
 
-@register
 class AutheliaProvider(InfraProvider):
     slot = "auth"
     key = "authelia"
     display_name = "Authelia"
-    category = "auth"
     description = (
         "Open-source SSO + 2FA. More feature-rich than TinyAuth; supports LDAP, email OTP, TOTP."
     )
@@ -187,7 +184,7 @@ notifier:
             )
 
         fragment = {
-            "image": "authelia/authelia:latest",  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
+            "image": "authelia/authelia:latest",
             "container_name": CONTAINER_NAME,
             "volumes": [
                 f"{authelia_config_dir}:/config",
@@ -237,9 +234,9 @@ notifier:
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "authelia",
-                    display_name=self.display_name,
+                    display_name="Authelia",
                     tier=0,  # tier 0 = infrastructure layer
-                    category=self.category,
+                    category="auth",
                     status="running",
                     image="authelia/authelia:latest",
                     image_tag="latest",

@@ -14,7 +14,7 @@ ports:
 volumes:
   config: /opt/data
 
-reverse_proxy:
+traefik:
   enabled: true
   subdomain: hermes-agent
 
@@ -25,12 +25,7 @@ companions:
     ports:
       - "8642:8642"
     volumes:
-      # Companion data under the wizard-configured config_root (was root-required
-      # /var/lib/slop/hermes-agent). {config_root} is expanded by _expand_path and the
-      # dir is created+chowned by the executor (the service user); container path is
-      # distinct (/opt/data) so no same-path constraint. /backend keeps it separate
-      # from the main app's config_root/hermes_agent config dir.
-      - host: "{config_root}/hermes_agent/backend"
+      - host: /var/lib/slop/hermes-agent
         container: /opt/data
 
 health:

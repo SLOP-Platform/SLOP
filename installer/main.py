@@ -138,7 +138,6 @@ def run_install_pipeline(
     backend_setup: Callable = backend.setup_backend,
     frontend_build: Callable = frontend.build_frontend,
     service_install: Callable = service.install_service,
-    backup_timer_install: Callable = service.install_backup_timer,
     smoke_test: Callable = _smoke_mod.smoke_test,
     resolve_hostname: Callable = _post_install_mod._resolve_hostname,
     post_install_write: Callable = _post_install_mod.write,
@@ -286,11 +285,7 @@ def run_install_pipeline(
         if _smoke_check("data_dir_install"):
             return 0
         print("[5/8] Downloading SLOP...", flush=True)
-        resolved_version = fetch_repo(
-            install_dir_path,
-            version_ref=version_ref,
-            verify_tree=not getattr(args, "skip_tree_verify", False),
-        )
+        resolved_version = fetch_repo(install_dir_path, version_ref=version_ref)
         if _smoke_check("fetch_repo"):
             return 0
         # Pre-create catalog/community/ with slop ownership so the running
@@ -317,18 +312,6 @@ def run_install_pipeline(
             return 0
         print("[8/8] Installing and starting service...", flush=True)
         service_install(install_dir_path, data_dir_path)
-        # #868 P3: scheduled-backup timer. Recoverability is advisory, not availability —
-        # a timer-install failure must NOT abort an otherwise-good install (design §7/§9).
-        try:
-            backup_timer_install(install_dir_path, data_dir_path)
-            print("      scheduled-backup timer enabled (ms-backup.timer, daily).", flush=True)
-        except Exception as timer_exc:  # advisory step — warn, never abort the install
-            print(
-                f"      warning: scheduled-backup timer not installed "
-                f"({type(timer_exc).__name__}: {timer_exc}). SLOP is healthy; run "
-                "`ms-backup --all` manually or re-run install to retry scheduling.",
-                flush=True,
-            )
     except Exception as exc:
         print(
             f"Install failed in {type(exc).__name__}: {exc}\n"
@@ -467,11 +450,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite an existing install (data directory is preserved)",
-    )
-    p_install.add_argument(
-        "--skip-tree-verify",
-        action="store_true",
-        help="Skip tree integrity verification after clone (not recommended)",
     )
     p_install.set_defaults(func=_cmd_install)
 

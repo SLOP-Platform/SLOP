@@ -38,9 +38,7 @@ if TYPE_CHECKING:
 import httpx
 
 from backend.core import docker_client
-from backend.manifests import db_provision
 from backend.core.compose import (
-    _SYSTEM_PORTS,
     STACK_NETWORK,
     compose_pull,
     compose_up,
@@ -52,22 +50,9 @@ from backend.core.compose import (
 )
 from backend.core.config import config
 from backend.core.logging import get_logger
-from backend.core.state import PORT_RESERVATION_STALE_MINUTES, StateDB
+from backend.core.state import StateDB
 from backend.manifests.loader import AppManifest, load_manifest
 from backend.manifests.seed_config import seed_config_files
-
-# App-to-app wiring pass extracted to executor_wiring.py (#1302 linecount drain).
-# Re-exported (redundant-alias idiom) so callers/tests resolve unchanged: apps.py
-# + checker.py use run_wiring_pass; scheduler.py + governance.py use
-# run_pending_wiring; tests patch executor_wiring._dispatch_wire and call _wire.
-from backend.manifests.executor_wiring import (
-    run_pending_wiring as run_pending_wiring,
-    run_wiring_pass as run_wiring_pass,
-    _apply_wire_result as _apply_wire_result,
-    _dispatch_wire as _dispatch_wire,
-    _reverse_wiring_pass as _reverse_wiring_pass,
-    _wire as _wire,
-)
 
 log = get_logger(__name__)
 
@@ -113,14 +98,6 @@ _installing: set[str] = set()  # keys currently being installed
 _installing_started: dict[str, float] = {}  # key → start timestamp
 _install_lock = _threading.Lock()
 MAX_INSTALL_SECONDS = 600  # 10 minutes — after this a lock is considered stale
-
-# Invariant (#1100 review #3): a port reservation must stay "live" for at least
-# the full install window, else a slow install (large image pull) has its port
-# stolen by a concurrent install mid-deploy. Trips at import if either constant
-# is changed out of agreement.
-assert PORT_RESERVATION_STALE_MINUTES * 60 >= MAX_INSTALL_SECONDS, (
-    "PORT_RESERVATION_STALE_MINUTES must cover MAX_INSTALL_SECONDS"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -412,8 +389,8 @@ def install_app(
 
 # Apps with internal ports that conflict with Traefik (80/443) or SLOP
 # (8080/8081) cannot bind a host port — they are only reachable via Traefik
-# hostname routing. The reserved set is single-sourced in backend.core.compose
-# (_SYSTEM_PORTS, imported above).
+# hostname routing.
+_SYSTEM_PORTS: frozenset[int] = frozenset({80, 443, 8080, 8081})
 
 
 def _validate_install(
@@ -460,20 +437,8 @@ def _validate_install(
     return True
 
 
-def _provision_app_db(
-    engine: str, manifest: AppManifest, result: ExecutionResult, provisioned_default: str
-) -> None:
-    """#1210: idempotently create the per-app managed-DB the app targets (no-op when it targets the
-    provisioned default or declares no target). Records a step only when something was attempted."""
-    r = db_provision.ensure_app_database(
-        engine, manifest.env, provisioned_default=provisioned_default
-    )
-    if r.status != "skipped":
-        result.add(f"deps_{engine}_db", r.status, r.message, r.detail)
-
-
 def _install_dependencies(manifest: AppManifest, platform: Any, result: ExecutionResult) -> bool:
-    """Resolve postgres / redis / mariadb / app / companion deps. Returns True to continue."""
+    """Resolve postgres / redis / app / companion deps. Returns True to continue."""
     deps = manifest.dependencies
 
     if deps.postgres:
@@ -488,10 +453,6 @@ def _install_dependencies(manifest: AppManifest, platform: Any, result: Executio
         )
         if pr["status"] == "error":
             return False
-        # #1210 defect-2: the managed postgres provisions only its default DB (`slop`); apps that
-        # connect to a per-app DB (affine→affine, …) need it provisioned or their migrations run
-        # against a non-existent database (broken install). SERVER-VERIFY gated (db_provision).
-        _provision_app_db("postgres", manifest, result, "slop")
 
     if deps.redis:
         rr = _ensure_managed_service("redis", network_name=platform.network_name)
@@ -504,20 +465,6 @@ def _install_dependencies(manifest: AppManifest, platform: Any, result: Executio
         )
         if rr["status"] == "error":
             return False
-
-    if deps.mariadb:
-        mr = _ensure_managed_service("mariadb", network_name=platform.network_name)
-        step_status = mr["status"] if mr["status"] != "error" else "warning"
-        result.add(
-            "deps_mariadb",
-            step_status,
-            mr["message"] if mr["status"] != "error" else f"Waiting for mariadb… {mr['message']}",
-            mr.get("detail", ""),
-        )
-        if mr["status"] == "error":
-            return False
-        # #1210 blast-radius: same per-app DB need for mariadb (default provisioned DB `booklore`).
-        _provision_app_db("mariadb", manifest, result, "booklore")
 
     for dep_key in deps.apps:
         with StateDB() as db:
@@ -537,7 +484,7 @@ def _install_dependencies(manifest: AppManifest, platform: Any, result: Executio
         if cr["status"] == "error":
             return False
 
-    if deps.postgres or deps.redis or deps.mariadb or manifest.companions:
+    if deps.postgres or deps.redis or manifest.companions:
         result.add("deps", "ok", "All dependencies are ready.")
     else:
         result.add("deps", "skipped", "No dependencies required.")
@@ -595,41 +542,6 @@ def _generate_auto_secrets(
     return result_env
 
 
-def _ensure_env_secrets(keys: dict[str, int]) -> None:
-    """Generate-if-absent managed secrets into the shared .env (mode 0600).
-
-    ``keys`` maps an env var name → token byte-length. Existing values are left
-    untouched (idempotent: the secret is generated once, on first provision, and
-    reused on every subsequent install). Used by managed services that must have a
-    real credential in .env before their container first starts (#1203) — distinct
-    from manifest ``auto_secrets``, which run AFTER dependency provisioning.
-    """
-    import secrets as _secrets
-
-    from backend.core.config import config as _cfg
-
-    env_path = _cfg.env_file
-    existing: dict[str, str] = {}
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                k, _, v = line.partition("=")
-                existing[k.strip()] = v.strip()
-
-    generated: dict[str, str] = {}
-    for key_name, length in keys.items():
-        if key_name not in existing or not existing[key_name]:
-            generated[key_name] = _secrets.token_hex(int(length))
-
-    if generated:
-        existing.update(generated)
-        content = "\n".join(f"{k}={v}" for k, v in sorted(existing.items())) + "\n"
-        env_path.parent.mkdir(parents=True, exist_ok=True)
-        env_path.write_text(content)
-        os.chmod(env_path, 0o600)
-        log.info("managed-secret: generated %s", list(generated))
-
-
 def _ensure_config_dir(
     platform: Any, key: str, result: ExecutionResult
 ) -> tuple[Path, bool] | None:
@@ -669,34 +581,21 @@ def _compute_host_port(manifest: AppManifest, host_port_override: int | None) ->
 
     Fast path: raw_port not in _SYSTEM_PORTS and not taken → return raw_port.
     Remap path: when raw_port conflicts (system port or given override conflicts),
-    find the next free host port above raw_port by checking DB-recorded ports,
-    live container ports, and active port_reservations, skipping any candidate
-    that is still in _SYSTEM_PORTS.
-
-    Active (non-stale, <5min) reservations held by OTHER apps are part of `taken`
-    (#1099): _check_port_conflict rejects a reserved port, so remapping onto one
-    would compute a port that then immediately hard-fails the conflict check. The
-    app's own reservation is excluded (mirrors _check_port_conflict's `key != ?`).
+    find the next free host port above raw_port by checking DB-recorded ports
+    and live container ports, skipping any candidate that is still in _SYSTEM_PORTS.
     """
     raw_port = host_port_override or manifest.web_port
     if raw_port is None:
         return None
-    # Collect taken host ports from the DB (active/installed apps) + active reservations.
+    # Collect taken host ports from the DB (active/installed apps).
     with StateDB() as _hpdb:
         _rows = _hpdb.execute(
             "SELECT host_port FROM apps WHERE host_port IS NOT NULL"
             " AND status NOT IN ('failed','removing')",
         ).fetchall()
-        _res_rows = _hpdb.execute(
-            """SELECT port FROM port_reservations
-               WHERE key != ?
-               AND (julianday('now') - julianday(reserved_at)) * 1440 < ?""",
-            (manifest.key, PORT_RESERVATION_STALE_MINUTES),
-        ).fetchall()
     db_ports: set[int] = {int(r[0]) for r in _rows}
-    reserved_ports: set[int] = {int(r[0]) for r in _res_rows}
     running_ports: set[int] = set(docker_client.ports_in_use().keys())
-    taken = _SYSTEM_PORTS | db_ports | running_ports | reserved_ports
+    taken = _SYSTEM_PORTS | db_ports | running_ports
     if raw_port not in taken:
         return raw_port
     # Need to remap: find next candidate above raw_port not in taken.
@@ -739,16 +638,14 @@ def _check_port_conflict(key: str, host_port: int | None, result: ExecutionResul
             f"Start '{_db_owner[0]}' to confirm it still needs that port, or remove it and retry.",
         )
         return False
-    # Check DB-level port reservation (TOCTOU guard set by replace_app /
-    # install_app). Reservations older than PORT_RESERVATION_STALE_MINUTES are
-    # treated as stale (crash leftovers) — see that constant for why it tracks
-    # MAX_INSTALL_SECONDS (#1100 review #3).
+    # Check DB-level port reservation (TOCTOU guard set by replace_app).
+    # Reservations older than 5 minutes are treated as stale (crash leftovers).
     with StateDB() as _pdb:
         _res_owner = _pdb.execute(
             """SELECT key FROM port_reservations
                WHERE port = ? AND key != ?
-               AND (julianday('now') - julianday(reserved_at)) * 1440 < ?""",
-            (host_port, key, PORT_RESERVATION_STALE_MINUTES),
+               AND (julianday('now') - julianday(reserved_at)) * 1440 < 5""",
+            (host_port, key),
         ).fetchone()
     if _res_owner:
         result.fail(
@@ -1128,43 +1025,24 @@ def _install_inner(
     if not _check_port_conflict(key, host_port, result):
         return
 
-    # Atomically claim the port to close the install-vs-install TOCTOU (#1100):
-    # _check_port_conflict + deploy + _register_install are NOT one atomic step,
-    # so a concurrent install of a DIFFERENT app could pass its own check for the
-    # same computed port and both deploy onto it. The conditional reservation
-    # (PK on port) lets exactly one racer win; the loser fails clean. Released in
-    # `finally` once the app is registered (the apps-table row then owns the port).
-    if host_port is not None:
-        with StateDB() as _pdb:
-            if not _pdb.try_reserve_port(host_port, key):
-                result.fail(
-                    "port_check",
-                    f"Port {host_port} was just claimed by a concurrent install. Retry shortly.",
-                )
-                return
-    try:
-        service_fragment = _build_compose_service(
-            manifest,
-            key,
-            platform,
-            host_port,
-            config_path,
-            extra_env,
-            user_volume_paths=user_volume_paths,
-        )
-        frag_path = _write_compose_files(key, service_fragment, result)
-        if frag_path is None:
-            return
+    service_fragment = _build_compose_service(
+        manifest,
+        key,
+        platform,
+        host_port,
+        config_path,
+        extra_env,
+        user_volume_paths=user_volume_paths,
+    )
+    frag_path = _write_compose_files(key, service_fragment, result)
+    if frag_path is None:
+        return
 
-        if not _run_deploy(key, frag_path, config_path, dir_created_now, result, manifest=manifest):
-            return
+    if not _run_deploy(key, frag_path, config_path, dir_created_now, result, manifest=manifest):
+        return
 
-        _run_post_deploy_steps(manifest, platform, result)
-        _register_install(manifest, key, host_port, config_path, extra_env, result)
-    finally:
-        if host_port is not None:
-            with StateDB() as _pdb:
-                _pdb.release_port_reservation(host_port)
+    _run_post_deploy_steps(manifest, platform, result)
+    _register_install(manifest, key, host_port, config_path, extra_env, result)
 
 
 # ---------------------------------------------------------------------------
@@ -1464,7 +1342,8 @@ def _replace_compute_shared_port(old_app: Any, new_key: str, result: ExecutionRe
         new_manifest = load_manifest(new_key)
         old_port = old_app.host_port
         new_port = new_manifest.web_port
-        if old_port and new_port and old_port == new_port and new_port not in _SYSTEM_PORTS:
+        _SYSTEM_PORTS_LOCAL = {80, 443, 8080, 8081}
+        if old_port and new_port and old_port == new_port and new_port not in _SYSTEM_PORTS_LOCAL:
             return int(old_port)
     except Exception as _pe:
         result.add("port_precheck", "warning", f"Could not determine port for reservation: {_pe}")
@@ -1569,36 +1448,19 @@ def _ensure_managed_service(service_type: str, network_name: str | None = None) 
     # last resort so existing code that does not yet pass network_name still works.
     effective_network = network_name or STACK_NETWORK
 
-    # Deploy the managed service. Tuple = (image, tag, internal_port, data_path).
-    # data_path differs per engine: postgres/redis store under /data; mariadb's
-    # official image stores under /var/lib/mysql (#1203).
+    # Deploy the managed service
     images = {
-        "postgres": ("postgres", "16-alpine", 5432, "/data"),
-        "redis": ("valkey/valkey", "8-alpine", 6379, "/data"),
-        "mariadb": ("mariadb", "11.4", 3306, "/var/lib/mysql"),
+        "postgres": ("postgres", "16-alpine", 5432),
+        "redis": ("valkey/valkey", "8-alpine", 6379),
     }
-    image, tag, _port, data_path = images[service_type]
-
-    # postgres/mariadb need a real DB password before the container first starts. deps are
-    # provisioned BEFORE _generate_auto_secrets runs, so the managed service owns its own
-    # secret-gen here (generate-if-absent → .env) rather than relying on auto_secrets. The
-    # fragments reference ${POSTGRES_PASSWORD}/${MARIADB_*} with no :- default and apps wire
-    # them into their DB connection (postgres: affine/umami/zilean/midarr), so without this the
-    # password is EMPTY and every dependent app authenticates with no credential (#1210 postgres
-    # mirrors the mariadb #1203 fix). redis (valkey) runs without auth → no managed secret.
-    managed_secrets = {
-        "postgres": {"POSTGRES_PASSWORD": 24},
-        "mariadb": {"MARIADB_ROOT_PASSWORD": 24, "MARIADB_PASSWORD": 24},
-    }
-    if service_type in managed_secrets:
-        _ensure_env_secrets(managed_secrets[service_type])
+    image, tag, _port = images[service_type]
 
     fragment: dict[str, Any] = {
         "image": f"{image}:{tag}",
         "container_name": service_type,
         "restart": "unless-stopped",
         "networks": [effective_network],
-        "volumes": [f"{service_type}_data:{data_path}"],
+        "volumes": [f"{service_type}_data:/data"],
     }
     if service_type == "postgres":
         fragment["environment"] = {
@@ -1607,19 +1469,9 @@ def _ensure_managed_service(service_type: str, network_name: str | None = None) 
         }
     elif service_type == "redis":
         fragment["command"] = "valkey-server --save 60 1 --loglevel warning"
-    elif service_type == "mariadb":
-        fragment["environment"] = {
-            "MARIADB_ROOT_PASSWORD": "${MARIADB_ROOT_PASSWORD}",
-            "MARIADB_DATABASE": "${MARIADB_DATABASE:-booklore}",
-            "MARIADB_USER": "${MARIADB_USER:-booklore}",
-            "MARIADB_PASSWORD": "${MARIADB_PASSWORD}",
-        }
 
     try:
-        # Named volume declared top-level so compose resolves it standalone (the
-        # fragment refers to <svc>_data; without the declaration compose errors on
-        # an undefined volume — latent for postgres/redis too, fixed here for all 3).
-        frag_path = write_fragment(service_type, fragment, named_volumes=[f"{service_type}_data"])
+        frag_path = write_fragment(service_type, fragment)
         # Pull image first (long timeout) — separate from container start
         pull_rc, pull_out = compose_pull(frag_path, timeout=600)
         if pull_rc != 0:
@@ -1927,8 +1779,330 @@ def _wait_api_ready(key: str, path: str, timeout: int, platform: Any) -> dict[st
     }
 
 
-# App-to-app wiring pass extracted to executor_wiring.py (#1302 drain) —
-# re-exported below.
+def _wire(source_key: str, target_key: str, wire_type: str) -> dict[str, str]:
+    """Record a wiring connection. Actual API wiring implemented in Step 5."""
+    with StateDB() as db:
+        source = db.get_app(source_key)
+        target = db.get_app(target_key)
+
+    if source is None:
+        return {
+            "status": "skipped",
+            "message": f"Wiring skipped — '{source_key}' is not installed.",
+        }
+    if target is None:
+        return {
+            "status": "skipped",
+            "message": f"Wiring skipped — '{target_key}' is not installed.",
+        }
+
+    with StateDB() as db:
+        db.execute(
+            """INSERT OR IGNORE INTO wiring
+               (source_app_id, target_app_id, wire_type, status, wired_at)
+               VALUES (?,?,?,?,?)""",
+            (source.id, target.id, wire_type, "active", int(time.time())),
+        )
+
+    return {
+        "status": "ok",
+        "message": f"Wired {source_key} → {target_key} ({wire_type}).",
+    }
+
+
+def _apply_wire_result(
+    db: StateDB,
+    source_app_id: int,
+    target_app_id: int,
+    wire_type: str,
+    outcome: str,
+) -> None:
+    """Update a wiring row's status to reflect the wire_indexer outcome.
+
+    "wired"    → status='active' (configuration confirmed in the target app)
+    "deferred" → leave 'pending'  (scheduler retries on a later cycle)
+    "failed"   → status='failed'  (surfaced to the UI; needs attention)
+    """
+    if outcome == "wired":
+        db.execute(
+            "UPDATE wiring SET status='active', wired_at=? "
+            "WHERE source_app_id=? AND target_app_id=? AND wire_type=?",
+            (int(time.time()), source_app_id, target_app_id, wire_type),
+        )
+    elif outcome == "failed":
+        db.execute(
+            "UPDATE wiring SET status='failed', checked_at=? "
+            "WHERE source_app_id=? AND target_app_id=? AND wire_type=?",
+            (int(time.time()), source_app_id, target_app_id, wire_type),
+        )
+    else:  # "deferred" — leave pending, just stamp the attempt
+        db.execute(
+            "UPDATE wiring SET checked_at=? "
+            "WHERE source_app_id=? AND target_app_id=? AND wire_type=?",
+            (int(time.time()), source_app_id, target_app_id, wire_type),
+        )
+
+
+def _dispatch_wire(
+    source_key: str,
+    wire_type: str,
+    source_manifest: Any,
+    target_key: str | None = None,
+) -> str:
+    """Route a wire_type to its registered handler. Returns the wire outcome.
+
+    Dispatch is driven by WIRE_HANDLERS in backend/manifests/wiring.py — add
+    a new wire_type there to extend without touching this function.
+
+    Unknown wire types log an error and return "failed" so the wiring row is
+    not retried forever on every health-scheduler cycle.  If the wire_type
+    is not yet registered, the operator should either add a handler or
+    remove the wiring declaration from the manifest.
+
+    config_root is read from the platform record (not Config) — it is an
+    operator-set, per-deployment value (see backend/core/state.Platform).
+
+    target_key is forwarded to handlers that need it (e.g. download_client
+    must know which arr app to configure).  Handlers that don't use it
+    accept it as an ignored keyword argument.
+    """
+    from backend.manifests.wiring import WIRE_HANDLERS
+
+    handler = WIRE_HANDLERS.get(wire_type)
+    if handler is None:
+        log.error(
+            "Wiring: wire_type %r for app %r has no registered handler — "
+            "add to WIRE_HANDLERS in backend/manifests/wiring.py",
+            wire_type,
+            source_key,
+        )
+        return "failed"
+    with StateDB() as _db:
+        config_root = _db.get_platform().config_root
+    return handler(source_key, source_manifest, config_root, target_key)
+
+
+def _reverse_wiring_pass(
+    installed_keys: set[str],
+    all_manifests: dict[str, Any],
+    wired: list[str],
+    deferred: list[str],
+    failed: list[str],
+) -> None:
+    """Reverse pass sub-routine for run_wiring_pass.
+
+    Checks previously-installed apps for wire steps targeting the newly-installed
+    apps (installed_keys).  Closes the install-order gap: if app A was installed
+    before app B, A's wire step targeting B was skipped at A's install time because
+    B wasn't present yet.  When B installs (the current call), we look back at A
+    and write any missing rows.
+
+    Mutates the wired/deferred/failed lists in place.
+    """
+    with StateDB() as db:
+        all_present_reverse = {a.key for a in db.get_all_apps()}
+    previously_installed = all_present_reverse - installed_keys
+
+    for existing_key in previously_installed:
+        existing_manifest = all_manifests.get(existing_key)
+        if existing_manifest is None:
+            continue
+        for step in existing_manifest.post_deploy:
+            if step.step_type != "wire":
+                continue
+            target = step.target
+            if target not in installed_keys:
+                continue
+            # Confirm both sides exist in the DB.
+            with StateDB() as db:
+                existing_app = db.get_app(existing_key)
+                target_app_rev = db.get_app(target)
+            if not (existing_app and target_app_rev):
+                continue
+            # Skip if a row already exists — INSERT OR IGNORE is safe here too,
+            # but an explicit check lets us avoid a redundant dispatch entirely.
+            with StateDB() as db:
+                existing_row = db.execute(
+                    "SELECT id FROM wiring "
+                    "WHERE source_app_id=? AND target_app_id=? AND wire_type=?",
+                    (existing_app.id, target_app_rev.id, step.wire_type),
+                ).fetchone()
+            if existing_row:
+                continue
+            # Write the missing row and attempt the wire.
+            with StateDB() as db:
+                db.execute(
+                    """INSERT OR IGNORE INTO wiring
+                       (source_app_id, target_app_id, wire_type, status, wired_at)
+                       VALUES (?,?,?,?,?)""",
+                    (
+                        existing_app.id,
+                        target_app_rev.id,
+                        step.wire_type,
+                        "pending",
+                        int(time.time()),
+                    ),
+                )
+            outcome = _dispatch_wire(
+                existing_key,
+                step.wire_type,
+                existing_manifest,
+                target_key=target,
+            )
+            with StateDB() as db:
+                _apply_wire_result(
+                    db,
+                    existing_app.id,
+                    target_app_rev.id,
+                    step.wire_type,
+                    outcome,
+                )
+            label = f"{existing_key}→{target}({step.wire_type})"
+            if outcome == "wired":
+                wired.append(label)
+            elif outcome == "failed":
+                failed.append(label)
+            else:
+                deferred.append(label)
+
+
+def run_wiring_pass(installed_keys: set[str]) -> dict[str, list[str]]:
+    """Write wiring rows for all apps in installed_keys whose manifest declares
+    a wire dep that is also installed, then attempt the actual wiring.
+
+    Called after a batch install completes. Safe to call multiple times —
+    INSERT OR IGNORE prevents duplicate rows; wire attempts are idempotent.
+
+    Rows are inserted with status='pending'. Each is then handed to the wire
+    implementation: "wired" → 'active', "deferred" → stays 'pending' (the
+    health scheduler retries via run_pending_wiring), "failed" → 'failed'.
+
+    Returns {"wired": [...], "deferred": [...], "failed": [...], "skipped": [...]}.
+    """
+    from backend.manifests.loader import load_all_manifests
+
+    wired: list[str] = []
+    deferred: list[str] = []
+    failed: list[str] = []
+    skipped: list[str] = []
+    all_manifests = load_all_manifests()
+    with StateDB() as db:
+        # Any app present in the DB (any status) is a valid wiring target — if the
+        # target app isn't running yet, wire_indexer returns "deferred" and the
+        # health scheduler retries. A status-based filter here would silently skip
+        # wiring for stopped/unhealthy apps and never write the DB row, so the
+        # scheduler would have nothing to retry.
+        all_present = {a.key for a in db.get_all_apps()}
+
+    for key in installed_keys:
+        manifest = all_manifests.get(key)
+        if not manifest:
+            continue
+        for step in manifest.post_deploy:
+            if step.step_type != "wire":
+                continue
+            target = step.target
+            if target not in all_present:
+                skipped.append(f"{key}→{target} (target not installed)")
+                continue
+            with StateDB() as db:
+                source_app = db.get_app(key)
+                target_app = db.get_app(target)
+            if not (source_app and target_app):
+                continue
+            # Record the intent first (status='pending') — the DB row is the
+            # durable record; the actual configuration is a separate event.
+            with StateDB() as db:
+                db.execute(
+                    """INSERT OR IGNORE INTO wiring
+                       (source_app_id, target_app_id, wire_type, status, wired_at)
+                       VALUES (?,?,?,?,?)""",
+                    (source_app.id, target_app.id, step.wire_type, "pending", int(time.time())),
+                )
+            outcome = _dispatch_wire(key, step.wire_type, manifest, target_key=target)
+            with StateDB() as db:
+                _apply_wire_result(
+                    db,
+                    source_app.id,
+                    target_app.id,
+                    step.wire_type,
+                    outcome,
+                )
+            label = f"{key}→{target}({step.wire_type})"
+            if outcome == "wired":
+                wired.append(label)
+            elif outcome == "failed":
+                failed.append(label)
+            else:
+                deferred.append(label)
+
+    _reverse_wiring_pass(installed_keys, all_manifests, wired, deferred, failed)
+
+    log.info(
+        "Wiring pass: wired=%s deferred=%s failed=%s skipped=%s",
+        wired,
+        deferred,
+        failed,
+        skipped,
+    )
+    return {"wired": wired, "deferred": deferred, "failed": failed, "skipped": skipped}
+
+
+def run_pending_wiring() -> dict[str, list[str]]:
+    """Retry every wiring row still in status='pending'.
+
+    Called by the health scheduler on each cycle — this is the asynchronous
+    completion path for wiring that was deferred at install time (e.g. an arr
+    app's config.xml hadn't been written yet). Idempotent and side-effect-safe:
+    a row that wires successfully flips to 'active' and is no longer retried.
+
+    Returns {"wired": [...], "deferred": [...], "failed": [...]} for logging.
+    """
+    from backend.manifests.loader import load_all_manifests
+
+    wired: list[str] = []
+    deferred: list[str] = []
+    failed: list[str] = []
+
+    with StateDB() as db:
+        pending = db.get_pending_wiring()
+    if not pending:
+        return {"wired": wired, "deferred": deferred, "failed": failed}
+
+    all_manifests = load_all_manifests()
+    for row in pending:
+        source_key = row.get("source_key")
+        wire_type = row.get("wire_type")
+        source_app_id = row.get("source_app_id")
+        target_app_id = row.get("target_app_id")
+        if not (source_key and wire_type and source_app_id and target_app_id):
+            continue
+        manifest = all_manifests.get(source_key)
+        target_key_val = row.get("target_key")
+        outcome = _dispatch_wire(source_key, wire_type, manifest, target_key=target_key_val)
+        with StateDB() as db:
+            _apply_wire_result(
+                db,
+                source_app_id,
+                target_app_id,
+                wire_type,
+                outcome,
+            )
+        label = f"{source_key}→{row.get('target_key')}({wire_type})"
+        if outcome == "wired":
+            wired.append(label)
+        elif outcome == "failed":
+            failed.append(label)
+        else:
+            deferred.append(label)
+
+    log.info(
+        "Pending wiring retry: wired=%s deferred=%s failed=%s",
+        wired,
+        deferred,
+        failed,
+    )
+    return {"wired": wired, "deferred": deferred, "failed": failed}
 
 
 def _expand_path(path: str, platform: Any) -> str:
@@ -2062,7 +2236,7 @@ def disable_app(key: str, reason: str = "user_request") -> DisableResult:
         return DisableResult(
             key=key,
             ok=False,
-            criticality=criticality.value,
+            criticality=criticality,
             error=(
                 f"'{key}' cannot be disabled — it is required for the stack to function. "
                 f"Disabling Traefik would take down all services."
@@ -2074,11 +2248,11 @@ def disable_app(key: str, reason: str = "user_request") -> DisableResult:
 
     if not app:
         return DisableResult(
-            key=key, ok=False, criticality=criticality.value, error=f"App '{key}' is not installed."
+            key=key, ok=False, criticality=criticality, error=f"App '{key}' is not installed."
         )
 
     if app.status == "disabled":
-        return DisableResult(key=key, ok=True, criticality=criticality.value)
+        return DisableResult(key=key, ok=True, criticality=criticality)
 
     # Stop the container (non-fatal if already stopped or Docker unavailable)
     import subprocess
@@ -2114,11 +2288,11 @@ def disable_app(key: str, reason: str = "user_request") -> DisableResult:
             "app",
             key,
             triggered_by="health" if reason in ("performance", "health") else "user",
-            detail={"reason": reason, "criticality": criticality.value},
+            detail={"reason": reason, "criticality": str(criticality)},
         )
 
-    log.info("Disabled %s (reason=%s, criticality=%s)", key, reason, criticality.value)
-    return DisableResult(key=key, ok=True, criticality=criticality.value)
+    log.info("Disabled %s (reason=%s, criticality=%s)", key, reason, criticality)
+    return DisableResult(key=key, ok=True, criticality=str(criticality))
 
 
 def enable_app(key: str) -> DisableResult:
@@ -2130,11 +2304,11 @@ def enable_app(key: str) -> DisableResult:
 
     if not app:
         return DisableResult(
-            key=key, ok=False, criticality=criticality.value, error=f"App '{key}' is not installed."
+            key=key, ok=False, criticality=str(criticality), error=f"App '{key}' is not installed."
         )
 
     if app.status != "disabled":
-        return DisableResult(key=key, ok=True, criticality=criticality.value)
+        return DisableResult(key=key, ok=True, criticality=str(criticality))
 
     # Restore the fragment
     disabled_path = config.compose_dir / f"{key}.yaml.disabled"
@@ -2145,7 +2319,7 @@ def enable_app(key: str) -> DisableResult:
         return DisableResult(
             key=key,
             ok=False,
-            criticality=criticality.value,
+            criticality=str(criticality),
             error=(f"Compose fragment not found for '{key}'. The app may need to be reinstalled."),
         )
 
@@ -2167,7 +2341,7 @@ def enable_app(key: str) -> DisableResult:
         return DisableResult(
             key=key,
             ok=False,
-            criticality=criticality.value,
+            criticality=str(criticality),
             error=f"Could not start {key}: {e}",
         )
 
@@ -2189,7 +2363,7 @@ def enable_app(key: str) -> DisableResult:
         db.log_operation("enable", "app", key, triggered_by="user")
 
     log.info("Re-enabled %s", key)
-    return DisableResult(key=key, ok=True, criticality=criticality.value)
+    return DisableResult(key=key, ok=True, criticality=str(criticality))
 
 
 # ---------------------------------------------------------------------------
@@ -2525,6 +2699,7 @@ def _run_smoke_test(key: str, manifest: Any, api_ready_passed: bool = False) -> 
         return step
 
     # GG: skip TCP smoke test for apps on system ports — Traefik owns them on the host
+    _SYSTEM_PORTS = {80, 443, 8080, 8081}
     if web_port in _SYSTEM_PORTS:
         step.status = "skipped"
         step.message = (
