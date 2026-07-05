@@ -19,6 +19,7 @@ from backend.core.config import config
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.infra.base import InfraProvider, ProviderResult
+from backend.infra.registry import register
 
 log = get_logger(__name__)
 
@@ -127,10 +128,12 @@ IMAGE = "ghcr.io/steveiliop56/tinyauth:v5"
 PORT = 3000
 
 
+@register
 class TinyauthProvider(InfraProvider):
     slot = "auth"
     key = "tinyauth"
     display_name = "Tinyauth v5"
+    category = "auth"
 
     fields: ClassVar[list[dict[str, Any]]] = [
         {
@@ -254,9 +257,9 @@ class TinyauthProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "tinyauth",
-                    display_name="Tinyauth v5",
+                    display_name=self.display_name,
                     tier=0,  # tier 0 = infrastructure layer
-                    category="auth",
+                    category=self.category,
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

@@ -28,7 +28,7 @@ dependencies:
   postgres: true
   redis: true
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: immich
 

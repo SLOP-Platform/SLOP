@@ -21,7 +21,7 @@ volumes:
 env:
   OLLAMA_HOST: "0.0.0.0"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: ollama
 

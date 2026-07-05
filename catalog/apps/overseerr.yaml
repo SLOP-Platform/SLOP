@@ -8,9 +8,9 @@ image: sctx/overseerr
 image_tag: latest
 
 ports:
-  web: 5056
+  web: 5055
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: overseerr
 
@@ -22,7 +22,7 @@ health:
     - name: api_reachable
       type: http
       path: /
-      port: 5056
+      port: 5055
       expect_status: 200
       interval: 30
 

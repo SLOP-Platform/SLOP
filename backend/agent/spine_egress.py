@@ -34,6 +34,7 @@ allowlisted payload that an interpreter (S3) hands to ``route_and_dispatch``, or
 
 from __future__ import annotations
 
+import hashlib
 import re as _re
 from dataclasses import dataclass
 from typing import Any
@@ -284,11 +285,153 @@ def send_for_review(finding: Finding, *, provider: str) -> EgressOutcome:
     )
 
 
+# ---------------------------------------------------------------------------
+# 2c Contribute-back channel — separate allowlist, same fail-closed pattern
+# ---------------------------------------------------------------------------
+
+CONTRIBUTE_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {
+        "error_class",
+        "app_key",
+        "suggested_fix",
+        "diagnosis_class",
+        "fix_type",
+        "confidence",
+        "sample_size",
+    }
+)
+
+_CONTRIBUTE_STRING_KEYS: frozenset[str] = frozenset(
+    {"error_class", "app_key", "suggested_fix", "diagnosis_class", "fix_type"}
+)
+
+
+def verify_contribute_clean(payload: dict[str, Any]) -> tuple[bool, str]:
+    """Independent verifier for the 2c contribute-back channel.
+
+    Confirms the payload contains ONLY allowlisted keys, that string fields are
+    actually strings, and that no residual leak marker survives in suggested_fix
+    (the one free-text field).  Returns (clean, reason) — a False here means
+    DO NOT CONTRIBUTE.  Reason NEVER echoes payload content (R5).
+    """
+    extra = set(payload.keys()) - CONTRIBUTE_ALLOWED_KEYS
+    if extra:
+        return False, f"disallowed key(s): {sorted(extra)}"
+    if not payload:
+        return False, "empty payload"
+    # string fields that ARE present must actually be strings
+    for key in _CONTRIBUTE_STRING_KEYS:
+        if key in payload and not isinstance(payload[key], str):
+            return False, f"non-string value for {key!r}"
+    # confidence and sample_size, when present, must be numeric
+    for key in ("confidence", "sample_size"):
+        if key in payload and not isinstance(payload[key], (int, float)):
+            return False, f"non-numeric value for {key!r}"
+    # suggested_fix is the only free-text field — leak-scan it
+    fix_text = payload.get("suggested_fix", "")
+    for idx, pat in enumerate(_LEAK_PATTERNS):
+        if idx == _HOSTNAME_PATTERN_IDX:
+            for tok_m in _HYPHEN_TOKEN_RE.finditer(fix_text):
+                tok = tok_m.group(0)
+                if not pat.search(tok):
+                    continue
+                tok_lower = tok.lower()
+                if any(tok_lower.startswith(pfx) for pfx in _P7_ALLOWLIST_PREFIXES):
+                    continue
+                return False, "residual leak marker in contribute payload"
+        elif pat.search(fix_text):
+            return False, "residual leak marker in contribute payload"
+    return True, "clean"
+
+
+def derive_contribute_key(
+    error_class: str,
+    app_key: str,
+    diagnosis_class: str,
+    fix_type: str,
+) -> str:
+    """Re-derive the contribution key from 4 closed-vocabulary allowlisted inputs.
+
+    Security review §2.1: the original ``signature_hash`` is allowlist-UNSAFE
+    (hostnames, tokens survive SHA256).  This key is derived from scratch using
+    ONLY allowlisted, closed-vocabulary fields — zero free text.  Identical
+    inputs produce identical keys across installs (unlinkable, ADR 0011).
+
+    Returns a 40-char hex SHA1 digest.
+    """
+    seed = f"{error_class}:{app_key}:{diagnosis_class}:{fix_type}"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()  # noqa: S324 — security review §2.1 explicitly chose SHA1 for key derivation
+
+
+def send_contribute_back(payload: dict[str, Any]) -> EgressOutcome:
+    """Prepare a 2c contribute-back payload through the fail-closed allowlist gate.
+
+    On a provably-clean allowlisted payload: ``sent=True`` with the scrubbed
+    payload.  On any disallowed content or verifier failure: ``sent=False``
+    with a recorded INDETERMINATE.  Never raises; never logs payload content.
+
+    Does NOT itself transmit to the moderation repo — returns the outcome so
+    the network call stays outside the boundary (same pattern as send_for_review).
+    """
+
+    try:
+        clean, reason = verify_contribute_clean(payload)
+    except Exception as exc:
+        log.warning(
+            "contribute verifier failed; refusing send",
+            error=type(exc).__name__,
+        )
+        return EgressOutcome(
+            sent=False,
+            provider="contribute-back",
+            verdict=Verdict.INDETERMINATE,
+            reason="verifier error — fail closed",
+        )
+
+    if not clean:
+        log.warning(
+            "contribute refused: payload not provably clean", reason=reason
+        )
+        return EgressOutcome(
+            sent=False,
+            provider="contribute-back",
+            verdict=Verdict.INDETERMINATE,
+            reason=f"not provably clean: {reason}",
+        )
+
+    # Scrub the one free-text field (defense-in-depth, same pattern as send_for_review)
+    redactions = 0
+    raw_fix = payload.get("suggested_fix", "")
+    if raw_fix:
+        scrubbed = scrub(raw_fix, profile="cloud")
+        redactions = max(scrubbed.count("<") - raw_fix.count("<"), 0)
+        payload["suggested_fix"] = scrubbed
+
+    log.info(
+        "contribute allowed",
+        fields=len(payload),
+        redactions=redactions,
+    )
+    return EgressOutcome(
+        sent=True,
+        provider="contribute-back",
+        payload=dict(payload),
+        verdict=Verdict.VERIFIED,
+        reason="clean",
+        redaction_count=redactions,
+        fields_sent=len(payload),
+    )
+
+
 __all__ = [
     "ALLOWED_KEYS",
     "ALLOWED_VERDICTS",
+    "CONTRIBUTE_ALLOWED_KEYS",
     "EgressOutcome",
+    "derive_contribute_key",
     "is_cloud_bound",
+    "send_contribute_back",
     "send_for_review",
     "verify_clean",
+    "verify_contribute_clean",
 ]

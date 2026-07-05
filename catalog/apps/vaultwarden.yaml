@@ -28,7 +28,7 @@ env:
 # The cert-expiry probe monitors the ACME store for certificate health.
 tls_cert_path: "{config_root}/traefik/acme.json"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: vaultwarden
   # Vaultwarden websocket notifications require these headers

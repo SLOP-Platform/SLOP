@@ -4,7 +4,7 @@
 #
 # Quick start (new install):
 #   mkdir -p /srv/slop && cd /srv/slop
-#   curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/docker-compose.yml \
+#   curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/docker-compose.yml \
 #     -o docker-compose.yml
 #   cp .env.example .env && nano .env   # set your domain and secrets
 #   docker network create slop    # network is external — create it first
@@ -27,7 +27,7 @@ name: slop
 
 services:
   slop:
-    image: ghcr.io/nnyan/slop:latest
+    image: ghcr.io/nnyan/slop:latest  # last-verified: 2026-06-21 — intentional self-update float (users pull :latest to auto-update; #945)
     container_name: slop
     restart: unless-stopped
     labels:
@@ -66,7 +66,7 @@ services:
 
   # ntfy — SLOP's internal notification service (push alerts to the UI and mobile)
   ntfy:
-    image: binwiederhier/ntfy
+    image: binwiederhier/ntfy  # last-verified: 2026-06-21 — intentional upstream-tracking float (matches catalog/apps/ntfy.yaml convention; #945)
     container_name: ntfy
     # `serve` is required — without a command the image just prints help and
     # exits 0, crash-looping under restart: unless-stopped (the /v1/health

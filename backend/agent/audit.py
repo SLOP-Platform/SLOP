@@ -119,7 +119,7 @@ def record_action_outcome(
     ts = int(time.time())
     try:
         with StateDB() as db:
-            db.execute(
+            cur = db.execute(
                 f"""INSERT INTO {TABLE_AGENT_AUDIT}
                     (run_id, ts, trigger, action_id, app_key, tier, status, outcome_msg, rollback)
                     SELECT run_id, ?, trigger, action_id, app_key, tier, ?, ?, ?
@@ -128,6 +128,17 @@ def record_action_outcome(
                     ORDER BY id LIMIT 1""",  # noqa: S608 - table is the fixed constant TABLE_AGENT_AUDIT; all values are ?-bound
                 (ts, status, outcome_msg[:4096], 1 if rollback else 0, run_id),
             )
+            # The OUTCOME row is built by SELECTing the QUEUED row's metadata. If the
+            # QUEUED write failed (record_action_queued is fail-open), there is no row
+            # to copy and the INSERT...SELECT inserts NOTHING. Make that LOUD instead of
+            # silently dropping the outcome (#1072 — close the data-loss gap).
+            if cur.rowcount == 0:
+                log.warning(
+                    "audit: record_action_outcome found no QUEUED row for run_id=%s "
+                    "(status=%s) — outcome NOT recorded; the queued write likely failed",
+                    run_id,
+                    status,
+                )
             # StateDB commits on __exit__ — no explicit commit needed.
     except Exception as exc:
         log.error("audit: record_action_outcome failed for run_id=%s: %s", run_id, exc)
@@ -161,9 +172,12 @@ def notify_action(
     """
     emoji = "✅" if status == "ok" else ("↩️" if rollback else "❌")
     title = f"{emoji} Agent action: {action_id} on {app_key}"
-    tier_label = {0: "T0-investigate", 1: "T1-reversible", 2: "T2-recoverable", 3: "T3-irreversible"}.get(
-        tier, f"T{tier}"
-    )
+    tier_label = {
+        0: "T0-investigate",
+        1: "T1-reversible",
+        2: "T2-recoverable",
+        3: "T3-irreversible",
+    }.get(tier, f"T{tier}")
     parts = [
         f"App: {app_key}",
         f"Action: {action_id} ({tier_label})",
@@ -191,7 +205,9 @@ def notify_action(
                     "audit.notify_action: ntfy send returned False for %s/%s", action_id, app_key
                 )
         except Exception as exc:
-            log.warning("audit.notify_action: ntfy send failed for %s/%s: %s", action_id, app_key, exc)
+            log.warning(
+                "audit.notify_action: ntfy send failed for %s/%s: %s", action_id, app_key, exc
+            )
 
     coro = _send()
     try:

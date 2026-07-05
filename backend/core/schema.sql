@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS fix_history (
     outcome     TEXT NOT NULL DEFAULT 'pending',  -- pending | success | failure
     thumbs      INTEGER DEFAULT NULL,             -- 1=up, -1=down, NULL=no feedback
     created_at  INTEGER NOT NULL
-, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', signature_hash TEXT NOT NULL DEFAULT '', image_digest TEXT NOT NULL DEFAULT '');
+, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', signature_hash TEXT NOT NULL DEFAULT '', image_digest TEXT NOT NULL DEFAULT '', rejection_reason TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE IF NOT EXISTS health_check_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,13 +136,16 @@ CREATE TABLE IF NOT EXISTS health_check_history (
 
 CREATE TABLE IF NOT EXISTS health_checks (
     id              INTEGER PRIMARY KEY,
-    subject_type    TEXT NOT NULL,          -- app | infra | platform
+    subject_type    TEXT NOT NULL,
     subject_key     TEXT NOT NULL,
-    check_name      TEXT NOT NULL,          -- e.g. api_reachable | disk_space | wiring
-    status          TEXT NOT NULL CHECK (status IN ('ok', 'warning', 'error', 'unknown')),
-    summary         TEXT NOT NULL,          -- one-line plain-language result
-    detail          TEXT,                   -- extended info for expansion
-    auto_fix        TEXT,                   -- name of available auto-fix, NULL if none
+    check_name      TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN (
+                        'ok', 'warning', 'error', 'unknown',
+                        'critical', 'degraded', 'running', 'disabled', 'skipped'
+                    )),
+    summary         TEXT NOT NULL,
+    detail          TEXT,
+    auto_fix        TEXT,
     checked_at      INTEGER NOT NULL DEFAULT (unixepoch()),
     UNIQUE (subject_type, subject_key, check_name)
 );
@@ -163,15 +166,15 @@ CREATE TABLE IF NOT EXISTS infra_migrations (
 );
 
 CREATE TABLE IF NOT EXISTS infra_slots (
-    id              INTEGER PRIMARY KEY,
-    slot            TEXT NOT NULL UNIQUE
-                        CHECK (slot IN ('auth', 'tunnel', 'vpn', 'management', 'dashboard')),
-    provider        TEXT,           -- e.g. tinyauth, cloudflared, gluetun
-    status          TEXT NOT NULL DEFAULT 'empty'
-                        CHECK (status IN ('empty', 'deploying', 'active', 'migrating', 'error', 'removed')),
-    config          TEXT,           -- JSON: provider-specific config (no secrets)
-    deployed_at     INTEGER,
-    updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
+    id INTEGER PRIMARY KEY,
+    slot TEXT NOT NULL UNIQUE
+        CHECK (slot IN ('auth', 'tunnel', 'vpn', 'management', 'dashboard', 'reverse_proxy')),
+    provider TEXT,
+    status TEXT NOT NULL DEFAULT 'empty'
+        CHECK (status IN ('empty', 'deploying', 'active', 'migrating', 'error', 'removed')),
+    config TEXT,
+    deployed_at INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
 CREATE TABLE IF NOT EXISTS infra_tunnel_providers (
@@ -320,7 +323,7 @@ CREATE TABLE IF NOT EXISTS pending_fixes (
     status      TEXT    NOT NULL DEFAULT 'pending',
     model       TEXT,
     created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
-    resolved_at INTEGER, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', fix_metadata TEXT NOT NULL DEFAULT '{}',
+    resolved_at INTEGER, diagnosis_class TEXT NOT NULL DEFAULT 'UNKNOWN', fix_metadata TEXT NOT NULL DEFAULT '{}', fix_history_id INTEGER,
     UNIQUE(app_key, check_name, action_type)
 );
 
@@ -378,18 +381,6 @@ CREATE TABLE IF NOT EXISTS request_routing (
                         CHECK (default_path IN ('debrid', 'download', 'ask')),
     notes           TEXT,
     updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
-);
-
-CREATE TABLE IF NOT EXISTS router_decisions (
-    id               INTEGER PRIMARY KEY,
-    prompt_chars     INT,
-    tier             TEXT,
-    chain            TEXT,          -- JSON array, e.g. '["ollama","openai"]'
-    chosen_provider  TEXT,
-    outcome          TEXT,          -- 'success' | 'all_failed' | NULL
-    cost_usd         REAL,
-    latency_ms       INT,
-    created_at       INT DEFAULT (unixepoch())
 );
 
 CREATE TABLE IF NOT EXISTS secrets (
@@ -491,10 +482,4 @@ CREATE INDEX IF NOT EXISTS idx_op_steps_key ON operation_steps(op_key, created_a
 CREATE INDEX IF NOT EXISTS idx_operations_started  ON operations(started_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_operations_subject ON operations(subject_type, subject_key);
-
-CREATE INDEX IF NOT EXISTS idx_router_decisions_chosen_provider
-    ON router_decisions (chosen_provider);
-
-CREATE INDEX IF NOT EXISTS idx_router_decisions_created_at
-    ON router_decisions (created_at);
 

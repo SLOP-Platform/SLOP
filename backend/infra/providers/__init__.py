@@ -1,34 +1,29 @@
-"""Auto-import all infrastructure providers.
-Each provider module uses the @register decorator from backend.infra.registry.
-Importing this package makes all providers available to list_providers().
+"""Auto-import all infrastructure providers (derived — #993).
+
+Importing this package GLOB-imports every sibling provider module, each of which
+self-registers its provider class(es) via the ``@register`` decorator from
+``backend.infra.registry``. There is no hand-maintained import list or ``__all__`` to
+drift out of sync with the modules on disk — drop a new ``<slot>_<name>.py`` in this
+package and it auto-registers (the append-point parallel streams used to collide on, and
+which had already drifted: ``auth_authelia`` / ``tunnel_headscale`` were registered by the
+registry but were MISSING from the old explicit ``__init__`` list).
+
+Display order is derived from ``(slot, key)`` sorting in ``list_providers()``, NOT import
+order, so glob discovery is order-safe.
 """
 
-# These imports trigger @register calls in each module.
-# Order is display order in the UI.
-from backend.infra.providers.auth_tinyauth import TinyauthProvider
-from backend.infra.providers.tunnel_cloudflare import CloudflareTunnelProvider
-from backend.infra.providers.tunnel_tailscale import TailscaleProvider
-from backend.infra.providers.vpn_gluetun import GluetunProvider
-from backend.infra.providers.dashboard_homepage import HomepageProvider
-from backend.infra.providers.dashboard_glance import GlanceDashboardProvider
-from backend.infra.providers.management_portainer import PortainerProvider
-from backend.infra.providers.management_alternatives import (
-    DockhandProvider,
-    DockgeProvider,
-    KomodoProvider,
-    PortainerBEProvider,
-)
+from __future__ import annotations
 
-__all__ = [
-    "CloudflareTunnelProvider",
-    "DockgeProvider",
-    "DockhandProvider",
-    "GlanceDashboardProvider",
-    "GluetunProvider",
-    "HomepageProvider",
-    "KomodoProvider",
-    "PortainerBEProvider",
-    "PortainerProvider",
-    "TailscaleProvider",
-    "TinyauthProvider",
-]
+import importlib
+import pkgutil
+
+
+def _import_all_provider_modules() -> None:
+    """Glob-import every sibling provider module so each self-registers (#993). Private/
+    dunder modules (``_*``) are skipped — only ``<slot>_<name>.py`` provider modules."""
+    for mod in pkgutil.iter_modules(__path__):
+        if not mod.name.startswith("_"):
+            importlib.import_module(f"{__name__}.{mod.name}")
+
+
+_import_all_provider_modules()

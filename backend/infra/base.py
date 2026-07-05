@@ -10,8 +10,8 @@ Providers are grouped into slots. The canonical slot set and the per-slot
 contract (slot_kind, wiring_kind, required_methods, migration_pair, health_probe,
 cardinality) are declared as data in `backend/infra/slots.py:SLOT_CONTRACTS` —
 the single slot SSOT. This docstring no longer maintains its own slot list;
-the authoritative set is (auth / tunnel / vpn / management / dashboard) — see
-that module for what each slot's contract requires.
+the authoritative set is (auth / tunnel / vpn / management / dashboard /
+reverse_proxy) — see that module for what each slot's contract requires.
 
 Each slot can have zero or one active provider. The swap system:
   1. Deploys the new provider alongside the old one
@@ -100,6 +100,20 @@ class InfraProvider(ABC):
     def list_hostnames(self) -> ProviderResult:
         """List all registered hostnames."""
         return ProviderResult.success("Not applicable.", data={"hostnames": []})
+
+    # ── Reverse-proxy slot interface (only reverse_proxy providers implement) ──
+    # These emit the raw reverse-proxy routing labels for an app. The base no-ops
+    # return an empty label list so a non-reverse_proxy provider contributes nothing;
+    # the active reverse_proxy provider (e.g. Traefik) overrides them with the real
+    # `traefik.http.*` emission (the #990 seam — wrapped in P1, the sole emitter in P2).
+
+    def emit_route_labels(self, *args: Any, **kwargs: Any) -> list[str]:
+        """Emit the Host(...)/router/service labels that publish an app. Base no-op."""
+        return []
+
+    def emit_forwardauth_labels(self, *args: Any, **kwargs: Any) -> list[str]:
+        """Emit the forwardAuth-middleware labels wiring an app to the auth slot. Base no-op."""
+        return []
 
     # ── Migration support ─────────────────────────────────────────────────
 

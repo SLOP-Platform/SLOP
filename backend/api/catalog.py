@@ -13,7 +13,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
+from backend.core.path_guard import PathNotAllowed
 from backend.manifests.loader import ManifestError, load_all_manifests, load_manifest
 
 log = get_logger(__name__)
@@ -68,8 +70,17 @@ def get_catalog_entry(key: str) -> CatalogDetail:
         m = load_manifest(key)
     except KeyError as err:
         raise HTTPException(status_code=404, detail=f"No app '{key}' in catalog.") from err
+    except PathNotAllowed as e:
+        # Unsafe key (traversal / control / non-ASCII charset) — reject as a client
+        # error instead of letting it propagate to the global handler as a 500.
+        # Mirrors the apps/registry/health PathNotAllowed seam (#1041/#1103).
+        raise HTTPException(
+            status_code=400, detail=safe_detail(e, "Invalid app key.", log=log)
+        ) from e
     except ManifestError as e:
-        raise HTTPException(status_code=500, detail=f"Manifest error: {e.message}") from e
+        raise HTTPException(
+            status_code=500, detail=safe_detail(e, "Manifest error.", log=log)
+        ) from e
 
     base = m.to_catalog_entry()
     return CatalogDetail(

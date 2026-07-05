@@ -47,7 +47,7 @@ env:
   # Log level
   LOG_LEVEL: info
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: ddns
 

@@ -19,7 +19,7 @@ ports:
 volumes:
   config: /data
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: budget
 

@@ -81,7 +81,7 @@ env:
 dependencies:
   postgres: true
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: dumb
 

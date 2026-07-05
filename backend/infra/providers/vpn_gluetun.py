@@ -20,14 +20,15 @@ from backend.infra.registry import register
 log = get_logger(__name__)
 
 CONTAINER_NAME = "gluetun"
-IMAGE = "qmcgaw/gluetun"
+IMAGE = "qmcgaw/gluetun"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
 
 
 @register
 class GluetunProvider(InfraProvider):
     slot = "vpn"
     key = "gluetun"
-    display_name = "Gluetun"
+    display_name = "Gluetun VPN"
+    category = "networking"
     description = (
         "VPN client container supporting 40+ providers (Mullvad, Surfshark, NordVPN, etc.)"
     )
@@ -114,7 +115,7 @@ class GluetunProvider(InfraProvider):
             env["SERVER_COUNTRIES"] = cfg["server_countries"]
 
         fragment = {
-            "image": "qmcgaw/gluetun:latest",
+            "image": "qmcgaw/gluetun:latest",  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
             "container_name": CONTAINER_NAME,
             "cap_add": ["NET_ADMIN"],
             "devices": ["/dev/net/tun:/dev/net/tun"],
@@ -157,9 +158,9 @@ class GluetunProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "gluetun",
-                    display_name="Gluetun VPN",
+                    display_name=self.display_name,
                     tier=0,  # tier 0 = infrastructure layer
-                    category="networking",
+                    category=self.category,
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

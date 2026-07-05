@@ -35,7 +35,7 @@ env:
   LLAMA_ARG_N_PREDICT: "512"
   LLAMA_ARG_THREADS: "4"
 
-traefik:
+reverse_proxy:
   # LLM server — expose on LAN only, not through CF Tunnel
   enabled: true
   subdomain: llm

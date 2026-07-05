@@ -32,7 +32,7 @@ volumes:
 env:
   TZ: "${TZ}"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: syncthing
 

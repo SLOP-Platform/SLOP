@@ -30,6 +30,7 @@ import time
 import uuid
 from typing import Any
 from collections.abc import Awaitable, Callable
+from urllib.parse import quote
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -175,8 +176,14 @@ class DeprecationHeaderMiddleware(BaseHTTPMiddleware):
             and path not in _API_NONVERSIONED_PATHS
         ):
             response.headers["Deprecation"] = "true"
+            # Percent-encode the successor URI: a request path can carry non-latin-1
+            # characters (e.g. U+0100), and HTTP header values are latin-1 encoded by
+            # Starlette — an unencoded successor would raise UnicodeEncodeError and turn
+            # EVERY such legacy request into a 500 (#1167). quote() is a no-op for the
+            # ASCII paths that dominate, and an RFC 8288 Link target is a URI-Reference
+            # (percent-encoded) anyway.
             successor = "/api/v1/" + path[len("/api/") :]
-            response.headers["Link"] = f'<{successor}>; rel="successor-version"'
+            response.headers["Link"] = f'<{quote(successor, safe="/")}>; rel="successor-version"'
             response.headers["Sunset"] = _API_SUNSET_HTTP_DATE
         return response
 
@@ -258,11 +265,21 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         try:
             from backend.core.logging import get_correlation_id
             from backend.core.state import StateDB
+            from backend.api.auth import resolve_actor
 
             body_hash = hashlib.sha256(body_bytes).hexdigest() if body_bytes else None
             template = _route_template(request)
             resource = _resource_id(request)
             corr = get_correlation_id()
+            # Attribute the mutating request to its authenticated principal (#978):
+            # control-plane-token requests record ACTOR_CONTROL_PLANE, the rest the
+            # prior ACTOR_LOCAL default. Derived from the request's own auth headers
+            # (case-insensitive) so attribution holds even on routes not yet wired to
+            # require_scope; resolve_actor never raises and logs no secret.
+            actor = resolve_actor(
+                request.headers.get("authorization"),
+                request.headers.get("x-api-key"),
+            )
             with StateDB() as db:
                 db.execute(
                     "INSERT INTO audit_log "
@@ -271,7 +288,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         int(time.time()),
-                        "local",
+                        actor,
                         f"{request.method} {template}",
                         resource,
                         body_hash,

@@ -28,7 +28,7 @@ env:
 auto_secrets:
   - WEBUI_SECRET_KEY
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: openwebui
 

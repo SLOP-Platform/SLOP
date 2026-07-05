@@ -11,7 +11,7 @@ linuxserver: true
 ports:
   web: 5299
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: lazylibrarian
 

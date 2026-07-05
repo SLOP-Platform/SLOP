@@ -1,18 +1,20 @@
 """backend.agent.router.decisions — Decision logging for the LLM routing engine.
 
 Emits a structured log event for each RouteDecision so that routing choices
-are observable via the structlog pipeline, and best-effort persists a row to
-the ``router_decisions`` table.
+(tier, chain, chosen provider, outcome, cost, latency) are observable via the
+structlog pipeline.
 
-The database write is always best-effort: any DB error is caught, logged as a
-warning, and swallowed so the caller is never blocked.  Existing single-arg
-callers (e.g. the CLI dry-run path) continue to work unchanged — the extra
-kwargs are all optional.
+The ``router_decisions`` DB leg was removed (#1090): the row was written on
+every dispatch but had ZERO readers (no dashboard, no query), so it was dead
+write amplification — and it carried a bug (``prompt_chars`` recorded
+``len(chain)``, the provider count, not the prompt size). Observability now
+rides structlog alone, which already covered routing and now also carries the
+cost/latency fields the table held. The orphaned table itself is dropped in a
+follow-up migration (its removal cascades through schema-regen + the generated
+behavioral suite). Existing callers are unchanged — the kwargs stay optional.
 """
 
 from __future__ import annotations
-
-import json
 
 import structlog
 
@@ -29,9 +31,8 @@ def log_decision(
     cost_usd: float | None = None,
     latency_ms: int | None = None,
 ) -> None:
-    """Emit the structlog event (unchanged) AND best-effort insert a
-    router_decisions row.  Never raises.  Existing single-arg callers
-    (cli.py dry-run) keep working — extra kwargs are optional.
+    """Emit the structlog event for a RouteDecision. Never raises. Existing
+    single-arg callers (cli.py dry-run) keep working — extra kwargs are optional.
 
     Fields emitted to structlog:
         event:           "router.decision"
@@ -40,12 +41,9 @@ def log_decision(
         reason:          Human-readable explanation from the selector
         chosen_provider: Provider that responded (or None)
         outcome:         'success' | 'all_failed' | None
-
-    DB columns written (best-effort, never raises):
-        prompt_chars, tier, chain (JSON), chosen_provider, outcome,
-        cost_usd, latency_ms, created_at (default unixepoch())
+        cost_usd:        Estimated cost in USD (or None)
+        latency_ms:      Wall-clock dispatch latency in ms (or None)
     """
-    # ── 1. Emit the structlog event (unchanged from batch 1) ─────────────────
     try:
         log.info(
             "router.decision",
@@ -54,33 +52,8 @@ def log_decision(
             reason=decision.reason,
             chosen_provider=chosen_provider,
             outcome=outcome,
+            cost_usd=cost_usd,
+            latency_ms=latency_ms,
         )
     except Exception as exc:  # pragma: no cover — defensive only
         log.warning("router.decisions: failed to log decision", error=str(exc))
-
-    # ── 2. Best-effort DB insert ──────────────────────────────────────────────
-    try:
-        from backend.core.state import StateDB  # lazy import; avoids hard dep at module load
-
-        prompt_chars = len(decision.chain)  # rough proxy when prompt text unavailable
-        chain_json = json.dumps(decision.chain)
-
-        with StateDB() as db:
-            db.execute(
-                """
-                INSERT INTO router_decisions
-                    (prompt_chars, tier, chain, chosen_provider, outcome, cost_usd, latency_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    prompt_chars,
-                    decision.tier.name,
-                    chain_json,
-                    chosen_provider,
-                    outcome,
-                    cost_usd,
-                    latency_ms,
-                ),
-            )
-    except Exception as exc:
-        log.warning("router.decisions: failed to persist decision row", error=str(exc))

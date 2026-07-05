@@ -24,7 +24,7 @@ ports:
 volumes:
   config: /build/models
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: localai
 

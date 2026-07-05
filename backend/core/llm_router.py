@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.core.logging import get_logger
+from backend.core.sqlbuild import build_update
 
 log = get_logger(__name__)
 
@@ -268,13 +269,7 @@ def upsert_model(
                 updates["ollama_name"] = ollama_name
             if notes is not None:
                 updates["notes"] = notes
-            cols = ", ".join(f"{k} = ?" for k in updates)
-            db.execute(
-                # nosec B608  # column names are module-local constants, not user
-                # input; all values are bound via ? placeholders.
-                f"UPDATE llm_model_registry SET {cols} WHERE filename = ?",  # noqa: S608  # nosec B608  # cols are module-local constants; values bound via ?
-                (*updates.values(), filename),
-            )
+            db.execute(*build_update("llm_model_registry", updates, "filename = ?", (filename,)))
 
 
 def remove_model_from_registry(filename: str) -> None:

@@ -18,15 +18,32 @@ from __future__ import annotations
 from typing import Any
 
 import asyncio
-import ipaddress
 import json
 import time
-import urllib.parse
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from backend.api.rate_limit import limiter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+
+# Request/response DTOs extracted to models_schemas.py (#1302 linecount drain).
+# Re-exported (redundant-alias idiom) so response_model= refs, handler bodies,
+# and any `from backend.api.models import <Schema>` callers resolve unchanged.
+from backend.api.models_schemas import (
+    AgentConfig as AgentConfig,
+    DownloadRequest as DownloadRequest,
+    EvaluateResult as EvaluateResult,
+    FixRecord as FixRecord,
+    GGUFFileInfo as GGUFFileInfo,
+    HardwareEvalResult as HardwareEvalResult,
+    HardwareEvalStep as HardwareEvalStep,
+    ModelRegistryEntry as ModelRegistryEntry,
+    PreflightResult as PreflightResult,
+    RegistryUpdateRequest as RegistryUpdateRequest,
+    ValidateRequest as ValidateRequest,
+    ValidateResponse as ValidateResponse,
+)
 
 from backend.core.config import config
 from backend.core.gguf_validator import (
@@ -35,8 +52,11 @@ from backend.core.gguf_validator import (
     list_gguf_files,
     validate_gguf,
 )
+from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
+from backend.core.url_guard import assert_not_metadata_url
+from backend.core.url_guard_httpx import pinned_async_client
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -45,58 +65,23 @@ router = APIRouter()
 # SSRF guard — H-10
 # ---------------------------------------------------------------------------
 
-_GGUF_BLOCKED_PRIVATE = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),  # link-local / AWS metadata
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-]
-
-
-_BLOCKED_HOSTNAMES = frozenset(
-    {
-        "localhost",
-        "ip6-localhost",
-        "ip6-loopback",
-        "127.0.0.1",
-        "::1",
-    }
-)
-
 
 def _validate_gguf_url(url: str) -> str:
     """Raise ValueError if url is not a safe https:// or hf:// URL.
 
-    Blocks file://, http://, and direct connections to private/reserved IPs
-    or loopback hostnames.
-    DNS rebinding is out of scope — only the scheme, literal-IP, and
-    known-loopback-hostname checks are enforced here.
+    Delegates to the shared SSRF guard (``backend/core/url_guard``) rather than a
+    bespoke duplicate (#1151): it rejects non-https schemes, private/loopback/
+    link-local IP literals (incl. alternate numeric encodings + CGNAT that the
+    old bespoke list missed), AND — via ``resolve_dns`` — a hostname that resolves
+    to an internal address (DNS-rebinding-to-private, #1102). ``hf://`` shorthand
+    is resolved later by ``resolve_gguf_url``. ``UrlNotAllowed`` is a
+    ``ValueError`` subclass, so existing ``except ValueError`` callers are unchanged.
     """
     if url.startswith("hf://"):
         return url  # handled by resolve_gguf_url in gguf_validator
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme != "https":
-        raise ValueError(
-            f"GGUF URL must use https:// (got: {parsed.scheme!r}). "
-            "file://, http://, and other schemes are not permitted."
-        )
-    hostname = parsed.hostname or ""
-    # Block known loopback hostnames (covers the DNS-name bypass)
-    if hostname.lower() in _BLOCKED_HOSTNAMES:
-        raise ValueError("GGUF URL must not target localhost or loopback addresses")
-    try:
-        addr = ipaddress.ip_address(hostname)
-        for net in _GGUF_BLOCKED_PRIVATE:
-            if addr in net:
-                raise ValueError(f"GGUF URL targets a private or reserved IP address: {hostname}")
-    except ValueError as exc:
-        if "GGUF" in str(exc):
-            raise
-        # hostname is a DNS name, not a bare IP — allow it
-        # (DNS rebinding mitigation is out of scope for this guard)
+    from backend.core.url_guard import assert_allowed_url
+
+    assert_allowed_url(url, allowed_hosts=None, resolve_dns=True)
     return url
 
 
@@ -126,73 +111,6 @@ def _models_dir() -> Path:
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
-
-
-class GGUFFileInfo(BaseModel):
-    filename: str
-    path: str
-    size_mb: float
-    valid: bool
-    gguf_version: int | None
-    error: str | None
-    warning: str | None
-
-
-class ValidateRequest(BaseModel):
-    path: str = Field(..., description="Absolute path to the GGUF file on the server")
-
-
-class ValidateResponse(BaseModel):
-    valid: bool
-    size_mb: float
-    gguf_version: int | None
-    error: str | None
-    warning: str | None
-
-
-class DownloadRequest(BaseModel):
-    url: str = Field(
-        ...,
-        description=(
-            "HuggingFace shorthand (hf://org/repo/file.gguf), "
-            "HuggingFace URL, or any direct HTTPS download URL"
-        ),
-    )
-    filename: str | None = Field(
-        None,
-        description="Override the destination filename. Defaults to the URL filename.",
-    )
-
-
-class AgentConfig(BaseModel):
-    backend: str = Field(
-        "ollama",
-        description="Inference backend: 'ollama' or 'llamacpp'",
-    )
-    # Ollama settings
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "phi4-mini"
-    # llama.cpp settings
-    llamacpp_url: str = "http://localhost:8081"
-    llamacpp_model_file: str = ""  # filename inside models_dir
-    # Agent behaviour
-    confidence_threshold: float = 0.85
-    auto_restart: bool = True
-    notify_on_auto_fix: bool = True
-    notify_on_escalation: bool = True
-    ntfy_topic: str = "slop"
-
-
-class EvaluateResult(BaseModel):
-    passed: bool
-    backend: str
-    model: str
-    inference_seconds: float
-    parsed_correctly: bool
-    identified_error: bool
-    response_preview: str
-    score: str  # pass | warn | fail
-    reason: str | None
 
 
 # Diagnostic test prompt — contains a planted error
@@ -246,6 +164,7 @@ def list_models() -> list[GGUFFileInfo]:
         ollama_url = cfg.get("ollama_url", "http://localhost:11434")
         if not ollama_url.startswith(("http://", "https://")):
             raise ValueError(f"Unsupported Ollama URL scheme: {ollama_url}")
+        assert_not_metadata_url(ollama_url, resolve_dns=False)  # SSRF floor #1193 (caught below)
 
         req = _req.Request(  # noqa: S310  # scheme validated above
             f"{ollama_url}/api/tags",
@@ -287,10 +206,12 @@ def validate_model_file(req: ValidateRequest) -> ValidateResponse:
     Path is restricted to the configured GGUF models directory to prevent
     directory traversal attacks — callers cannot read arbitrary files.
     """
-    requested = Path(req.path).resolve()
     models_dir = _models_dir().resolve()
-    # Ensure the path stays within the allowed models directory
+    # Resolve + containment-check together: Path(...).resolve() itself raises ValueError on
+    # an invalid path (e.g. an embedded null byte), which must surface as a 400 like a
+    # traversal attempt — not an uncaught 500 (#1197). relative_to raises the same type.
     try:
+        requested = Path(req.path).resolve()
         requested.relative_to(models_dir)
     except ValueError as e:
         raise HTTPException(
@@ -332,7 +253,9 @@ def download_model_sse(
     try:
         _validate_gguf_url(url)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400, detail=safe_detail(exc, "Invalid or disallowed model URL.", log=log)
+        ) from exc
 
     event_queue: queue.Queue[Any] = queue.Queue()
 
@@ -411,7 +334,8 @@ def download_model_sse(
 
 
 @router.post("/gguf/download")
-def download_model(req: DownloadRequest) -> dict[str, Any]:
+@limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; heavy external GGUF download (#1205 external-fetch tier)
+def download_model(request: Request, req: DownloadRequest) -> dict[str, Any]:
     """Start a GGUF download (POST version for non-EventSource clients).
 
     For browser UI use GET /gguf/download?url=...&filename=... with EventSource.
@@ -421,7 +345,9 @@ def download_model(req: DownloadRequest) -> dict[str, Any]:
     try:
         _validate_gguf_url(req.url)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400, detail=safe_detail(exc, "Invalid or disallowed model URL.", log=log)
+        ) from exc
 
     fname = req.filename or req.url.split("/")[-1].split("?")[0]
     dest = _models_dir() / fname
@@ -437,7 +363,11 @@ def download_model(req: DownloadRequest) -> dict[str, Any]:
             "error": result.error if result else None,
         }
     except Exception as e:
-        return {"ok": False, "filename": fname, "error": str(e)}
+        return {
+            "ok": False,
+            "filename": fname,
+            "error": safe_detail(e, "Validation failed.", log=log),
+        }
 
 
 @router.delete("/gguf/{filename}")
@@ -452,6 +382,9 @@ def delete_model(filename: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Model file '{filename}' not found.")
 
     path.unlink()
+    from backend.core.llm_router import remove_model_from_registry
+
+    remove_model_from_registry(filename)
     log.info("Deleted model: %s", filename)
     return {"message": f"Model '{filename}' deleted."}
 
@@ -496,7 +429,8 @@ def set_agent_config(cfg: AgentConfig) -> AgentConfig:
 
 
 @router.post("/agent/evaluate", response_model=EvaluateResult)
-async def evaluate_model() -> EvaluateResult:
+@limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; LLM inference external call, heaviest (#1205 external-fetch tier)
+async def evaluate_model(request: Request) -> EvaluateResult:
     """Run a diagnostic evaluation prompt on the current agent model.
 
     Tests whether the configured model:
@@ -506,8 +440,6 @@ async def evaluate_model() -> EvaluateResult:
 
     Returns a structured score: pass / warn / fail.
     """
-    import httpx
-
     with StateDB() as db:
         raw = db.get_setting(_AGENT_CONFIG_KEY)
     cfg = AgentConfig(**json.loads(raw)) if raw else AgentConfig()
@@ -517,8 +449,11 @@ async def evaluate_model() -> EvaluateResult:
     parsed = {}
 
     try:
+        # SSRF floor (#1193): ollama_url/llamacpp_url are operator-settable (caught below).
+        eval_url = cfg.ollama_url if cfg.backend == "ollama" else cfg.llamacpp_url
+        assert_not_metadata_url(eval_url, resolve_dns=False)
         if cfg.backend == "ollama":
-            async with httpx.AsyncClient(timeout=90) as client:
+            async with pinned_async_client(timeout=90) as client:
                 resp = await client.post(
                     f"{cfg.ollama_url}/api/generate",
                     json={
@@ -532,7 +467,7 @@ async def evaluate_model() -> EvaluateResult:
                 raw_response = resp.json().get("response", "")
 
         else:  # llamacpp
-            async with httpx.AsyncClient(timeout=90) as client:
+            async with pinned_async_client(timeout=90) as client:
                 resp = await client.post(
                     f"{cfg.llamacpp_url}/completion",
                     json={
@@ -609,21 +544,6 @@ async def evaluate_model() -> EvaluateResult:
 # ---------------------------------------------------------------------------
 # Full hardware evaluation endpoint
 # ---------------------------------------------------------------------------
-
-
-class HardwareEvalStep(BaseModel):
-    label: str
-    status: str  # ok | warn | error | info
-    detail: str
-
-
-class HardwareEvalResult(BaseModel):
-    steps: list[HardwareEvalStep]
-    verdict: str  # can_run | runs_slowly | cannot_run
-    summary: str
-    recommended_quantization: str
-    estimated_tokens_per_second: int
-    inference_mode: str  # cpu | gpu
 
 
 @router.get("/evaluate-hardware")
@@ -805,30 +725,25 @@ def evaluate_hardware_for_model(
 # ---------------------------------------------------------------------------
 
 
-class PreflightResult(BaseModel):
-    ok: bool
-    filename: str
-    size_mb: float | None
-    content_type: str | None
-    requires_auth: bool
-    error: str | None
-
-
 @router.post("/gguf/preflight")
-def preflight_download(url: str) -> PreflightResult:
+@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; HEAD probe of user URL (#1205 external-fetch tier)
+def preflight_download(request: Request, url: str) -> PreflightResult:
     """HEAD request to validate a model URL before starting download.
 
     Detects: 401 (HuggingFace gated model), 404 (bad URL),
     wrong content-type (not a binary file), file size.
     """
-    import urllib.request as _req
     import urllib.error as _uerr
+
+    from backend.core.url_guard import pinned_urlopen
 
     # SSRF guard — H-10: reject non-https, private IPs, file:// etc.
     try:
         _validate_gguf_url(url)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400, detail=safe_detail(exc, "Invalid or disallowed model URL.", log=log)
+        ) from exc
 
     # Build headers
     headers = {"User-Agent": "SLOP/3.0"}
@@ -841,8 +756,9 @@ def preflight_download(url: str) -> PreflightResult:
     fname = url.split("/")[-1].split("?")[0]
 
     try:
-        request = _req.Request(url, method="HEAD", headers=headers)  # noqa: S310  # scheme validated by _validate_gguf_url above
-        with _req.urlopen(request, timeout=15) as resp:  # noqa: S310  # nosec B310  # scheme validated by _validate_gguf_url above
+        # SSRF-hardened seam: https-only + connect-time IP pin (re-validated per hop),
+        # closing the residual rebinding TOCTOU between _validate_gguf_url and the fetch.
+        with pinned_urlopen(url, headers=headers, method="HEAD", timeout=15) as resp:
             size_bytes = resp.headers.get("Content-Length")
             content_type = resp.headers.get("Content-Type", "")
             size_mb = round(int(size_bytes) / 1024 / 1024, 1) if size_bytes else None
@@ -883,7 +799,7 @@ def preflight_download(url: str) -> PreflightResult:
             size_mb=None,
             content_type=None,
             requires_auth=False,
-            error=f"HTTP {e.code}: {e.reason}",
+            error=safe_detail(e, "Could not fetch model metadata over HTTP.", log=log),
         )
     except Exception as e:
         return PreflightResult(
@@ -892,7 +808,7 @@ def preflight_download(url: str) -> PreflightResult:
             size_mb=None,
             content_type=None,
             requires_auth=False,
-            error=str(e),
+            error=safe_detail(e, "Preflight check failed.", log=log),
         )
 
 
@@ -924,7 +840,9 @@ def search_huggingface_models(q: str, limit: int = 10) -> list[dict[str, Any]]:
             for m in models
         ]
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"HuggingFace search failed: {e}") from e
+        raise HTTPException(
+            status_code=503, detail=safe_detail(e, "HuggingFace search failed.", log=log)
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -932,17 +850,22 @@ def search_huggingface_models(q: str, limit: int = 10) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-class FixRecord(BaseModel):
-    app_key: str
-    error_type: str
-    context: str
-    suggested_fix: str
-    outcome: str = "pending"  # pending | success | failure
-
-
 @router.post("/fix-history")
 def record_fix(rec: FixRecord) -> dict[str, Any]:
-    """Store an LLM-suggested fix and its outcome."""
+    """Store an LLM-suggested fix and its outcome.
+
+    ``outcome`` is constrained to the canonical ``fix_history.outcome`` vocabulary
+    (``FIX_HISTORY_OUTCOMES``, #1212) so this direct-INSERT path cannot write a label
+    the learning layer can't interpret — the same fail-closed posture as the
+    ``PUT /fix-history/{id}/outcome`` route below.
+    """
+    from backend.agent.fix_outcome import FIX_HISTORY_OUTCOMES
+
+    if rec.outcome not in FIX_HISTORY_OUTCOMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"outcome must be one of {sorted(FIX_HISTORY_OUTCOMES)}",
+        )
     with StateDB() as db:
         db.execute(
             """INSERT OR REPLACE INTO fix_history
@@ -993,29 +916,6 @@ def get_fix_history(app_key: str | None = None, limit: int = 20) -> list[dict[st
 # ---------------------------------------------------------------------------
 # LLM Model Registry — active models + task routing
 # ---------------------------------------------------------------------------
-
-
-class ModelRegistryEntry(BaseModel):
-    filename: str
-    display_name: str
-    enabled: bool
-    capabilities: list[str]
-    task_scores: dict[str, float]
-    priority: int
-    context_window: int
-    ollama_name: str | None
-    notes: str
-
-
-class RegistryUpdateRequest(BaseModel):
-    enabled: bool | None = None
-    display_name: str | None = None
-    capabilities: list[str] | None = None
-    task_scores: dict[str, float] | None = None
-    priority: int | None = None
-    context_window: int | None = None
-    ollama_name: str | None = None
-    notes: str | None = None
 
 
 @router.get("/registry")

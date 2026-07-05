@@ -22,7 +22,7 @@ env:
   TZ: "${TZ}"
   DB_CONNECTION: sqlite
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: speedtest
 

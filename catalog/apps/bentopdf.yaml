@@ -16,7 +16,7 @@ ports:
 volumes:
   config: /tmp/bentopdf
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: pdf
   # BentoPDF requires these headers for Office file conversion (SharedArrayBuffer)

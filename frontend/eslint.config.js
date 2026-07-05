@@ -71,27 +71,35 @@ export default [
     },
   },
   {
-    // Structural guard (CL-01 STREAM E / C3): ban raw `fetch('/api/...reset...')`
-    // in .vue files. Raw fetch to the platform reset endpoints silently omits the
-    // required confirm token (?confirm=RESET_PLATFORM / ?confirm=DESTROY_ALL_DATA),
-    // producing a silent 400 in production. Reset MUST go through the typed client
-    // (`platform.reset()` / `platform.resetFull()` in src/api/client.ts), which
-    // always attaches the token. This prevents the bug class from recurring.
-    files: ["src/**/*.vue"],
+    // Structural guard (#1219 / #1237, CL-01): ban raw `fetch('/api/…')` in views
+    // and composables. State-mutating and read calls MUST route through the typed
+    // client (`src/api/client.ts`) so URL/version/contract/auth-token handling stays
+    // centralized — a raw fetch silently bypasses all of it (the original bug class:
+    // a reset call that omitted its ?confirm token → silent 400). `src/api/**` is
+    // exempt (client.ts is the one legitimate home for fetch).
+    //
+    // GENUINE raw-Response carve-outs (status-code branching, body-read-on-non-ok,
+    // assume-success, install-orchestration polling) — where the throwing typed
+    // client would change behavior — annotate IN-PLACE with:
+    //   // eslint-disable-next-line no-restricted-syntax -- raw-response: <reason>
+    // The carve-out inventory + rationale per site: .claude/run/c-3po-1237-carveout-map.md.
+    // This annotation class is registered in tools/suppression_ledger.json.
+    files: ["src/**/*.{vue,ts}"],
+    ignores: ["src/api/**"],
     rules: {
       "no-restricted-syntax": [
         "error",
         {
           selector:
-            "CallExpression[callee.name='fetch'] > Literal[value=/\\/api\\/.*reset/]",
+            "CallExpression[callee.name='fetch'] > Literal[value=/\\/api\\//]",
           message:
-            "Do not call fetch('/api/.../reset') directly — use the typed client (platform.reset() / platform.resetFull()) so the required ?confirm token is attached. Raw fetch omits it → silent 400.",
+            "Do not call fetch('/api/…') directly — route it through the typed client (src/api/client.ts). If this site genuinely needs raw Response semantics, annotate it: // eslint-disable-next-line no-restricted-syntax -- raw-response: <reason> (see .claude/run/c-3po-1237-carveout-map.md).",
         },
         {
           selector:
-            "CallExpression[callee.name='fetch'] > TemplateLiteral:has(TemplateElement[value.raw=/\\/api\\/.*reset/])",
+            "CallExpression[callee.name='fetch'] > TemplateLiteral:has(TemplateElement[value.raw=/\\/api\\//])",
           message:
-            "Do not call fetch(`/api/.../reset`) directly — use the typed client (platform.reset() / platform.resetFull()) so the required ?confirm token is attached. Raw fetch omits it → silent 400.",
+            "Do not call fetch(`/api/…`) directly — route it through the typed client (src/api/client.ts). If this site genuinely needs raw Response semantics, annotate it: // eslint-disable-next-line no-restricted-syntax -- raw-response: <reason> (see .claude/run/c-3po-1237-carveout-map.md).",
         },
       ],
     },

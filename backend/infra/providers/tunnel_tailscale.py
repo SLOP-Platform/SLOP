@@ -9,7 +9,7 @@ Uses tsnet/the Tailscale Docker container to expose services on the tailnet.
 from __future__ import annotations
 
 import subprocess
-from typing import Any
+from typing import Any, ClassVar
 
 from backend.core import docker_client
 from backend.core.compose import compose_up, write_fragment
@@ -19,7 +19,7 @@ from backend.infra.base import InfraProvider, ProviderResult
 from backend.infra.registry import register
 
 CONTAINER_NAME = "tailscale"
-IMAGE = "tailscale/tailscale:latest"
+IMAGE = "tailscale/tailscale:latest"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
 
 
 @register
@@ -27,6 +27,46 @@ class TailscaleProvider(InfraProvider):
     slot = "tunnel"
     key = "tailscale"
     display_name = "Tailscale"
+
+    # MANIFEST-LESS infra provider (no catalog/apps/tailscale.yaml) — `fields` is
+    # hand-authored from this provider's own deploy() config knowledge
+    # (auth_key/hostname/routes/exit_node). Judgment-class gap: an infra slot
+    # provider with no catalog manifest has no manifest SSOT for its UI schema
+    # (see #975 follow-up).
+    fields: ClassVar[list[dict[str, Any]]] = [
+        {
+            "key": "auth_key",
+            "label": "Tailscale auth key",
+            "type": "text",
+            "secret": True,
+            "required": True,
+            "help": "Reusable auth key from tailscale.com/admin/settings/keys.",
+        },
+        {
+            "key": "hostname",
+            "label": "Tailnet hostname",
+            "type": "text",
+            "placeholder": "slop",
+            "required": False,
+            "help": "Advertised hostname on the tailnet (default: slop).",
+        },
+        {
+            "key": "routes",
+            "label": "Advertised routes",
+            "type": "text",
+            "placeholder": "192.168.1.0/24",
+            "required": False,
+            "help": "Comma-separated subnets to advertise. Leave blank for none.",
+        },
+        {
+            "key": "exit_node",
+            "label": "Advertise as exit node",
+            "type": "checkbox",
+            "required": False,
+            "help": "Allow this node to route tailnet traffic to the internet.",
+        },
+    ]
+    category = "networking"
 
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
         """Deploy the Tailscale container.
@@ -99,9 +139,9 @@ class TailscaleProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "tailscale",
-                    display_name="Tailscale",
+                    display_name=self.display_name,
                     tier=0,  # tier 0 = infrastructure layer
-                    category="networking",
+                    category=self.category,
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

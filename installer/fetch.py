@@ -1,21 +1,28 @@
 """installer/fetch.py — repo clone and version-pin step for the v5 installer.
 
-fetch_repo() clones the slop repo to install_dir at a pinned tag and
-removes .git/ so the installed copy is not a git working tree.
+fetch_repo() clones the slop repo to install_dir at a pinned tag,
+verifies tree integrity against a published per-release checksum manifest,
+and removes .git/ so the installed copy is not a git working tree.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
+import urllib.error
+import urllib.request
 from pathlib import Path
 from collections.abc import Callable
 
 from installer._run import run_required
 from installer.state import STATE_FILE_NAME, read_state_file
 
-_REPO_URL: str = "https://github.com/Nnyan/SLOP.git"
+_REPO_URL: str = "https://github.com/SLOP-Platform/SLOP.git"
 _V5_TAG_RE: re.Pattern = re.compile(r"^v5\.\d+\.\d+(-[\w.]+)?$")
+
+_TREE_CHECKSUMS_URL: str = (
+    "https://github.com/SLOP-Platform/SLOP/releases/download/{ref}/tree.checksums"
+)
 
 
 # ── Error classes ─────────────────────────────────────────────────────────────
@@ -31,6 +38,102 @@ class CloneNetworkError(FetchError):
 
 class VersionTagNotFoundError(FetchError):
     pass
+
+
+class TreeIntegrityError(FetchError):
+    pass
+
+
+# ── Tree integrity verification ───────────────────────────────────────────────
+
+
+def _is_version_tag(ref: str) -> bool:
+    return bool(_V5_TAG_RE.match(ref))
+
+
+def _download_tree_manifest(
+    ref: str,
+    *,
+    _urlopen=urllib.request.urlopen,
+) -> str:
+    url = _TREE_CHECKSUMS_URL.format(ref=ref)
+    try:
+        with _urlopen(url, timeout=30) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise TreeIntegrityError(
+                f"No tree checksum manifest found for release {ref} (HTTP 404).\n"
+                f"  URL: {url}\n"
+                f"  This release does not have integrity metadata.\n"
+                f"  Use --skip-tree-verify to proceed without tree integrity "
+                "verification."
+            ) from exc
+        raise TreeIntegrityError(
+            f"Could not download tree checksum manifest for {ref} "
+            f"(HTTP {exc.code}).\n"
+            f"  URL: {url}\n"
+            f"  Use --skip-tree-verify to proceed without tree integrity "
+            "verification."
+        ) from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise TreeIntegrityError(
+            f"Could not download tree checksum manifest for {ref} "
+            f"(network error).\n"
+            f"  URL: {url}\n"
+            f"  Check network connectivity or use --skip-tree-verify to "
+            "proceed without tree integrity verification."
+        ) from exc
+
+
+def _verify_tree_checksums(
+    manifest: str,
+    dest: Path,
+    *,
+    _run=run_required,
+) -> None:
+    resolved_dest = dest.resolve()
+    for line in manifest.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("  ", 1)
+        if len(parts) != 2:
+            continue
+        entry_path = parts[1].strip()
+        if entry_path.startswith("./"):
+            entry_path = entry_path[2:]
+        if entry_path.startswith("/") or ".." in Path(entry_path).parts:
+            raise TreeIntegrityError(
+                f"Rejecting tree checksum manifest: path escapes dest "
+                f"directory ({entry_path!r})."
+            )
+        resolved_entry = (resolved_dest / entry_path).resolve()
+        if resolved_dest not in resolved_entry.parents and resolved_entry != resolved_dest:
+            raise TreeIntegrityError(
+                f"Rejecting tree checksum manifest: path escapes dest "
+                f"directory ({entry_path!r})."
+            )
+
+    manifest_path = dest / ".tree-checksums-tmp"
+    try:
+        manifest_path.write_text(manifest)
+        result = _run(
+            ["sha256sum", "-c", str(manifest_path)],
+            cwd=str(dest),
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise TreeIntegrityError(
+                f"Tree integrity verification FAILED for {dest}.\n"
+                "  The cloned tree does not match the release checksum manifest.\n"
+                "  This may indicate a compromised repository or an incomplete "
+                "release.\n\n"
+                f"{result.stderr.strip()}"
+            )
+    finally:
+        if manifest_path.exists():
+            manifest_path.unlink()
 
 
 # ── I/O helpers (replaceable in tests via fetch_repo kwargs) ──────────────────
@@ -148,11 +251,14 @@ def fetch_repo(
     install_dir,
     version_ref: str | None = None,
     *,
+    verify_tree: bool = True,
     repo_url: str = _REPO_URL,
     list_remote_tags: Callable[[str], list] = _list_remote_tags,
     run_git_clone: Callable[[str, Path, str], None] = _run_git_clone,
     remove_git_dir: Callable[[Path], None] = _remove_git_dir,
     read_state: Callable = read_state_file,
+    download_tree_manifest: Callable[[str], str] = _download_tree_manifest,
+    verify_tree_checksums: Callable[[str, Path], None] = _verify_tree_checksums,
 ) -> str:
     """Clone the slop repo to install_dir at the given version_ref.
 
@@ -162,6 +268,11 @@ def fetch_repo(
     Idempotency: if install_dir already contains a state file whose
     slop_version matches the resolved tag, the clone is skipped and
     the resolved tag is returned immediately.
+
+    Tree integrity: when verify_tree is True and the resolved ref is a v5
+    version tag, the cloned tree is verified against a per-release checksum
+    manifest (tree.checksums) published alongside the release.  Verification
+    runs between clone and .git/ removal.  Use --skip-tree-verify to disable.
 
     The .git/ directory is removed after a successful clone — installed
     copies are not git working trees (ADR 0013 §1).
@@ -179,6 +290,11 @@ def fetch_repo(
         return resolved
 
     run_git_clone(repo_url, dest, resolved)
+
+    if verify_tree and _is_version_tag(resolved):
+        manifest = download_tree_manifest(resolved)
+        verify_tree_checksums(manifest, dest)
+
     remove_git_dir(dest)
 
     return resolved

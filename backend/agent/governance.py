@@ -83,8 +83,29 @@ def authorize(
 ) -> GateOutcome:
     """Decide whether *action_id* may execute for *app_key*, fail-closed.
 
-    This is the ONE gate every mutating caller routes through. Order (each step
-    fails closed — deny/ask, never act):
+    The shared mutating-action gate. SCOPE: the autonomous agent **remediation**
+    domain (self-heal / auto-fix / auto-update). As of #977/#981/#1236 EVERY known
+    mutating path in that domain routes through this single chokepoint: the scheduler
+    safe-fix path (scheduler.py `_authorize`), the REST apply path (api.py
+    `apply_fix`), registry-invoked actions (registry.py `invoke_action`), and — the
+    last remediation bypass, closed by #1236 (DToC consensus Q3 Option A,
+    `.claude/run/l3-37-981-dtoc-consensus.md`) — CVE auto-heal (cve_audit.py
+    `evaluate_cve_heal`, T2 RECOVERABLE / repull_restart, per-app pref as the
+    pre-approval, now counted against this gate's shared budget). The chokepoint set is
+    locked proven-red by `tests/test_agent_authorize_chokepoint.py` (leg 2 goes RED if a
+    new authorize() call-site in backend/agent appears unregistered).
+
+    NOT in this domain (do NOT mistake for bypasses):
+      * traefik platform-continuity self-restart (`scheduler.py::_check_and_restart_traefik`)
+        — ungated by design: self-heals SLOP's OWN ingress (not a catalog app), the
+        agent's primary keep-SLOP-running duty, a regime distinct from app-remediation.
+      * deferred install-flow app-to-app wiring (manifests/executor `run_pending_wiring`
+        → wiring.py, scheduler-retried) — a USER-initiated install's plumbing (rows are
+        written at install time, retried for reliability), not an autonomous remediation
+        decision. Whether that retry path warrants its own governance (kill-switch /
+        rate-limit) is tracked separately (#1252), out of #977 scope.
+
+    Order (each step fails closed — deny/ask, never act):
 
       1. **ADVISORY** operational level ⇒ never act (deny).
       2. **T3 (irreversible / always-ask)** ⇒ requires a valid authz-bound
@@ -176,7 +197,10 @@ def _budget_open(app_key: str) -> tuple[bool, str]:
 
         glob = check_circuit(cap=10)
         if not glob.open:
-            return False, f"global autofix budget closed ({glob.reason}: {glob.fixes_last_hour}/{glob.cap})"
+            return (
+                False,
+                f"global autofix budget closed ({glob.reason}: {glob.fixes_last_hour}/{glob.cap})",
+            )
         per_app = check_app_circuit(app_key, cap=5)
         if not per_app.open:
             return (

@@ -51,7 +51,7 @@ volumes:
 env:
   SNAPRAID_CONFIG: /etc/snapraid.conf
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: snapraid
 

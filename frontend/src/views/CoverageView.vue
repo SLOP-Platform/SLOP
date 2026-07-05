@@ -493,6 +493,7 @@ async function refresh() {
   loading.value = true
   error.value = null
   try {
+    // eslint-disable-next-line no-restricted-syntax -- raw-response: unversioned (/api/coverage is not under /api/v1 = client BASE)
     const r = await fetch('/api/coverage')
     if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`)
     data.value = await r.json()

@@ -51,8 +51,8 @@ def get_provider(slot: str, key: str) -> InfraProvider:
 
 
 def list_providers(slot: str | None = None) -> list[dict[str, str]]:
-    _ensure_providers_registered()
     """List all registered providers, optionally filtered by slot."""
+    _ensure_providers_registered()
     result = []
     for (s, k), cls in _REGISTRY.items():
         if slot is None or s == slot:
@@ -244,7 +244,7 @@ class SetActiveResult:
 def set_active(slot: str, key: str, config: dict[str, Any]) -> SetActiveResult:
     """Activate a provider in a **stateless** slot — config-only, no migration.
 
-    Stateless slots (slot_kind == "stateless": vpn, management, dashboard) hold no
+    Stateless slots (slot_kind == "stateless": vpn, management, dashboard, reverse_proxy) hold no
     SLOP-migratable state. Switching providers is a plain redeploy: remove the
     current provider (if any), then deploy the new one. There is no
     snapshot → deploy-alongside → migrate → verify → remove dance — that ceremony
@@ -262,16 +262,23 @@ def set_active(slot: str, key: str, config: dict[str, Any]) -> SetActiveResult:
         result.add("lookup", "error", f"Unknown slot '{slot}'.")
         return result
     if contract.slot_kind != "stateless":
-        # Fail-closed: refuse to config-swap a slot that carries state. The whole
-        # point of the two-engine split is that a stateful slot routes through the
-        # migration-preserving swap_slot, never this shortcut.
+        # Fail-closed: set_active only governs stateless slots. The two-engine split
+        # means a STATEFUL slot must route through the migration-preserving swap_slot
+        # (never this shortcut), and a SELECTION slot (e.g. llm) is registry-backed —
+        # its providers are simultaneously available and chosen per-request, so it has
+        # no host-mutating "active" provider for either engine to set.
         result.ok = False
-        result.add(
-            "guard",
-            "error",
-            f"Slot '{slot}' is stateful — use swap_slot() so its state is migrated, "
-            "not set_active().",
-        )
+        if contract.slot_kind == "selection":
+            msg = (
+                f"Slot '{slot}' is a selection slot — its providers are selected "
+                f"per-request from the router registry, not deployed via set_active()."
+            )
+        else:
+            msg = (
+                f"Slot '{slot}' is stateful — use swap_slot() so its state is "
+                f"migrated, not set_active()."
+            )
+        result.add("guard", "error", msg)
         return result
 
     try:
@@ -441,53 +448,32 @@ def _complete_migration(migration_id: int | None, status: str, error: str | None
 
 
 def _ensure_providers_registered() -> None:
-    """Import all provider modules and register them — idempotent."""
-    if ("auth", "tinyauth") in _REGISTRY:
-        return  # already registered
-    # pylint: disable=import-outside-toplevel
-    from backend.infra.providers.auth_tinyauth import TinyauthProvider
-    from backend.infra.providers.tunnel_cloudflare import CloudflareTunnelProvider
-    from backend.infra.providers.tunnel_tailscale import TailscaleProvider
-    from backend.infra.providers.vpn_gluetun import GluetunProvider
-    from backend.infra.providers.dashboard_homepage import HomepageProvider
-    from backend.infra.providers.dashboard_glance import GlanceDashboardProvider
-    from backend.infra.providers.management_portainer import PortainerProvider
-    from backend.infra.providers.auth_authelia import AutheliaProvider
-    from backend.infra.providers.tunnel_headscale import HeadscaleProvider
-    from backend.infra.providers.management_alternatives import (
-        DockhandProvider,
-        DockgeProvider,
-        KomodoProvider,
-        PortainerBEProvider,
-    )
+    """Import all provider modules and validate them — idempotent.
 
-    # The imports above are what trigger each provider class definition. The
-    # registration loop iterates those same symbols directly — there is no longer
-    # a separate hand-maintained class list to drift out of sync with the imports
-    # (one of the three implicit slot lists the SLOT_CONTRACTS SSOT collapses).
-    _provider_classes = (
-        TinyauthProvider,
-        CloudflareTunnelProvider,
-        TailscaleProvider,
-        GluetunProvider,
-        HomepageProvider,
-        GlanceDashboardProvider,
-        PortainerProvider,
-        DockhandProvider,
-        DockgeProvider,
-        KomodoProvider,
-        PortainerBEProvider,
-        AutheliaProvider,
-        HeadscaleProvider,
-    )
-    for cls in _provider_classes:
-        # Fail-closed: a provider whose slot is not a declared contract slot is a
-        # registration error, not a silent add (the SLOT_CONTRACTS SSOT is the
-        # authority on what slots exist).
-        if cls.slot not in SLOT_CONTRACTS:
+    Derived (#993): importing the ``backend.infra.providers`` package GLOB-imports every
+    sibling provider module, each of which self-registers via the ``@register`` decorator —
+    so a new provider self-registers on drop-in. There is no longer a hand-maintained import
+    list OR a ``_provider_classes`` tuple to drift out of sync with the modules on disk (the
+    append-point parallel streams collided on; the old ``__init__`` list had already drifted,
+    omitting auth_authelia / tunnel_headscale). The fail-closed slot check then runs over
+    every registered provider class.
+    """
+    if ("auth", "tinyauth") in _REGISTRY:
+        return  # already registered (idempotent fast-path)
+    # pylint: disable=import-outside-toplevel
+    import importlib
+
+    # Import the providers package — its __init__ glob-imports every sibling provider module,
+    # each self-registering via @register. importlib (not a bare `import`) avoids an unused-
+    # import (F401) on a side-effect-only import.
+    importlib.import_module("backend.infra.providers")
+
+    # Fail-closed: a provider whose slot is not a declared contract slot is a registration
+    # error, not a silent add (the SLOT_CONTRACTS SSOT is the authority on what slots exist).
+    # Scoped to the provider package so a test-registered fake elsewhere is not validated here.
+    for (slot, _key), cls in list(_REGISTRY.items()):
+        if cls.__module__.startswith("backend.infra.providers") and slot not in SLOT_CONTRACTS:
             raise ValueError(
-                f"Provider {cls.__name__} declares unknown slot '{cls.slot}'. "
+                f"Provider {cls.__name__} declares unknown slot '{slot}'. "
                 f"Known slots (backend/infra/slots.py): {sorted(SLOT_CONTRACTS)}"
             )
-        # registry stores classes; instantiation is gated by get_provider().
-        _REGISTRY[(cls.slot, cls.key)] = cls

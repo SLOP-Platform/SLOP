@@ -999,7 +999,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useToast } from '@/composables/useToast'
-import { models, health } from '../api/client'
+import { models, health, settings } from '../api/client'
 import type { GGUFModel, RecommendedModel } from '../api/client'
 
 const installedModels = ref<GGUFModel[]>([])
@@ -1107,23 +1107,18 @@ async function saveOllamaUrl() {
     params.set('ollama_url', ollamaUrlInput.value || providerUrl(inferenceProvider.value))
     if (providerApiKey.value) params.set('api_key', providerApiKey.value)
     if (providerModel.value)  params.set('model',   providerModel.value)
-    const r = await fetch(`/api/v1/health/agent-config?${params}`, { method: 'PUT' })
-    if (r.ok) {
-      toast.success('Provider config saved.')
-      await doPing()
-  // Check if cloud LLM is configured (agent may work via cloud even if Ollama offline)
-  try {
-    const r = await fetch('/api/v1/settings')
-    const d = await r.json()
-    const cfg = JSON.parse(d.llm_agent_config || '{}')
-    if (cfg.provider && cfg.provider !== 'ollama' && cfg.provider !== 'none' && cfg.api_key) {
-      cloudLLMConfigured.value = true
-      cloudLLMProvider.value = cfg.provider
-    }
-  } catch { /* intentional: non-fatal */ }
-    } else {
-      toast.error('Could not save provider config.')
-    }
+    await health.setAgentConfig(params.toString())
+    toast.success('Provider config saved.')
+    await doPing()
+    // Check if cloud LLM is configured (agent may work via cloud even if Ollama offline)
+    try {
+      const d = await settings.get()
+      const cfg = JSON.parse((d.llm_agent_config as string) || '{}')
+      if (cfg.provider && cfg.provider !== 'ollama' && cfg.provider !== 'none' && cfg.api_key) {
+        cloudLLMConfigured.value = true
+        cloudLLMProvider.value = cfg.provider
+      }
+    } catch { /* intentional: non-fatal */ }
   } catch (e) {
     toast.error('Save failed.', String(e))
   } finally {
@@ -1150,9 +1145,7 @@ function capColor(cap: string): string {
 
 async function loadHistory() {
   try {
-    const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 10000)
-    const r = await fetch('/api/v1/models/routing-log?limit=40', { signal: ctrl.signal })
-    if (r.ok) routingLog.value = await r.json()
+    routingLog.value = await models.routingLog(40)
   } catch { /* intentional: non-fatal */ }
 }
 
@@ -1166,8 +1159,7 @@ function formatAge(ts: number): string {
 
 async function loadRegistry() {
   try {
-    const r = await fetch('/api/v1/models/registry')
-    if (r.ok) registry.value = await r.json()
+    registry.value = await models.registry()
   } catch { /* intentional: non-fatal */ }
   registryLoaded.value = true
 }
@@ -1184,11 +1176,7 @@ async function enableModel(m: any) {
   } else {
     // Auto-register + enable
     try {
-      await fetch(`/api/v1/models/registry/${encodeURIComponent(m.filename)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true }),
-      })
+      await models.updateRegistryModel(m.filename, { enabled: true })
       await loadRegistry()
       toast.success(`${m.filename} enabled for routing.`)
     } catch (e) {
@@ -1200,12 +1188,7 @@ async function enableModel(m: any) {
 async function toggleModel(m: any) {
   m.enabled = !m.enabled
   try {
-    const r = await fetch(`/api/v1/models/registry/${encodeURIComponent(m.filename)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: m.enabled }),
-    })
-    const d = await r.json()
+    const d = await models.updateRegistryModel(m.filename, { enabled: m.enabled })
     if (d.routing_table) registry.value.routing_table = d.routing_table
     registry.value.enabled_count = registry.value.models.filter((x: any) => x.enabled).length
     toast.success(m.enabled ? `${m.display_name} enabled` : `${m.display_name} disabled`)
@@ -1216,18 +1199,17 @@ async function toggleModel(m: any) {
 }
 
 async function updatePriority(m: any, priority: number) {
+  const prevPriority = m.priority
   m.priority = priority
   try {
-    const r = await fetch(`/api/v1/models/registry/${encodeURIComponent(m.filename)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority }),
-    })
-    const d = await r.json()
+    const d = await models.updateRegistryModel(m.filename, { priority })
     if (d.routing_table) registry.value.routing_table = d.routing_table
     // Re-sort models by priority
     registry.value.models.sort((a: any, b: any) => a.priority - b.priority)
-  } catch { /* intentional: non-fatal */ }
+  } catch (e) {
+    m.priority = prevPriority // roll back the optimistic update on error
+    toast.error('Could not update priority.', String(e))
+  }
 }
 
 const _iconUrlCache = new Map<string, string>()
@@ -1265,7 +1247,11 @@ async function refreshModels() {
 }
 
 async function removeModel(filename: string) {
-  await models.remove(filename).catch(() => {})
+  try {
+    await models.remove(filename)
+  } catch (e) {
+    toast.error('Could not delete model.', String(e))
+  }
   await refreshModels()
 }
 
@@ -1282,8 +1268,7 @@ async function evaluateAgent() {
         : installedModels.value[0]
     const modelSizeGb = sel ? sel.size_mb / 1024 : 4.0
 
-    const res = await fetch(`/api/v1/models/evaluate-hardware?model_size_gb=${modelSizeGb.toFixed(1)}`)
-    const data = await res.json()
+    const data = await models.evaluateHardware(Number(modelSizeGb.toFixed(1)))
     evalSteps.value = data.steps ?? []
     evalSummary.value = data.summary ?? ''
     evalVerdict.value = data.verdict ?? ''
@@ -1300,9 +1285,7 @@ async function evaluateAgent() {
 async function doPing() {
   pinging.value = true
   try {
-    const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 8000)
-    const r = await fetch('/api/v1/health/llm-ping', { signal: ctrl.signal })
-    ping.value = await r.json()
+    ping.value = await health.llmPing()
     if (ping.value?.ollama_url) ollamaUrlInput.value = ping.value.ollama_url
   } catch { ping.value = null }
   pinging.value = false
@@ -1311,15 +1294,13 @@ async function doPing() {
 async function runAgent() {
   runningAgent.value = true
   try {
-    const r = await fetch('/api/v1/health/run', { method: 'POST' })
-    const d = await r.json()
+    const d = await health.runCycle()
     agentStatus.value = await health.llmAgent()
     await doPing()
   // Check if cloud LLM is configured (agent may work via cloud even if Ollama offline)
   try {
-    const r = await fetch('/api/v1/settings')
-    const d = await r.json()
-    const cfg = JSON.parse(d.llm_agent_config || '{}')
+    const d = await settings.get()
+    const cfg = JSON.parse((d.llm_agent_config as string) || '{}')
     if (cfg.provider && cfg.provider !== 'ollama' && cfg.provider !== 'none' && cfg.api_key) {
       cloudLLMConfigured.value = true
       cloudLLMProvider.value = cfg.provider
@@ -1350,8 +1331,7 @@ async function runPreflight() {
   preflighting.value = true
   preflight.value = null
   try {
-    const res = await fetch(`/api/v1/models/gguf/preflight?url=${encodeURIComponent(customUrl.value)}`, { method: 'POST' })
-    preflight.value = await res.json()
+    preflight.value = await models.ggufPreflight(customUrl.value)
   } catch (e) {
     preflight.value = { ok: false, error: String(e) }
   } finally {
@@ -1402,8 +1382,7 @@ async function searchHF() {
   searching.value = true
   hfResults.value = []
   try {
-    const res = await fetch(`/api/v1/models/hf/search?q=${encodeURIComponent(hfQuery.value)}`)
-    hfResults.value = await res.json()
+    hfResults.value = await models.hfSearch(hfQuery.value)
   } catch { /* intentional: non-fatal */ }
   finally { searching.value = false }
 }
@@ -1412,12 +1391,7 @@ async function validateLocal() {
   validatingLocal.value = true
   localValidation.value = null
   try {
-    const res = await fetch('/api/v1/models/gguf/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: localPath.value }),
-    })
-    localValidation.value = await res.json()
+    localValidation.value = await models.validate(localPath.value)
     if (localValidation.value?.valid) await refreshModels()
   } catch (e) {
     localValidation.value = { valid: false, error: String(e) }
@@ -1460,9 +1434,8 @@ function downloadModel(m: RecommendedModel) {
   await doPing()
   // Check if cloud LLM is configured (agent may work via cloud even if Ollama offline)
   try {
-    const r = await fetch('/api/v1/settings')
-    const d = await r.json()
-    const cfg = JSON.parse(d.llm_agent_config || '{}')
+    const d = await settings.get()
+    const cfg = JSON.parse((d.llm_agent_config as string) || '{}')
     if (cfg.provider && cfg.provider !== 'ollama' && cfg.provider !== 'none' && cfg.api_key) {
       cloudLLMConfigured.value = true
       cloudLLMProvider.value = cfg.provider
@@ -1499,16 +1472,15 @@ onUnmounted(() => {
 onMounted(async () => {
   const [inst, rec, status, secrets] = await Promise.allSettled([
     models.list(), models.recommended(), health.llmAgent(),
-    fetch('/api/v1/settings/secrets').then(r => r.json())
+    settings.secrets()
   ])
   await loadRegistry()
   await loadHistory()
   await doPing()
   // Check if cloud LLM is configured (agent may work via cloud even if Ollama offline)
   try {
-    const r = await fetch('/api/v1/settings')
-    const d = await r.json()
-    const cfg = JSON.parse(d.llm_agent_config || '{}')
+    const d = await settings.get()
+    const cfg = JSON.parse((d.llm_agent_config as string) || '{}')
     if (cfg.provider && cfg.provider !== 'ollama' && cfg.provider !== 'none' && cfg.api_key) {
       cloudLLMConfigured.value = true
       cloudLLMProvider.value = cfg.provider
@@ -1520,14 +1492,11 @@ onMounted(async () => {
   if (status.status === 'fulfilled') agentStatus.value = status.value
   // Load current provider config
   try {
-    const cfgRes = await fetch('/api/v1/health/agent-config')
-    if (cfgRes.ok) {
-      const cfg = await cfgRes.json()
-      inferenceProvider.value = cfg.provider || 'ollama'
-      ollamaUrlInput.value    = cfg.ollama_url || providerUrl(cfg.provider || 'ollama')
-      if (cfg.api_key) providerApiKey.value = cfg.api_key
-      if (cfg.model)   providerModel.value  = cfg.model
-    }
+    const cfg = await health.agentConfig()
+    inferenceProvider.value = cfg.provider || 'ollama'
+    ollamaUrlInput.value    = cfg.ollama_url || providerUrl(cfg.provider || 'ollama')
+    if (cfg.api_key) providerApiKey.value = cfg.api_key
+    if (cfg.model)   providerModel.value  = cfg.model
   } catch { /* intentional: non-fatal */ }
   if (secrets.status === 'fulfilled') {
     const tokenInfo = secrets.value?.secrets?.HF_TOKEN

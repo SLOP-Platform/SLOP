@@ -9,15 +9,19 @@ GET  /api/platform/wizard/steps    — list of steps with descriptions
 """
 
 from __future__ import annotations
-import re
 import threading as _threading
 import time as _time
 import uuid as _uuid
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
+# WizardRequest extracted to platform_schemas.py (#1302 linecount drain).
+# Re-exported so the wizard route bodies + `from backend.api.platform import
+# WizardRequest` (tests) resolve unchanged.
+from backend.api.platform_schemas import WizardRequest as WizardRequest
+from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.platform.wizard import (
@@ -25,6 +29,7 @@ from backend.platform.wizard import (
     run_wizard,
     validate_wizard,
 )
+from backend.api.contract import confirm_token
 from backend.api.rate_limit import limiter
 from backend.api.jobs_store import (
     load_ollama_job as _load_ollama_job_from_db,
@@ -32,7 +37,6 @@ from backend.api.jobs_store import (
     persist_job as _persist_job,
 )
 
-_NETWORK_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -335,180 +339,6 @@ def restore_stack(stack_id: str) -> dict[str, Any]:
 
 
 # ── Request / Response models ─────────────────────────────────────────────
-
-
-class WizardRequest(BaseModel):
-    domain: str = Field(..., description="Base domain e.g. example.com")
-    secrets: dict[str, str] = Field(
-        default_factory=dict, description="Secrets from Stage 5: API tokens, generated passwords"
-    )
-    eab_kid: str = Field("", description="ZeroSSL EAB Key ID")
-    eab_hmac: str = Field("", description="ZeroSSL EAB HMAC Key")
-    ntfy_url: str = Field("http://ntfy:80", description="ntfy server URL")
-    ntfy_topic: str = Field("slop", description="ntfy topic")
-    ntfy_enabled: bool = Field(False, description="Enable ntfy notifications")
-    infra_selections: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Infra slot selections from Stage 3 — values may be str or list[str] (tunnel is multi-select)",
-    )
-    selected_stacks: list[str] = Field(
-        default_factory=list, description="Quick stack IDs from Stage 4"
-    )
-    llm_provider: str = Field("none", description="LLM provider: ollama|groq|cerebras|none")
-    groq_api_key: str = Field("", description="Groq API key if provider=groq")
-    config_root: str = Field(
-        "/var/lib/slop/config",
-        description="Absolute path for app config folders",
-    )
-    media_root: str = Field(
-        "/mnt/media",
-        description="Absolute path for media library",
-    )
-    puid: int = Field(
-        1000,
-        ge=1,
-        le=65534,
-        description="File owner UID for linuxserver containers (must not be 0/root)",
-    )
-    pgid: int = Field(
-        1000,
-        ge=1,
-        le=65534,
-        description="File owner GID for linuxserver containers (must not be 0/root)",
-    )
-    timezone: str = Field("America/Los_Angeles", description="TZ database name")
-    cert_resolver: str = Field("letsencrypt", description="Traefik cert resolver name")
-    network_name: str = Field("slop", description="Docker network name")
-    # TLS / DNS-01 settings
-    acme_email: str = Field(
-        "", description="Email for Let's Encrypt account (defaults to admin@domain)"
-    )
-
-    @field_validator("dns_provider")
-    @classmethod
-    def validate_dns_provider(cls, v: str) -> str:
-        from backend.core.compose import _PROVIDER_ENV_VARS
-
-        if v and v not in _PROVIDER_ENV_VARS:
-            known = ", ".join(sorted(_PROVIDER_ENV_VARS.keys()))
-            raise ValueError(f"Unknown DNS provider '{v}'. Supported providers: {known}")
-        return v or "cloudflare"
-
-    dns_provider: str = Field(
-        "cloudflare",
-        description=(
-            "DNS provider for ACME DNS-01 challenge. Required for wildcard certs. "
-            "Options: cloudflare, route53, namecheap, porkbun, digitalocean, gandi, "
-            "hetzner, linode, ovh, godaddy, duckdns, google, azure, desec, and 80+ more. "
-            "Full list: https://doc.traefik.io/traefik/https/acme/#providers"
-        ),
-    )
-    include_zerossl: bool = Field(
-        False,
-        description="Include ZeroSSL resolver (only needed when cert_resolver=zerossl)",
-    )
-
-    @field_validator("domain")
-    @classmethod
-    def domain_must_have_dot(cls, v: str) -> str:
-        v = v.strip().lower()
-        if "\n" in v or "\r" in v:
-            raise ValueError("domain must not contain newlines")
-        if "." not in v:
-            raise ValueError("Domain must contain at least one dot, e.g. 'example.com'")
-        return v
-
-    @field_validator("config_root", "media_root")
-    @classmethod
-    def must_be_absolute(cls, v: str) -> str:
-        if not v.startswith("/"):
-            raise ValueError("Path must be absolute (start with '/')")
-        return v
-
-    @field_validator("timezone")
-    @classmethod
-    def validate_timezone(cls, v: str) -> str:
-        if not v:
-            raise ValueError("Timezone is required. Example: 'America/Los_Angeles'.")
-        try:
-            from zoneinfo import available_timezones
-
-            if v not in available_timezones():
-                raise ValueError(
-                    f"'{v}' is not a valid IANA timezone name. "
-                    "Example: 'America/Los_Angeles'. "
-                    "Use the timezone dropdown to pick a valid zone."
-                )
-        except ImportError:
-            # zoneinfo is available in Python ≥ 3.9 (stdlib). If missing, the
-            # runtime is unexpectedly old — log at WARNING so it isn't invisible.
-            log.warning(
-                "zoneinfo not available — skipping IANA timezone validation in Pydantic model. "
-                "Upgrade to Python 3.9+ to enable this check."
-            )
-        return v
-
-    # ── Security validators ────────────────────────────────────────────────
-    # C-1 / C-2: EAB fields — base64url charset only, no newlines or YAML chars
-    @field_validator("eab_kid", "eab_hmac")
-    @classmethod
-    def no_injection_chars(cls, v: str) -> str:
-        if v and not re.match(r"^[A-Za-z0-9\-_=]+$", v):
-            raise ValueError(
-                "Invalid characters — EAB fields must be base64url only (A-Z a-z 0-9 - _ =)"
-            )
-        return v
-
-    # C-3: ACME email — proper format, no newlines
-    @field_validator("acme_email")
-    @classmethod
-    def valid_email(cls, v: str) -> str:
-        if v and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v.strip()):
-            raise ValueError("Invalid email format")
-        return v.strip() if v else v
-
-    # H-5: ntfy URL — must be http:// or https://, no newlines
-    @field_validator("ntfy_url")
-    @classmethod
-    def valid_url(cls, v: str) -> str:
-        if v and not re.match(r"^https?://[^\s\n\r]+$", v):
-            raise ValueError("Must be a valid http/https URL")
-        return v
-
-    # H-5b: ntfy_topic — alphanumeric, hyphens, underscores only [BR: input not sanitized before structured-file write]
-    @field_validator("ntfy_topic")
-    @classmethod
-    def ntfy_topic_safe(cls, v: str) -> str:
-        """Topic must be URL-safe: alphanumeric, hyphens, underscores only."""
-        import re as _re
-
-        if not _re.match(r"^[A-Za-z0-9_-]{1,64}$", v):
-            raise ValueError("ntfy_topic must be alphanumeric with hyphens/underscores, 1-64 chars")
-        return v
-
-    # H-6: cert_resolver — restrict to known enum values
-    @field_validator("cert_resolver")
-    @classmethod
-    def validate_cert_resolver(cls, v: str) -> str:
-        _valid = {"letsencrypt", "zerossl", "buypass", "staging"}
-        if v and v not in _valid:
-            raise ValueError(
-                "Unknown cert_resolver '" + v + "'. Allowed values: " + ", ".join(sorted(_valid))
-            )
-        return v
-
-    # M-7: network_name — allowlist (letters, digits, hyphen, underscore only)
-    @field_validator("network_name")
-    @classmethod
-    def network_name_safe(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("network_name must not be empty")
-        if not _NETWORK_NAME_RE.match(v):
-            raise ValueError(
-                "network_name may only contain letters, digits, hyphens, and underscores"
-            )
-        return v
 
 
 class StepInfo(BaseModel):
@@ -1041,6 +871,7 @@ def _remove_network(network: str = "slop") -> bool:
 
 
 @router.post("/reset")
+@confirm_token("RESET_PLATFORM")  # #1044 declarative shadow of the body `if confirm != ...` check
 @limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped (heavy mutation tier)
 def reset_platform(
     request: Request,
@@ -1163,6 +994,7 @@ def reset_platform(
 
 
 @router.post("/reset/full")
+@confirm_token("DESTROY_ALL_DATA")  # #1044 declarative shadow of the body `if confirm != ...` check
 @limiter.limit("5/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped (heavy mutation tier)
 def reset_platform_full(
     request: Request,
@@ -2063,8 +1895,8 @@ def wizard_setup_ollama(req: OllamaSetupRequest) -> dict[str, Any]:
                         phase="error",
                         done=True,
                         ok=False,
-                        errorDetail=str(e),
-                        message=f"Install error: {e}",
+                        errorDetail=safe_detail(e, "Install error.", log=log),
+                        message="Install error.",
                     )
                     return
             else:
@@ -2159,7 +1991,11 @@ def wizard_setup_ollama(req: OllamaSetupRequest) -> dict[str, Any]:
             return
         except Exception as e:
             _update(
-                phase="error", done=True, ok=False, errorDetail=str(e), message=f"Pull error: {e}"
+                phase="error",
+                done=True,
+                ok=False,
+                errorDetail=safe_detail(e, "Pull error.", log=log),
+                message="Pull error.",
             )
             return
 
@@ -2215,7 +2051,9 @@ def wizard_bcrypt_users(req: BcryptUsersRequest) -> dict[str, Any]:
             detail="bcrypt not installed. Run: pip install bcrypt",
         ) from err
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail=safe_detail(e, "Could not generate credentials.", log=log)
+        ) from e
 
 
 @router.post("/wizard/install-stacks")
@@ -2269,7 +2107,12 @@ async def wizard_install_stacks(req: WizardStacksRequest) -> dict[str, Any]:
                     ],
                 }
             except Exception as exc:
-                return {"key": app_key, "ok": False, "error": str(exc), "steps": []}
+                return {
+                    "key": app_key,
+                    "ok": False,
+                    "error": safe_detail(exc, "Install failed.", log=log),
+                    "steps": [],
+                }
 
     tasks = [_install_one(key) for key in stack_keys]
     results: list[dict[str, Any]] = await asyncio.gather(*tasks, return_exceptions=False)
@@ -2370,7 +2213,10 @@ def wizard_save_llm(req: WizardLLMRequest) -> dict[str, Any]:
             db.set_setting("llm_enabled", "true" if provider != "none" else "false")
         return {"ok": True, "message": f"AI monitoring configured: {provider}"}
     except Exception as e:
-        return {"ok": False, "message": str(e)}
+        return {
+            "ok": False,
+            "message": safe_detail(e, "Could not configure AI monitoring.", log=log),
+        }
 
 
 @router.get("/cloud-models")
@@ -2384,6 +2230,8 @@ async def get_cloud_models(provider: str, api_key: str = "") -> dict[str, Any]:
     Supported providers: openai, anthropic, openrouter, groq
     """
     import httpx as _httpx
+
+    from backend.core.url_guard_httpx import pinned_async_client
 
     # --- SSRF allowlist: only these URLs are ever contacted ---
     _PROVIDER_URLS: dict[str, tuple[str, str]] = {
@@ -2412,7 +2260,7 @@ async def get_cloud_models(provider: str, api_key: str = "") -> dict[str, Any]:
         headers["anthropic-version"] = "2023-06-01"
 
     try:
-        async with _httpx.AsyncClient(timeout=5.0) as client:
+        async with pinned_async_client(timeout=5.0) as client:
             r = await client.get(url, headers=headers)
             if r.status_code != 200:
                 return {"models": [], "error": f"Provider returned HTTP {r.status_code}"}
@@ -2425,7 +2273,7 @@ async def get_cloud_models(provider: str, api_key: str = "") -> dict[str, Any]:
     except _httpx.TimeoutException:
         return {"models": [], "error": "Request timed out after 5 s"}
     except Exception as exc:
-        return {"models": [], "error": str(exc)}
+        return {"models": [], "error": safe_detail(exc, "Could not list models.", log=log)}
 
 
 @router.get("/ollama-models")
@@ -2439,26 +2287,22 @@ async def get_ollama_models(ollama_url: str = "http://localhost:11434") -> dict[
     The wizard always targets the user's own machine; remote Ollama URLs
     that pass through this endpoint would allow scanning arbitrary hosts.
     """
-    import urllib.parse as _up
-    import httpx as _httpx
+    from backend.core.url_guard import UrlNotAllowed, assert_allowed_url
+    from backend.core.url_guard_httpx import pinned_async_client
 
-    # SSRF guard — only localhost targets allowed
-    _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "ip6-localhost"})
+    # SSRF guard — exact-host match via shared guard; loopback-only (allow_private).
+    _ALLOWED = frozenset({"localhost", "127.0.0.1", "::1", "ip6-localhost"})
     try:
-        parsed = _up.urlparse(ollama_url)
-        host = (parsed.hostname or "").lower().strip("[]")
-    except Exception as err:
-        raise HTTPException(status_code=400, detail="Invalid ollama_url") from err
-
-    if host not in _ALLOWED_HOSTS:
-        raise HTTPException(
-            status_code=400,
-            detail="ollama_url must target localhost (localhost, 127.0.0.1, or ::1)",
+        p = assert_allowed_url(
+            ollama_url, allowed_hosts=_ALLOWED, schemes=("http", "https"), allow_private=True
         )
+    except UrlNotAllowed as err:
+        raise HTTPException(status_code=400, detail="ollama_url must target localhost") from err
 
     try:
-        async with _httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"{ollama_url}/api/tags")
+        async with pinned_async_client(timeout=3.0) as client:
+            # Fetch from validated parts, not the raw user string.
+            r = await client.get(f"{p.scheme}://{p.netloc}/api/tags")
             if r.status_code == 200:
                 data = r.json()
                 return {"models": [m["name"] for m in data.get("models", [])], "live": True}
