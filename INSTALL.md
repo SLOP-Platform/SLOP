@@ -1,7 +1,7 @@
 # SLOP Installation Guide
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
+curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
 ```
 
 ## Prerequisites
@@ -25,7 +25,7 @@ immediately with a non-zero status and a human-readable error message.
 ## Quick install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
+curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
 ```
 
 `--install-docker=yes` installs Docker via the official convenience script
@@ -43,7 +43,7 @@ On success, the installer prints a summary to stdout and writes the same content
 Clone the repository to inspect `install.sh` before running it:
 
 ```bash
-git clone https://github.com/Nnyan/SLOP.git
+git clone https://github.com/SLOP-Platform/SLOP.git
 cd slop
 sudo ./install.sh --install-docker=yes
 ```
@@ -72,7 +72,7 @@ sudo ./install.sh --install-docker=no
 Pin to a specific release via pipe mode:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh \
   | sudo bash -s -- --install-docker=yes --version-ref=v5.0.0
 ```
 
@@ -111,7 +111,7 @@ If they differ it exits non-zero without modifying the system.
 sha256sum install.sh
 
 # Fetch the published checksum and compare
-curl -fsSL https://github.com/Nnyan/SLOP/releases/download/<tag>/install.sh.sha256
+curl -fsSL https://github.com/SLOP-Platform/SLOP/releases/download/<tag>/install.sh.sha256
 ```
 
 Replace `<tag>` with the release tag, for example `v5.0.0`. The two hash values must
@@ -249,7 +249,7 @@ The server has IPv6 configured but no working IPv6 route. curl prefers IPv6 and 
 immediately. Force IPv4 with the `-4` flag:
 
 ```bash
-curl -4 -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
+curl -4 -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh | sudo bash -s -- --install-docker=yes
 ```
 
 To check whether this is the cause: `curl -4 -I https://raw.githubusercontent.com` should

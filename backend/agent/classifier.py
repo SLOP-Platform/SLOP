@@ -31,6 +31,8 @@ import hashlib
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from backend.agent.taxonomy import DETECTION_PATTERNS, ErrorClass
 
@@ -165,7 +167,7 @@ async def _query_llm_for_diagnosis(prompt: str) -> str | None:
     """
     try:
         import json as _json
-        import httpx
+        from backend.core.url_guard_httpx import pinned_async_client
         from backend.core.state import StateDB
         from backend.health.checker import _load_provider_config
         from backend.agent.router.dispatch import route_and_dispatch
@@ -182,7 +184,7 @@ async def _query_llm_for_diagnosis(prompt: str) -> str | None:
         if not model:
             model = cfg.get("ollama_model", "phi4-mini")
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with pinned_async_client(timeout=30) as client:
             # route_and_dispatch routes every per-provider call through
             # _dispatch_llm_call (scrub preserved) and degrades to the legacy
             # single-provider path on empty chain / router error. Returns ''
@@ -301,7 +303,16 @@ def current_image_digest(container: str | None) -> str:
 
 
 def _enforce_enabled() -> bool:
-    """True iff the shadow gate is flipped to enforce the derived score."""
+    """True iff the shadow gate is flipped to enforce the derived score.
+
+    Two conditions must BOTH hold (#1088 leg 6 — the flip is gated by the promotion probe, not
+    merely preceded by it):
+      1. the ``agent_learning_enforce`` operator flag is truthy; AND
+      2. the promotion GATE has recorded a VERIFIED criterion — >= 5 independent advancing PASS
+         windows in ``.shadow-promotion-windows.json`` (``promotion_is_verified``). Absent that
+         recorded evidence the derived scorer stays in shadow even with the flag on (fail-closed:
+         the unsafe flip is impossible without GROUND proof the scorer beats the flat 0.95).
+    """
     try:
         from backend.core.state import StateDB
 
@@ -309,7 +320,22 @@ def _enforce_enabled() -> bool:
             raw = db.get_setting(LEARNING_ENFORCE_SETTING)
     except Exception:
         return False
-    return raw is not None and raw.strip().lower() in ("1", "true", "yes", "on")
+    flag_on = raw is not None and raw.strip().lower() in ("1", "true", "yes", "on")
+    if not flag_on:
+        return False
+    # Gate the flip on the recorded promotion verdict (leg 6). Best-effort: a missing/unreadable
+    # window file → not verified → stay shadow.
+    try:
+        from backend.agent.shadow_promotion import (
+            PROMOTION_WINDOWS_FILE,
+            load_promotion_windows,
+            promotion_is_verified,
+        )
+
+        repo_root = Path(__file__).resolve().parents[2]
+        return promotion_is_verified(load_promotion_windows(repo_root / PROMOTION_WINDOWS_FILE))
+    except Exception:
+        return False
 
 
 def evaluate_learned_confidence(
@@ -368,6 +394,68 @@ def evaluate_learned_confidence(
         )
 
 
+def derive_cache_confidence(app_key: str, signature_hash: str, *, image_digest: str = "") -> float:
+    """Evidence-ranked confidence for a fix_history pattern-library cache hit (#823).
+
+    The install path (`classify_with_llm`) and the health path (`_llm_diagnose`)
+    derived this IDENTICALLY and independently -- the duplication #823 flags. It is
+    centralised here so the shadow/enforce semantics can never silently diverge
+    between the two paths (which would make the SAME cached fix score differently
+    depending on who looked it up): derive the outcome-weighted, image_digest-aware
+    score (and log it to the shadow gate via evaluate_learned_confidence); return
+    the derived score in **enforce** mode, else the legacy flat
+    LEGACY_CACHE_CONFIDENCE (**shadow** mode).
+    """
+    learned = evaluate_learned_confidence(app_key, signature_hash, image_digest=image_digest or "")
+    return learned.score if learned.enforce else LEGACY_CACHE_CONFIDENCE
+
+
+def lookup_cached_fix(
+    conn: Any, signature_hash: str, *, image_digest: str | None = None
+) -> tuple[str, str] | None:
+    """Version- + supersede-aware fix-history cache *serve* decision (#1003 TIER-D).
+
+    The two pattern-library cache readers (install ``classify_with_llm`` Step 1 and health
+    ``checker_llm._llm_diagnose`` Step 0) previously both served on
+    ``WHERE signature_hash=? AND outcome='success' ORDER BY created_at DESC`` — i.e. "a success
+    EXISTS". That is the live F2 hazard: it **replays an old-image fix against a new image**
+    (version-blind) and **ignores a later failed_verification** (no supersede/veto). This
+    centralises the corrected serve decision so the two paths can never diverge (the same
+    Reuse principle #823 applied to confidence):
+
+    Serve the cached fix ONLY when the **most-recent** recorded outcome for this signature is
+    ``'success'`` — so a success superseded by a later failure is NOT replayed. When
+    ``image_digest`` is given (the health path resolves the running container's digest), the
+    lookup is constrained to that digest, so a fix recorded against a DIFFERENT image version
+    is not replayed across versions. ``image_digest=None`` (install path — no running
+    container to resolve a current digest) applies the supersede leg only.
+
+    Returns ``(suggested_fix, row_image_digest)`` on a serve, else ``None`` (→ caller falls
+    through to the LLM). Index-based row access so it works whether or not the caller set a
+    ``row_factory``. Best-effort: the caller keeps its own try/except for DB unavailability.
+    """
+    if image_digest:
+        row = conn.execute(
+            "SELECT suggested_fix, image_digest, outcome FROM fix_history "
+            "WHERE signature_hash=? AND image_digest=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (signature_hash, image_digest),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT suggested_fix, image_digest, outcome FROM fix_history "
+            "WHERE signature_hash=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (signature_hash,),
+        ).fetchone()
+    if not row:
+        return None
+    suggested_fix, row_digest, outcome = row[0], row[1], row[2]
+    if outcome != "success":
+        return None
+    return suggested_fix, (row_digest or "")
+
+
 async def classify_with_llm(
     error_text: str,
     app_key: str,
@@ -415,25 +503,22 @@ async def classify_with_llm(
     if db_path:
         try:
             conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT suggested_fix, image_digest FROM fix_history "
-                "WHERE signature_hash=? AND outcome='success' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (sig_hash,),
-            ).fetchone()
+            # Version-/supersede-aware serve decision via the shared helper (#1003 TIER-D):
+            # don't replay a fix superseded by a later failed_verification. No running
+            # container at install time, so the version (image_digest) leg is N/A here
+            # (supersede-only); the health path supplies the running digest.
+            served = lookup_cached_fix(conn, sig_hash)
             conn.close()
-            if row:
+            if served is not None:
+                cached_fix, cached_digest = served
                 # Evidence-ranked: derive an outcome-weighted, image_digest-aware
                 # score (demote-on-failure) and log it to the shadow gate. In
                 # shadow mode the legacy 0.95 still drives behaviour; only the
                 # enforce flag promotes the derived score to the return value.
-                cached_digest = row["image_digest"] if "image_digest" in row.keys() else ""
-                learned = evaluate_learned_confidence(
+                confidence = derive_cache_confidence(
                     app_key, sig_hash, image_digest=cached_digest or ""
                 )
-                confidence = learned.score if learned.enforce else LEGACY_CACHE_CONFIDENCE
-                return (error_class, row["suggested_fix"], confidence)
+                return (error_class, cached_fix, confidence)
         except Exception:  # noqa: S110  # best-effort DB lookup; fall through to LLM if unavailable
             pass
 

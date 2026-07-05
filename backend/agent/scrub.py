@@ -8,6 +8,38 @@ Public API
 ----------
 scrub(text, *, profile="cloud") -> str
 is_external(provider) -> bool
+
+Boundary role & disposition (#979)
+----------------------------------
+`scrub()` is the redaction boundary on the **LLM-diagnosis dispatch** path —
+`checker._dispatch_llm_call` (checker.py) and `checker_llm._llm_diagnose`
+(checker_llm.py) call it on cloud/external-provider prompts. (The separate
+agent **event-stream** egress has its own fail-closed gate,
+`spine_egress.send_for_review`.)
+
+This is a deliberate **defense-in-depth** layer, NOT a fail-closed allowlist —
+a denylist that redacts known internal-identifier classes (secrets, SLOP paths,
+container names, IPs, internal usernames). The residual softness of any denylist
+(a novel identifier format could slip) is accepted here rather than
+re-architecting the LLM prompt to an allowlist (disproportionate). Two real
+mechanisms bound the risk, all three now real:
+  * **GROUND probe (real — cannot silently rot):**
+    `scrub_probe.check_scrub_effectiveness` runs each health cycle, asserting
+    `scrub()` still catches every claimed category against a canonical corpus.
+    NOTE this validates scrub's *effectiveness*, not that the dispatch sites
+    *call* it.
+  * **Auditable opt-out (real — not a runtime toggle):** the `allow_raw` kwarg
+    (default False, scrub always) is the ADR-0021-sanctioned escape hatch —
+    using it requires a deliberate, reviewable code change, which IS the audit.
+  * **Application gate (real — built #1154):** a TIER_1 enforcement gate
+    (`check_llm_outbound_scrubbed`, warn-only) AST-verifies that
+    `_dispatch_llm_call` routes cloud text through `scrub()`, surfacing DRIFT if a
+    refactor silently drops the call on the cloud path. (Earlier this was a
+    phantom-gate citation — a #930-family gap; the gate is now real.)
+
+See ADR 0021 (docs/adr/0021-llm-anonymization.md). Disposition recorded for #979:
+documented as defense-in-depth; no logic change. The application gate ADR-0021
+cited is now built (#1154), so all three mechanisms above are real.
 """
 
 from __future__ import annotations

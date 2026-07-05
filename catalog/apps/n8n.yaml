@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 5678
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: n8n
 

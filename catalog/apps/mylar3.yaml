@@ -17,7 +17,7 @@ volumes:
   config: /config
   media: /data
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: mylar3
 

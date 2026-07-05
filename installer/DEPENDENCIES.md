@@ -238,7 +238,7 @@ Each failure mode has a detection signal, an operator-facing message template, a
 ### Dependency version unparseable
 
 - **Detection**: For deps with a floor (Docker engine, nodejs), the post-install check parses the version string. If parsing fails (e.g. an unexpected suffix, a missing newline, an empty stdout), the installer raises `DependencyVersionUnparseableError`.
-- **Operator message**: `Could not parse {dep} version from output: '{raw_output}'. This is unusual; please file a bug at https://github.com/Nnyan/SLOP/issues with the full installer log.`
+- **Operator message**: `Could not parse {dep} version from output: '{raw_output}'. This is unusual; please file a bug at https://github.com/SLOP-Platform/SLOP/issues with the full installer log.`
 - **Remediation**: Bug-class, not operator-actionable. The installer fails-fast rather than continuing on an unverified install.
 
 ## Idempotency Contract

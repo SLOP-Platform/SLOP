@@ -113,6 +113,17 @@ def should_suggest(action_type: str) -> bool:
     return level in ("suggest", "act")  # act implies suggest was already shown
 
 
+# ── Action handlers (id=1135 / #961-C12) ──────────────────────────────────
+# Every `_action_*` handler takes `_detail` (the underscore signals
+# intentionally-unused-by-design) but derives its operands ONLY from the
+# app_key + ground-truth DB/host state, NEVER from `_detail`. `_detail` is the
+# LLM diagnosis's free-text `suggested_fix` (see the execute_action callers in
+# api/health.py). Letting untrusted LLM free-text parameterize a privileged
+# `docker`/`systemctl` call would be an injection vector, so it is deliberately
+# not consumed here. The payload is NOT dropped silently: execute_action()
+# records it at the audit layer (`payload_preview` in the dispatch log). The
+# param is kept on every handler for a uniform `Callable[[str, str], ...]`
+# dispatch signature. Do not "wire `_detail` through" — that re-opens the hole.
 def _action_restart_container(app_key: str, _detail: str) -> dict[str, Any]:
     import subprocess
 

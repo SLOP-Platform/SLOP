@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from backend.core import docker_client
 from backend.core.compose import compose_up, write_fragment
@@ -20,7 +20,7 @@ from backend.infra.base import InfraProvider, ProviderResult
 from backend.infra.registry import register
 
 CONTAINER_NAME = "glance"
-IMAGE = "glanceapp/glance:latest"
+IMAGE = "glanceapp/glance:latest"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
 INTERNAL_PORT = 8080
 
 # Minimal starter glance.yml — user customises after deploy
@@ -58,6 +58,28 @@ class GlanceDashboardProvider(InfraProvider):
     key = "glance"
     display_name = "Glance"
 
+    # Derived from catalog/apps/glance.yaml via `add_app.py --as-provider --key glance`
+    # (manifest is the SSOT — #975). UI schema only; behaviour-neutral.
+    fields: ClassVar[list[dict[str, Any]]] = [
+        {
+            "key": "domain",
+            "label": "Public domain",
+            "type": "text",
+            "placeholder": "example.com",
+            "required": True,
+            "help": "Base domain — Glance is published at glance.<domain>.",
+        },
+        {
+            "key": "port",
+            "label": "Host port",
+            "type": "number",
+            "placeholder": "8080",
+            "required": False,
+            "help": "Host port to publish the UI on (container port is 8080).",
+        },
+    ]
+    category = "dashboard"
+
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
         with StateDB() as db:
             platform = db.get_platform()
@@ -80,7 +102,11 @@ class GlanceDashboardProvider(InfraProvider):
             "networks": [network],
             "ports": [f"{host_port}:{INTERNAL_PORT}"],
             "volumes": [
-                f"{glance_yml}:/app/glance.yml:ro",
+                # glance reads its config from /app/config/glance.yml (matches the
+                # catalog glance.yaml SSOT volume `config: /app/config`). Mounting the
+                # starter at /app/glance.yml left it unread → built-in default loaded
+                # (#1140, #975 child).
+                f"{glance_yml}:/app/config/glance.yml:ro",
                 "/etc/timezone:/etc/timezone:ro",
                 "/etc/localtime:/etc/localtime:ro",
                 "/var/run/docker.sock:/var/run/docker.sock:ro",
@@ -123,9 +149,9 @@ class GlanceDashboardProvider(InfraProvider):
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "glance",
-                    display_name="Glance",
+                    display_name=self.display_name,
                     tier=0,  # tier 0 = infrastructure layer
-                    category="dashboard",
+                    category=self.category,
                     status="running",
                     image=IMAGE,
                     image_tag="latest",

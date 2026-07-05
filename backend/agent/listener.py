@@ -133,7 +133,8 @@ def _write_pending_fix(
             status         = 'pending',
             diagnosis_class= excluded.diagnosis_class,
             created_at     = unixepoch(),
-            resolved_at    = NULL
+            resolved_at    = NULL,
+            fix_history_id = NULL
         """,
         (app_key, _CHECK_NAME, _ACTION_TYPE, problem, suggested_fix, confidence, diagnosis_class),
     )

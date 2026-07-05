@@ -110,8 +110,8 @@ def apply_fix(fix_id: int) -> Any:
     with StateDB() as db:
         row = db.execute(
             """
-            SELECT id, app_key, diagnosis_class, suggested_fix, fix_metadata,
-                   status
+            SELECT id, app_key, problem, diagnosis_class, suggested_fix,
+                   fix_metadata, status
             FROM   pending_fixes
             WHERE  id = ?
             """,
@@ -134,11 +134,50 @@ def apply_fix(fix_id: int) -> Any:
             },
         )
 
+    # 2.5 Governance gate (#977): route this REST apply through the SAME `authorize()`
+    #     chokepoint the scheduler uses (scheduler.py `_authorize`). Before this, the REST
+    #     path was the WORST bypass — an externally-triggerable HTTP endpoint that ran docker
+    #     restart/pull gated only on backoff + SAFE_FIX_TYPES, skipping authorize()'s shared
+    #     budget + ADVISORY/kill-switch level entirely (#977 / DToC consensus Q3 Option A:
+    #     `.claude/run/l3-37-981-dtoc-consensus.md`). A human-initiated REST apply is
+    #     `pre_approved=True` (the explicit apply IS the approval — mirrors the scheduler's
+    #     policy authority), so the default SUPERVISED flow still allows; but ADVISORY, the
+    #     kill-switch, and the shared per-app/global budget now bind. Fail-closed: any error
+    #     consulting the gate denies execution (never an unmetered bypass).
+    try:
+        from backend.agent.governance import authorize
+        from backend.agent.registry import tier_for
+        from backend.agent.types import OperationalLevel
+
+        with StateDB() as gdb:
+            op_level = OperationalLevel.from_setting(gdb.get_setting("agent_operational_level"))
+        gate = authorize(
+            action_id=fix_type,
+            app_key=row["app_key"],
+            tier=tier_for(fix_type),
+            operational_level=op_level,
+            pre_approved=True,
+        )
+    except Exception as gov_err:  # fail-closed — do not execute if the gate can't be consulted
+        log.warning("apply_fix: governance gate unavailable for fix_id=%s: %s", fix_id, gov_err)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"governance gate unavailable (fail-closed): {gov_err}"},
+        )
+    if not gate.allow:
+        log.info(
+            "apply_fix: governance gate denied fix_id=%s app=%s — %s",
+            fix_id,
+            row["app_key"],
+            gate.reason,
+        )
+        return JSONResponse(status_code=403, content={"detail": f"governance gate: {gate.reason}"})
+
     # 3. Execute the fix.
     import subprocess
 
     try:
-        result = apply_safe_fix(fix_id, row)
+        result = apply_safe_fix(fix_id, row, trigger="api", operational_level=op_level)
     except subprocess.CalledProcessError as exc:
         log.warning("apply_fix: docker command failed for fix_id=%s: %s", fix_id, exc)
         return JSONResponse(

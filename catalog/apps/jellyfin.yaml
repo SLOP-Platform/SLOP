@@ -55,7 +55,7 @@ gpu:
   nvidia: true
   amd: true
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: jellyfin
 

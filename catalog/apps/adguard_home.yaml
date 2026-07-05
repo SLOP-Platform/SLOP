@@ -29,7 +29,7 @@ volumes:
     - host: "{config_root}/adguard_home/work"
       container: /opt/adguardhome/work
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: adguard
 

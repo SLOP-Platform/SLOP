@@ -11,20 +11,28 @@ start_grace_s: 60
 ports:
   web: 4000
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: midarr
 
 companions:
   - key: midarr-db
-    image: postgres:15
+    image: postgres
+    image_tag: "15"
     container_name: midarr-db
     environment:
       POSTGRES_USER: midarr
       POSTGRES_PASSWORD: midarr
       POSTGRES_DB: midarr_db
     volumes:
-      - host: /var/lib/slop/midarr/postgres
+      # Postgres data under the wizard-configured config_root (was root-required
+      # /var/lib/slop/midarr/postgres, which the executor — running as the service
+      # user — cannot create under /var/lib). {config_root} is expanded by _expand_path
+      # and the dir is created by _build_companion_volumes; container path
+      # (/var/lib/postgresql/data) is distinct, so no same-path constraint. The
+      # postgres:15 entrypoint runs as root and chowns PGDATA to its own user, so the
+      # 0o777 host dir (no run_as_uid set, matching the hermes_agent sibling) is fine.
+      - host: "{config_root}/midarr/postgres"
         container: /var/lib/postgresql/data
 
 health:

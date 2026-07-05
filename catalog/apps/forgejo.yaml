@@ -4,8 +4,8 @@ description: Lightweight self-hosted Git service — Gitea-compatible forge with
 category: tools
 tier: 2
 
-image: codeberg.org/forgejo/forgejo:10
-image_tag: latest
+image: codeberg.org/forgejo/forgejo
+image_tag: "10"
 
 # Opt into the recoverability backup machinery: ms-backup can archive this
 # app's config volume, and the agent tracks its backup freshness.
@@ -15,7 +15,7 @@ ports:
   web: 3100
   ssh: 222
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: forgejo
 

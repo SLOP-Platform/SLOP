@@ -30,10 +30,16 @@ LAYERING (cycle-free):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 from backend.agent.types import ActionSpec, ActionTier
 from backend.core.logging import get_logger
+
+# Type-preserving decorator var: @register_probe returns the wrapped fn UNCHANGED, so the
+# decorated probe keeps its exact signature (no mypy untyped-decorator on the scheduler probes).
+_ProbeFn = TypeVar("_ProbeFn", bound=Callable[..., object])
 
 log = get_logger(__name__)
 
@@ -43,10 +49,27 @@ log = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
+# Registry entry KIND discriminator (#980 DToC Q1 — .claude/run/bb-8-980-dtoc-decision.md).
+# The cluster unified probes onto THIS table rather than a sibling registry; `kind`
+# is the field that lets one SSOT carry both action and probe rows. Action-domain
+# derivations (safe_fix_types / diagnosis_to_fix_type / executable_action_ids /
+# build_registry) filter to KIND_ACTION so probe rows can never leak into the
+# mutation/authorize path. Probe rows are consumed by the agent-domain coverage
+# gates (#984/#985/#1211) and the agreement-proof gate (#980 slice 2).
+KIND_ACTION = "action"
+KIND_PROBE = "probe"
+_VALID_KINDS = frozenset({KIND_ACTION, KIND_PROBE})
+
+
 @dataclass(frozen=True)
 class _SpecMeta:
-    """Handler-free description of a registry action: everything apply.py needs to
-    derive the taxonomy, without importing an executor."""
+    """Handler-free description of a registry entry: everything apply.py needs to
+    derive the taxonomy, without importing an executor.
+
+    ``kind`` discriminates action rows (the default — mutating operations that
+    flow through governance/apply) from probe rows (agent-domain health probes,
+    #980). Existing rows omit ``kind`` and default to :data:`KIND_ACTION`, so the
+    field is backward-compatible."""
 
     id: str
     tier: ActionTier
@@ -59,6 +82,14 @@ class _SpecMeta:
     handler_name: str | None
     verify_name: str | None
     rollback_name: str | None
+    # action|probe discriminator (#980). Defaults to action for back-compat.
+    kind: str = KIND_ACTION
+
+    def __post_init__(self) -> None:
+        if self.kind not in _VALID_KINDS:
+            raise ValueError(
+                f"_SpecMeta(id={self.id!r}): kind={self.kind!r} not in {sorted(_VALID_KINDS)}"
+            )
 
 
 # The canonical action table. Adding an action = one row here.
@@ -126,11 +157,77 @@ _META_BY_ID: dict[str, _SpecMeta] = {m.id: m for m in _SPEC_META}
 # ---------------------------------------------------------------------------
 
 
+def specs_for_kind(kind: str) -> tuple[_SpecMeta, ...]:
+    """All registry rows of *kind* (action|probe). #980 seam for consumers that
+    want one slice of the unified registry."""
+    return tuple(m for m in _SPEC_META if m.kind == kind)
+
+
+def action_specs() -> tuple[_SpecMeta, ...]:
+    """Action rows only (the mutation/governance domain)."""
+    return specs_for_kind(KIND_ACTION)
+
+
+# ---------------------------------------------------------------------------
+# Probe self-registration (#980 slice 2 — DToC Q2).
+# ---------------------------------------------------------------------------
+# Probes are READ-ONLY (T0/INVESTIGATE) post-cycle health entry points that live
+# in backend/health/scheduler.py. They self-register HERE via @register_probe so
+# the ONE registry module carries both kinds (Q1) while the declaration stays
+# INDEPENDENT of the scheduler's _POST_CYCLE_PROBES dispatch list — that
+# independence is what gives the agreement-proof gate teeth (it asserts the two
+# agree; if it built one FROM the other there would be no drift to catch).
+_PROBE_ROWS: list[_SpecMeta] = []
+_PROBE_IDS: set[str] = set()
+
+
+def register_probe(name: str, *, description: str = "") -> Callable[[_ProbeFn], _ProbeFn]:
+    """Decorator: register *name* as a KIND_PROBE row in the unified registry,
+    then return the wrapped function UNCHANGED (probes keep their plain call
+    signature for the scheduler). Probes are T0 read-only (no handler/verify/
+    rollback). Duplicate name → ValueError (no silent shadowing)."""
+
+    def _decorate(fn: _ProbeFn) -> _ProbeFn:
+        if name in _PROBE_IDS:
+            raise ValueError(f"register_probe: duplicate probe id {name!r}")
+        _PROBE_IDS.add(name)
+        _PROBE_ROWS.append(
+            _SpecMeta(
+                id=name,
+                tier=ActionTier.INVESTIGATE,  # T0 read-only
+                reversible=False,  # a probe mutates nothing — nothing to reverse
+                default_rate_limit=0,  # dispatched every cycle (backoff is the scheduler's job)
+                scopeable=False,
+                diagnosis_classes=(),
+                description=description,
+                handler_name=None,
+                verify_name=None,
+                rollback_name=None,
+                kind=KIND_PROBE,
+            )
+        )
+        return fn
+
+    return _decorate
+
+
+def probe_specs() -> tuple[_SpecMeta, ...]:
+    """Probe rows only (the agent-domain coverage/aging consumers — #984/#985/#1211).
+    Sourced from the @register_probe self-registration; populated once the modules
+    that declare probes (backend/health/scheduler.py) have been imported."""
+    return tuple(_PROBE_ROWS)
+
+
 def safe_fix_types() -> set[str]:
     """The set of fix_type ids the safe-apply tier knows about (T1/T2 + the
     declared env_var_format stub) — derived from the registry metadata so the
-    taxonomy can never drift from the registry (N1)."""
-    return {m.id for m in _SPEC_META if m.diagnosis_classes or m.handler_name}
+    taxonomy can never drift from the registry (N1). Action rows ONLY (#980):
+    probe rows never reach the apply path."""
+    return {
+        m.id
+        for m in _SPEC_META
+        if m.kind == KIND_ACTION and (m.diagnosis_classes or m.handler_name)
+    }
 
 
 def diagnosis_to_fix_type() -> dict[str, str]:
@@ -138,14 +235,16 @@ def diagnosis_to_fix_type() -> dict[str, str]:
     Single source of truth for the taxonomy (replaces the hand-maintained dict)."""
     out: dict[str, str] = {}
     for m in _SPEC_META:
+        if m.kind != KIND_ACTION:
+            continue
         for dc in m.diagnosis_classes:
             out[dc] = m.id
     return out
 
 
 def executable_action_ids() -> set[str]:
-    """Ids of actions with a wired handler (can actually mutate)."""
-    return {m.id for m in _SPEC_META if m.handler_name is not None}
+    """Ids of actions with a wired handler (can actually mutate). Action rows only (#980)."""
+    return {m.id for m in _SPEC_META if m.kind == KIND_ACTION and m.handler_name is not None}
 
 
 def all_spec_meta() -> tuple[_SpecMeta, ...]:
@@ -203,6 +302,8 @@ def build_registry() -> dict[str, ActionSpec]:
 
     wired: dict[str, ActionSpec] = {}
     for m in _SPEC_META:
+        if m.kind != KIND_ACTION:  # probe rows never wire an executor (#980)
+            continue
         wired[m.id] = ActionSpec(
             id=m.id,
             tier=m.tier,
@@ -335,19 +436,42 @@ def invoke_action(
             "message": outcome.reason,
         }
 
-    # (4) Dispatch.
+    # (4) Dispatch — wrapped in the agent-action audit trail (#1072): QUEUED before the
+    # handler fires, OUTCOME + best-effort notify after (both fail-open, never raise).
     assert spec.handler is not None  # guaranteed by (2)
+    from backend.agent.audit import notify_action, record_action_outcome, record_action_queued
+
+    run_id = record_action_queued(
+        trigger="chat", action_id=action_id, app_key=app_key, tier=int(spec.tier)
+    )
+    audit_status, audit_msg = "failed", ""
     try:
-        result = spec.handler(app_key, params)
-    except Exception as exc:  # never leak an executor exception to the seam
-        log.warning("invoke_action: handler raised for %s/%s: %s", action_id, app_key, exc)
-        return {
-            "ok": False,
-            "action_id": action_id,
-            "message": f"handler error: {exc}",
-        }
-    result.setdefault("action_id", action_id)
-    return result
+        try:
+            result = spec.handler(app_key, params)
+        except Exception as exc:  # never leak an executor exception to the seam
+            log.warning("invoke_action: handler raised for %s/%s: %s", action_id, app_key, exc)
+            audit_msg = f"handler error: {exc}"
+            return {
+                "ok": False,
+                "action_id": action_id,
+                "message": f"handler error: {exc}",
+            }
+        result.setdefault("action_id", action_id)
+        audit_status = "ok" if result.get("ok") else "failed"
+        audit_msg = str(result.get("message", ""))
+        return result
+    finally:
+        try:
+            record_action_outcome(run_id, status=audit_status, outcome_msg=audit_msg)
+            notify_action(
+                action_id=action_id,
+                app_key=app_key,
+                tier=int(spec.tier),
+                status=audit_status,
+                outcome_msg=audit_msg,
+            )
+        except Exception as _ae:  # pragma: no cover - defensive; both calls fail-open
+            log.warning("invoke_action: audit/notify failed for run_id=%s: %s", run_id, _ae)
 
 
 __all__ = [

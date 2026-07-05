@@ -10,7 +10,7 @@
       "tier": 2,
       "icon": "\ud83d\udcb0",
       "tags": ["finance", "budget", "money", "productivity", "local-first"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/actual_budget.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/actual_budget.yaml",
       "image": "ghcr.io/actualbudget/actual-server",
       "image_tag": "latest"
     },
@@ -22,7 +22,7 @@
       "tier": 2,
       "icon": "\ud83d\udeab",
       "tags": ["dns", "adblock", "privacy", "monitoring"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/adguard_home.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/adguard_home.yaml",
       "image": "adguard/adguardhome",
       "image_tag": "latest"
     },
@@ -34,7 +34,7 @@
       "tier": 2,
       "icon": "\ud83c\udfa8",
       "tags": ["notes", "wiki", "whiteboard", "productivity", "collaboration", "notion-alternative"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/affine.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/affine.yaml",
       "image": "ghcr.io/toeverything/affine-graphql",
       "image_tag": "stable"
     },
@@ -46,7 +46,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "llm", "rag", "documents", "chat"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/anythingllm.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/anythingllm.yaml",
       "image": "mintplexlabs/anythingllm",
       "image_tag": "latest"
     },
@@ -58,7 +58,7 @@
       "tier": 2,
       "icon": "\ud83c\udfa7",
       "tags": ["audiobooks", "podcasts", "media-server", "mobile"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/audiobookshelf.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/audiobookshelf.yaml",
       "image": "ghcr.io/advplyr/audiobookshelf",
       "image_tag": "latest"
     },
@@ -70,7 +70,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/autobrr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/autobrr.yaml",
       "image": "ghcr.io/autobrr/autobrr",
       "image_tag": "latest"
     },
@@ -82,7 +82,7 @@
       "tier": 2,
       "icon": "\ud83d\udcac",
       "tags": ["arr", "subtitles", "sonarr", "radarr", "media"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/bazarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/bazarr.yaml",
       "image": "lscr.io/linuxserver/bazarr",
       "image_tag": "latest"
     },
@@ -94,7 +94,7 @@
       "tier": 2,
       "icon": "\ud83d\udcc4",
       "tags": ["pdf", "tools", "productivity"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/bentopdf.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/bentopdf.yaml",
       "image": "ghcr.io/alam00000/bentopdf",
       "image_tag": "latest"
     },
@@ -106,7 +106,7 @@
       "tier": 2,
       "icon": "\ud83d\udce1",
       "tags": ["monitoring", "metrics", "docker", "server", "alerts"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/beszel.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/beszel.yaml",
       "image": "ghcr.io/henrygd/beszel",
       "image_tag": "latest"
     },
@@ -118,7 +118,7 @@
       "tier": 2,
       "icon": "\ud83d\udcda",
       "tags": ["ebooks", "books", "library", "epub", "pdf", "comics", "kobo"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/booklore.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/booklore.yaml",
       "image": "ghcr.io/booklore-app/booklore",
       "image_tag": "latest"
     },
@@ -130,7 +130,7 @@
       "tier": 2,
       "icon": "\ud83d\udc41\ufe0f",
       "tags": ["monitoring", "alerts", "tracking", "websites", "automation"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/changedetection.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/changedetection.yaml",
       "image": "ghcr.io/dgtlmoon/changedetection.io",
       "image_tag": "latest"
     },
@@ -142,7 +142,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "stable-diffusion", "image-generation", "gpu"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/comfyui.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/comfyui.yaml",
       "image": "ghcr.io/ai-dock/comfyui",
       "image_tag": "latest-cuda"
     },
@@ -154,7 +154,7 @@
       "tier": 2,
       "icon": "\ud83d\udee1\ufe0f",
       "tags": ["security", "firewall", "ips", "threat-intelligence"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/crowdsec.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/crowdsec.yaml",
       "image": "crowdsecurity/crowdsec",
       "image_tag": "latest"
     },
@@ -166,7 +166,7 @@
       "tier": 2,
       "icon": "\ud83c\udf10",
       "tags": ["ddns", "dns", "dynamic-ip", "tools", "networking", "residential"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/ddns_updater.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ddns_updater.yaml",
       "image": "qmcgaw/ddns-updater",
       "image_tag": "latest"
     },
@@ -178,7 +178,7 @@
       "tier": 2,
       "icon": "\u26a1",
       "tags": ["debrid", "real-debrid", "arr", "download-client", "torrent", "usenet", "streaming"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/decypharr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/decypharr.yaml",
       "image": "cy01/blackhole",
       "image_tag": "latest"
     },
@@ -190,7 +190,7 @@
       "tier": 1,
       "icon": "\ud83d\udd12",
       "tags": ["security", "docker", "proxy", "infrastructure", "traefik"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/docker_socket_proxy.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/docker_socket_proxy.yaml",
       "image": "tecnativa/docker-socket-proxy",
       "image_tag": "latest"
     },
@@ -202,7 +202,7 @@
       "tier": 2,
       "icon": "\ud83c\udfa9",
       "tags": ["docker", "compose", "stacks", "management", "tools"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/dockge.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dockge.yaml",
       "image": "louislam/dockge",
       "image_tag": "1"
     },
@@ -214,7 +214,7 @@
       "tier": 2,
       "icon": "\ud83d\udc0b",
       "tags": ["docker", "management", "containers", "stacks", "git", "tools"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/dockhand.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dockhand.yaml",
       "image": "fnsys/dockhand",
       "image_tag": "latest"
     },
@@ -226,7 +226,7 @@
       "tier": 2,
       "icon": "\u2705",
       "tags": ["tasks", "chores", "productivity", "household"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/donetick.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/donetick.yaml",
       "image": "ghcr.io/donetick/donetick",
       "image_tag": "latest"
     },
@@ -238,7 +238,7 @@
       "tier": 2,
       "icon": "\ud83e\udeb5",
       "tags": ["logs", "docker", "monitoring", "debugging"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/dozzle.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dozzle.yaml",
       "image": "amir20/dozzle",
       "image_tag": "latest"
     },
@@ -250,7 +250,7 @@
       "tier": 2,
       "icon": "\ud83c\udf0a",
       "tags": ["debrid", "real-debrid", "zurg", "rclone", "zilean", "all-in-one", "streaming"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/dumb.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/dumb.yaml",
       "image": "iampuid0/dumb",
       "image_tag": "latest"
     },
@@ -262,7 +262,7 @@
       "tier": 1,
       "icon": "\ud83d\udcfa",
       "tags": ["media", "emby", "streaming", "movies", "tv", "music"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/emby.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/emby.yaml",
       "image": "emby/embyserver",
       "image_tag": "latest"
     },
@@ -274,7 +274,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/filebot.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/filebot.yaml",
       "image": "jlesage/filebot",
       "image_tag": "latest"
     },
@@ -286,7 +286,7 @@
       "tier": 2,
       "icon": "\ud83d\udcc2",
       "tags": ["files", "browser", "upload", "manager", "tools"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/filebrowser.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/filebrowser.yaml",
       "image": "filebrowser/filebrowser",
       "image_tag": "s6"
     },
@@ -298,7 +298,7 @@
       "tier": 2,
       "icon": "\ud83d\udd04",
       "tags": ["files", "automation", "transcoding", "processing", "workflow"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/fileflows.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/fileflows.yaml",
       "image": "revenz/fileflows",
       "image_tag": "latest"
     },
@@ -310,7 +310,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/forgejo.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/forgejo.yaml",
       "image": "codeberg.org/forgejo/forgejo:10",
       "image_tag": "latest"
     },
@@ -322,7 +322,7 @@
       "tier": 2,
       "icon": "\ud83d\udce1",
       "tags": ["rss", "feeds", "news", "productivity", "reader"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/freshrss.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/freshrss.yaml",
       "image": "lscr.io/linuxserver/freshrss",
       "image_tag": "latest"
     },
@@ -334,7 +334,7 @@
       "tier": 2,
       "icon": "\ud83d\udc40",
       "tags": ["dashboard", "rss", "feeds", "monitoring", "widgets"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/glance.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/glance.yaml",
       "image": "glanceapp/glance",
       "image_tag": "latest"
     },
@@ -346,7 +346,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/grocy.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/grocy.yaml",
       "image": "lscr.io/linuxserver/grocy",
       "image_tag": "latest"
     },
@@ -358,7 +358,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "llm", "agent", "tool-use", "local"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/hermes_agent.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/hermes_agent.yaml",
       "image": "ghcr.io/nesquena/hermes-webui",
       "image_tag": "latest"
     },
@@ -370,7 +370,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["home-automation", "iot", "smart-home"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/homeassistant.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/homeassistant.yaml",
       "image": "lscr.io/linuxserver/homeassistant",
       "image_tag": "latest"
     },
@@ -382,7 +382,7 @@
       "tier": 2,
       "icon": "\ud83d\udcf7",
       "tags": ["photos", "media", "self-hosted"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/immich.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/immich.yaml",
       "image": "ghcr.io/immich-app/immich-server",
       "image_tag": "release"
     },
@@ -394,7 +394,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/jackett.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/jackett.yaml",
       "image": "lscr.io/linuxserver/jackett",
       "image_tag": "latest"
     },
@@ -406,7 +406,7 @@
       "tier": 1,
       "icon": "\ud83c\udf9e\ufe0f",
       "tags": ["media", "jellyfin", "streaming", "movies", "tv", "music", "open-source"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/jellyfin.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/jellyfin.yaml",
       "image": "jellyfin/jellyfin",
       "image_tag": "latest"
     },
@@ -418,7 +418,7 @@
       "tier": 2,
       "icon": "\ud83d\udcd6",
       "tags": ["manga", "comics", "books", "reader", "library", "opds"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/kavita.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/kavita.yaml",
       "image": "jvmilazz0/kavita",
       "image_tag": "latest"
     },
@@ -430,7 +430,7 @@
       "tier": 2,
       "icon": "\ud83e\udd8e",
       "tags": ["docker", "management", "multi-server", "git", "deploy", "automation", "tools"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/komodo.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/komodo.yaml",
       "image": "ghcr.io/moghtech/komodo-core",
       "image_tag": "latest"
     },
@@ -442,7 +442,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/lazylibrarian.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/lazylibrarian.yaml",
       "image": "lscr.io/linuxserver/lazylibrarian",
       "image_tag": "latest"
     },
@@ -454,7 +454,7 @@
       "tier": 2,
       "icon": "\ud83c\udfb5",
       "tags": ["arr", "music", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/lidarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/lidarr.yaml",
       "image": "lscr.io/linuxserver/lidarr",
       "image_tag": "latest"
     },
@@ -466,7 +466,7 @@
       "tier": 2,
       "icon": "\ud83e\udd99",
       "tags": ["ai", "llm", "inference", "local-ai", "gguf"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/llamacpp_server.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/llamacpp_server.yaml",
       "image": "ghcr.io/ggerganov/llama.cpp",
       "image_tag": "server"
     },
@@ -478,7 +478,7 @@
       "tier": 2,
       "icon": "\ud83e\udd16",
       "tags": ["ai", "llm", "inference", "local-ai", "openai-compatible"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/localai.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/localai.yaml",
       "image": "localai/localai",
       "image_tag": "latest"
     },
@@ -490,7 +490,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/maintainerr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/maintainerr.yaml",
       "image": "ghcr.io/maintainerr/maintainerr",
       "image_tag": "latest"
     },
@@ -502,7 +502,7 @@
       "tier": 2,
       "icon": "\ud83c\udf7d\ufe0f",
       "tags": ["recipes", "meal-planning", "cooking", "productivity"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/mealie.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/mealie.yaml",
       "image": "ghcr.io/mealie-recipes/mealie",
       "image_tag": "latest"
     },
@@ -514,7 +514,7 @@
       "tier": 2,
       "icon": "\ud83d\udcdd",
       "tags": ["notes", "markdown", "productivity", "lightweight"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/memos.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/memos.yaml",
       "image": "neosmemo/memos",
       "image_tag": "stable"
     },
@@ -526,7 +526,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["media", "streaming", "sonarr", "radarr"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/midarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/midarr.yaml",
       "image": "ghcr.io/midarrlabs/midarr-server",
       "image_tag": "latest"
     },
@@ -538,7 +538,7 @@
       "tier": 2,
       "icon": "\ud83e\uddb8",
       "tags": ["arr", "comics", "manga", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/mylar3.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/mylar3.yaml",
       "image": "lscr.io/linuxserver/mylar3",
       "image_tag": "latest"
     },
@@ -550,7 +550,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/n8n.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/n8n.yaml",
       "image": "n8nio/n8n",
       "image_tag": "latest"
     },
@@ -562,7 +562,7 @@
       "tier": 2,
       "icon": "\ud83d\udcca",
       "tags": ["monitoring", "metrics", "performance", "system"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/netdata.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/netdata.yaml",
       "image": "netdata/netdata",
       "image_tag": "latest"
     },
@@ -574,7 +574,7 @@
       "tier": 2,
       "icon": "\ud83d\udd14",
       "tags": ["notifications", "push", "alerts", "tools"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/ntfy.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ntfy.yaml",
       "image": "binwiederhier/ntfy",
       "image_tag": "latest"
     },
@@ -586,7 +586,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/nzbget.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/nzbget.yaml",
       "image": "lscr.io/linuxserver/nzbget",
       "image_tag": "latest"
     },
@@ -598,7 +598,7 @@
       "tier": 2,
       "icon": "\ud83e\udd16",
       "tags": ["ai", "llm", "local-ai"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/ollama.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ollama.yaml",
       "image": "ollama/ollama",
       "image_tag": "latest"
     },
@@ -611,7 +611,7 @@
       "tier": 2,
       "icon": "\ud83d\udcbb",
       "tags": ["ai", "llm", "coding", "assistant", "openai-compatible"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/opencode.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/opencode.yaml",
       "image": "node:24-trixie",
       "image_tag": "latest"
     },
@@ -623,7 +623,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/ombi.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/ombi.yaml",
       "image": "lscr.io/linuxserver/ombi",
       "image_tag": "latest"
     },
@@ -632,7 +632,7 @@
       "display_name": "Open WebUI",
       "description": "Sleek, feature-rich chat interface for local LLMs",
       "category": "ai",
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/open_webui.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/open_webui.yaml",
       "image": "ghcr.io/open-webui/open-webui"
     },
     {
@@ -643,7 +643,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/overseerr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/overseerr.yaml",
       "image": "sctx/overseerr",
       "image_tag": "latest"
     },
@@ -655,7 +655,7 @@
       "tier": 2,
       "icon": "\ud83d\udcc1",
       "tags": ["documents", "ocr", "productivity", "scan"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/paperless_ngx.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/paperless_ngx.yaml",
       "image": "ghcr.io/paperless-ngx/paperless-ngx",
       "image_tag": "latest"
     },
@@ -667,7 +667,7 @@
       "tier": 1,
       "icon": "\ud83c\udfac",
       "tags": ["media", "plex", "streaming", "movies", "tv", "music"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/plex.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/plex.yaml",
       "image": "plexinc/pms-docker",
       "image_tag": "latest"
     },
@@ -679,7 +679,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/posteria.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/posteria.yaml",
       "image": "bozodev/posteria",
       "image_tag": "latest"
     },
@@ -691,7 +691,7 @@
       "tier": 2,
       "icon": "\ud83d\udd0d",
       "tags": ["arr", "indexers"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/prowlarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/prowlarr.yaml",
       "image": "lscr.io/linuxserver/prowlarr",
       "image_tag": "latest"
     },
@@ -703,7 +703,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/pulsarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/pulsarr.yaml",
       "image": "lakker/pulsarr",
       "image_tag": "latest"
     },
@@ -715,7 +715,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/qbittorrent.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/qbittorrent.yaml",
       "image": "lscr.io/linuxserver/qbittorrent",
       "image_tag": "latest"
     },
@@ -727,7 +727,7 @@
       "tier": 2,
       "icon": "\ud83c\udfa5",
       "tags": ["arr", "movies", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/radarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/radarr.yaml",
       "image": "lscr.io/linuxserver/radarr",
       "image_tag": "latest"
     },
@@ -739,7 +739,7 @@
       "tier": 2,
       "icon": "\ud83d\udcd7",
       "tags": ["arr", "books", "ebooks", "audiobooks", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/readarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/readarr.yaml",
       "image": "lscr.io/linuxserver/readarr",
       "image_tag": "develop"
     },
@@ -751,7 +751,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/recyclarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/recyclarr.yaml",
       "image": "recyclarr/recyclarr",
       "image_tag": "latest"
     },
@@ -763,7 +763,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["sync", "p2p", "file-sharing", "bittorrent"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/resilio_sync.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/resilio_sync.yaml",
       "image": "lscr.io/linuxserver/resilio-sync",
       "image_tag": "latest"
     },
@@ -772,7 +772,7 @@
       "display_name": "SABnzbd",
       "description": "Usenet binary newsreader and download manager",
       "category": "downloader",
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/sabnzbd.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sabnzbd.yaml",
       "image": "ghcr.io/linuxserver/sabnzbd"
     },
     {
@@ -783,7 +783,7 @@
       "tier": 2,
       "icon": "\ud83d\udcbf",
       "tags": ["smart", "disk-health", "monitoring", "storage", "hardware"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/scrutiny.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/scrutiny.yaml",
       "image": "ghcr.io/analogj/scrutiny",
       "image_tag": "master-omnibus"
     },
@@ -795,7 +795,7 @@
       "tier": 2,
       "icon": "\ud83c\udfaf",
       "tags": ["requests", "plex", "jellyfin", "automation", "discovery"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/seerr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/seerr.yaml",
       "image": "ghcr.io/fallenbagel/jellyseerr",
       "image_tag": "latest"
     },
@@ -807,7 +807,7 @@
       "tier": 2,
       "icon": "\ud83d\udd2b",
       "tags": ["notes", "wiki", "markdown", "knowledge-base", "offline-first", "lightweight"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/silverbullet.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/silverbullet.yaml",
       "image": "ghcr.io/silverbulletmd/silverbullet",
       "image_tag": "latest"
     },
@@ -819,7 +819,7 @@
       "tier": 2,
       "icon": "\ud83d\uddc4\ufe0f",
       "tags": ["snapraid", "mergerfs", "storage", "parity", "monitoring"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/snapraid_ui.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/snapraid_ui.yaml",
       "image": "ghcr.io/firsttris/snapraid-ui",
       "image_tag": "latest"
     },
@@ -831,7 +831,7 @@
       "tier": 2,
       "icon": "\ud83d\udcfa",
       "tags": ["arr", "tv", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/sonarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sonarr.yaml",
       "image": "lscr.io/linuxserver/sonarr",
       "image_tag": "latest"
     },
@@ -843,7 +843,7 @@
       "tier": 2,
       "icon": "\u26a1",
       "tags": ["monitoring", "network", "speed", "isp", "performance"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/speedtest_tracker.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/speedtest_tracker.yaml",
       "image": "ghcr.io/alexjustesen/speedtest-tracker",
       "image_tag": "latest"
     },
@@ -855,7 +855,7 @@
       "tier": 2,
       "icon": "\ud83d\udcc4",
       "tags": ["pdf", "tools", "ocr", "documents", "server-side"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/stirling_pdf.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/stirling_pdf.yaml",
       "image": "frooodle/s-pdf",
       "image_tag": "latest"
     },
@@ -867,7 +867,7 @@
       "tier": 2,
       "icon": "\ud83d\udd01",
       "tags": ["sync", "files", "p2p", "encrypted", "dropbox-alternative"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/syncthing.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/syncthing.yaml",
       "image": "lscr.io/linuxserver/syncthing",
       "image_tag": "latest"
     },
@@ -879,7 +879,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/tautulli.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/tautulli.yaml",
       "image": "lscr.io/linuxserver/tautulli",
       "image_tag": "latest"
     },
@@ -891,7 +891,7 @@
       "tier": 2,
       "icon": "\ud83c\udf9e\ufe0f",
       "tags": ["transcoding", "media", "automation", "video", "arr"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/tdarr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/tdarr.yaml",
       "image": "ghcr.io/haveagitgat/tdarr",
       "image_tag": "latest"
     },
@@ -903,7 +903,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/thelounge.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/thelounge.yaml",
       "image": "lscr.io/linuxserver/thelounge",
       "image_tag": "latest"
     },
@@ -915,7 +915,7 @@
       "tier": 2,
       "icon": "\ud83d\udcca",
       "tags": ["analytics", "privacy", "gdpr", "monitoring", "web-analytics"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/umami.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/umami.yaml",
       "image": "ghcr.io/umami-software/umami",
       "image_tag": "postgresql-latest"
     },
@@ -927,7 +927,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["networking", "ubiquiti", "unifi", "controller"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/unifi.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unifi.yaml",
       "image": "lscr.io/linuxserver/unifi-network-application",
       "image_tag": "latest"
     },
@@ -939,7 +939,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/unmanic.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unmanic.yaml",
       "image": "josh5/unmanic",
       "image_tag": "latest"
     },
@@ -951,7 +951,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/unpackerr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/unpackerr.yaml",
       "image": "golift/unpackerr",
       "image_tag": "latest"
     },
@@ -963,7 +963,7 @@
       "tier": 2,
       "icon": "\ud83d\udd10",
       "tags": ["passwords", "security", "bitwarden", "productivity"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/vaultwarden.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vaultwarden.yaml",
       "image": "vaultwarden/server",
       "image_tag": "latest"
     },
@@ -975,7 +975,7 @@
       "tier": 2,
       "icon": "\ud83d\udccb",
       "tags": ["tasks", "kanban", "projects", "productivity", "team"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/vikunja.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vikunja.yaml",
       "image": "vikunja/vikunja",
       "image_tag": "latest"
     },
@@ -987,7 +987,7 @@
       "tier": 2,
       "icon": "",
       "tags": [],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/vsftpd.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/vsftpd.yaml",
       "image": "fauria/vsftpd",
       "image_tag": "latest"
     },
@@ -999,7 +999,7 @@
       "tier": 2,
       "icon": "\ud83d\udd1e",
       "tags": ["arr", "adult", "media-management"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/whisparr.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/whisparr.yaml",
       "image": "ghcr.io/hotio/whisparr",
       "image_tag": "latest"
     },
@@ -1011,7 +1011,7 @@
       "tier": 2,
       "icon": "\ud83d\udd2e",
       "tags": ["debrid", "real-debrid", "indexer", "prowlarr", "arr"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/zilean.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/zilean.yaml",
       "image": "ghcr.io/iPromKnight/zilean",
       "image_tag": "latest"
     },
@@ -1023,7 +1023,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "llm", "chat", "roleplay", "local-ai"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/sillytavern.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/sillytavern.yaml",
       "image": "ghcr.io/sillytavern/sillytavern",
       "image_tag": "latest"
     },
@@ -1035,7 +1035,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "llm", "local-ai", "inference", "gguf", "huggingface"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/oobabooga.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/oobabooga.yaml",
       "image": "atinoda/text-generation-webui",
       "image_tag": "latest-cpu"
     },
@@ -1047,7 +1047,7 @@
       "tier": 2,
       "icon": "",
       "tags": ["ai", "llm", "proxy", "router", "api", "openai-compatible"],
-      "source_url": "https://github.com/Nnyan/SLOP/blob/main/catalog/apps/litellm.yaml",
+      "source_url": "https://github.com/SLOP-Platform/SLOP/blob/main/catalog/apps/litellm.yaml",
       "image": "ghcr.io/berriai/litellm",
       "image_tag": "main-latest"
     }

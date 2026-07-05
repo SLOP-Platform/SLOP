@@ -30,6 +30,21 @@ _UNIT_PATH: Path = Path("/etc/systemd/system/slop.service")
 _UNIT_NAME: str = "slop"
 _TEMPLATE_FILE: Path = Path(__file__).parent / "templates" / "slop.service.j2"
 
+# ── #868 P3: scheduled-backup systemd timer (host-native; §7 design decision) ──
+# A oneshot service + timer that runs `ms-backup --all` on a cadence. systemd timer (not an
+# in-app scheduler) so backup liveness survives a SLOP restart and does not couple to the
+# agent-runtime-only process — see docs/BACKUP-PRODUCT-868-DESIGN.md §7.
+_BACKUP_SERVICE_PATH: Path = Path("/etc/systemd/system/ms-backup.service")
+_BACKUP_TIMER_PATH: Path = Path("/etc/systemd/system/ms-backup.timer")
+_BACKUP_TIMER_NAME: str = "ms-backup.timer"
+_BACKUP_SERVICE_TEMPLATE: Path = Path(__file__).parent / "templates" / "ms-backup.service.j2"
+_BACKUP_TIMER_TEMPLATE: Path = Path(__file__).parent / "templates" / "ms-backup.timer.j2"
+# systemd OnCalendar for the timer FIRE frequency. The timer fires hourly; `--due-only` (#1284)
+# filters each tick down to the apps actually due per `backup_cadence_hours` (default 24h) — so the
+# effective per-app cadence is a settings write, not a unit re-render. Hourly is the tick, not the
+# backup frequency.
+_DEFAULT_BACKUP_CADENCE: str = "hourly"
+
 
 # ── Error classes ─────────────────────────────────────────────────────────────
 
@@ -141,3 +156,66 @@ def install_service(
     run_systemctl("daemon-reload", "")
     run_systemctl("enable", _UNIT_NAME)
     run_systemctl("start", _UNIT_NAME)
+
+
+# ── #868 P3: scheduled-backup timer install (advisory; never aborts the install) ──
+
+
+def _render_backup_template(
+    template_text: str, install_dir: str, data_dir: str, cadence: str
+) -> str:
+    """Substitute {{ install_dir }}, {{ data_dir }}, {{ cadence }} in a backup unit template."""
+    return (
+        template_text.replace("{{ install_dir }}", install_dir)
+        .replace("{{ data_dir }}", data_dir)
+        .replace("{{ cadence }}", cadence)
+    )
+
+
+def _read_backup_templates() -> tuple[str, str]:
+    """Read (service, timer) template text; raise ServiceInstallError on a missing template."""
+    try:
+        return (
+            _BACKUP_SERVICE_TEMPLATE.read_text(encoding="utf-8"),
+            _BACKUP_TIMER_TEMPLATE.read_text(encoding="utf-8"),
+        )
+    except OSError as exc:
+        raise ServiceInstallError(
+            f"Could not read backup-timer template ({_BACKUP_SERVICE_TEMPLATE} / "
+            f"{_BACKUP_TIMER_TEMPLATE}): {exc}. The installer package may be incomplete."
+        ) from exc
+
+
+def install_backup_timer(
+    install_dir,
+    data_dir,
+    *,
+    cadence: str = _DEFAULT_BACKUP_CADENCE,
+    read_templates: Callable[[], tuple[str, str]] = _read_backup_templates,
+    write_unit_file: Callable[[Path, str], None] = _write_unit_file,
+    run_systemctl: Callable[[str, str], None] = _run_systemctl,
+) -> None:
+    """Render + activate the #868 P3 scheduled-backup systemd timer.
+
+    Writes ms-backup.service (oneshot `ms-backup --all`) + ms-backup.timer (OnCalendar=cadence)
+    to /etc/systemd/system, then:
+      systemctl daemon-reload
+      systemctl enable ms-backup.timer
+      systemctl start  ms-backup.timer
+
+    The TIMER is enabled/started (not the oneshot service — the timer triggers it). Scheduled
+    backup is RECOVERABILITY, not availability (design §7/§9): the caller treats a failure here
+    as advisory and does NOT abort the install. The keyword-only I/O args exist for test injection.
+    """
+    service_text, timer_text = read_templates()
+    write_unit_file(
+        _BACKUP_SERVICE_PATH,
+        _render_backup_template(service_text, str(install_dir), str(data_dir), cadence),
+    )
+    write_unit_file(
+        _BACKUP_TIMER_PATH,
+        _render_backup_template(timer_text, str(install_dir), str(data_dir), cadence),
+    )
+    run_systemctl("daemon-reload", "")
+    run_systemctl("enable", _BACKUP_TIMER_NAME)
+    run_systemctl("start", _BACKUP_TIMER_NAME)

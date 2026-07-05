@@ -16,7 +16,7 @@ image_tag: latest
 linuxserver: false
 
 ports:
-  web: 8097
+  web: 8096
   extra:
     - name: https
       internal: 8920
@@ -43,7 +43,7 @@ gpu:
   nvidia: true
   amd: true
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: emby
 

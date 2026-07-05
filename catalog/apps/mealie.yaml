@@ -19,10 +19,25 @@ ports:
 volumes:
   config: /app/data
 
+# Mealie defaults to SQLite unless DB_ENGINE=postgres + the POSTGRES_* connection
+# vars are set; without this block the declared postgres dependency spins up the
+# managed postgres but mealie silently ignores it and runs on SQLite (#1210 empty-env
+# class). Connects as the managed-postgres superuser `slop` with the generated
+# ${POSTGRES_PASSWORD}; POSTGRES_DB=mealie is the per-app database the installer
+# provisions at install time (db_provision._provision_app_db), matching the
+# affine/umami/zilean per-app-DB pattern.
+env:
+  DB_ENGINE: postgres
+  POSTGRES_SERVER: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: slop
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_DB: mealie
+
 dependencies:
   postgres: true
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: mealie
 

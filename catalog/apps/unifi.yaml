@@ -17,17 +17,25 @@ volumes:
 
 companions:
   - key: unifi-db
-    image: mongo:7
+    image: mongo
+    image_tag: "7"
     container_name: unifi-db
     environment:
       MONGO_INITDB_ROOT_USERNAME: unifi
       MONGO_INITDB_ROOT_PASSWORD: unifi
       MONGO_DBNAME: unifi
     volumes:
-      - host: /var/lib/slop/unifi/mongodb
+      # Mongo data under the wizard-configured config_root (was root-required
+      # /var/lib/slop/unifi/mongodb, which the executor — running as the service
+      # user — cannot create under /var/lib). {config_root} is expanded by _expand_path
+      # and the dir is created by _build_companion_volumes; container path (/data/db)
+      # is distinct, so no same-path constraint. The mongo:7 entrypoint runs as root and
+      # chowns /data/db to its own user, so the 0o777 host dir (no run_as_uid set,
+      # matching the hermes_agent sibling) is fine.
+      - host: "{config_root}/unifi/mongodb"
         container: /data/db
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: unifi
 

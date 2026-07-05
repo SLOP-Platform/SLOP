@@ -10,7 +10,7 @@ image_tag: latest
 ports:
   web: 9283
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: grocy
 

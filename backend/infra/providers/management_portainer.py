@@ -8,7 +8,7 @@ Deploys Portainer CE — the visual Docker management UI.
 from __future__ import annotations
 
 import subprocess
-from typing import Any
+from typing import Any, ClassVar
 
 from backend.core import docker_client
 from backend.core.compose import compose_up, write_fragment
@@ -18,7 +18,9 @@ from backend.infra.base import InfraProvider, ProviderResult
 from backend.infra.registry import register
 
 CONTAINER_NAME = "portainer"
-IMAGE = "portainer/portainer-ce:latest"
+IMAGE = (
+    "portainer/portainer-ce:latest"  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
+)
 INTERNAL_PORT = 9000
 EDGE_PORT = 8000
 
@@ -28,6 +30,30 @@ class PortainerProvider(InfraProvider):
     slot = "management"
     key = "portainer"
     display_name = "Portainer CE"
+
+    # MANIFEST-LESS infra provider (no catalog/apps/portainer.yaml) — `fields` is
+    # hand-authored from this provider's own deploy() config knowledge
+    # (domain/port). Judgment-class gap: an infra slot provider with no catalog
+    # manifest has no manifest SSOT for its UI schema (see #975 follow-up).
+    fields: ClassVar[list[dict[str, Any]]] = [
+        {
+            "key": "domain",
+            "label": "Public domain",
+            "type": "text",
+            "placeholder": "example.com",
+            "required": True,
+            "help": "Base domain — Portainer is published at portainer.<domain>.",
+        },
+        {
+            "key": "port",
+            "label": "Host port",
+            "type": "number",
+            "placeholder": "9000",
+            "required": False,
+            "help": "Host port to publish the UI on (container port is 9000).",
+        },
+    ]
+    category = "management"
 
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
         with StateDB() as db:
@@ -83,6 +109,33 @@ class PortainerProvider(InfraProvider):
             )
 
         url = f"https://portainer.{domain}" if domain else f"http://localhost:{host_port}"
+        # Register as a fully managed app — identical to catalog install and to
+        # the other infra providers (dashboard_homepage/glance, tunnel_*). This
+        # makes infra apps health-monitored, Dashboard-visible, with operation
+        # history. Best-effort: a DB hiccup must not fail an otherwise-good deploy.
+        # (#994: this upsert used to be smuggled into the read-only list_hostnames.)
+        try:
+            from backend.core.state import StateDB as _SDB2
+            import time as _t2
+
+            with _SDB2() as _db2:
+                _db2.upsert_app(
+                    "portainer",
+                    display_name=self.display_name,
+                    tier=0,
+                    category=self.category,
+                    status="running",
+                    image=IMAGE,
+                    image_tag="latest",
+                    container_name=CONTAINER_NAME,
+                    host_port=host_port,
+                    last_healthy_at=int(_t2.time()),
+                )
+        except Exception as _e2:
+            import logging as _l2
+
+            _l2.getLogger(__name__).debug("Could not register infra app in DB: %s", _e2)
+
         return ProviderResult.success(
             f"Portainer CE deployed at {url}. Create your admin account on first login."
         )
@@ -109,6 +162,9 @@ class PortainerProvider(InfraProvider):
             return ProviderResult.failure(f"Could not remove Portainer: {e}")
         with StateDB() as db:
             db.update_slot("management", status="empty", provider=None, config={})
+            # #1123: remove the apps-table row deploy() registered, else a stale
+            # row lingers after a management-slot swap (cascade delete; no-op if absent).
+            db.remove_app(self.key)
         return ProviderResult.success("Portainer removed.")
 
     def verify(self) -> ProviderResult:
@@ -124,24 +180,6 @@ class PortainerProvider(InfraProvider):
         return ProviderResult.success("Management provider — no hostname management.")
 
     def list_hostnames(self) -> ProviderResult:
-        try:
-            from backend.core.state import StateDB as _SDB_p
-            import time as _t_p
-
-            with _SDB_p() as _db_p:
-                _db_p.upsert_app(
-                    "portainer",
-                    display_name="Portainer",
-                    tier=0,
-                    category="management",
-                    status="running",
-                    image=IMAGE,
-                    image_tag="latest",
-                    container_name=CONTAINER_NAME,
-                    host_port=9000,
-                    last_healthy_at=int(_t_p.time()),
-                )
-        except Exception:  # noqa: S110  # best-effort DB update; provider result returned regardless
-            pass
-
+        # Pure read — no side-effects. App registration happens in deploy()
+        # (the canonical seam), not here (#994).
         return ProviderResult.success("Portainer has no external hostnames.", data={})

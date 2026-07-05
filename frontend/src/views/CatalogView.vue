@@ -915,7 +915,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { catalog, apps as appsApi } from '../api/client'
+import { catalog, apps as appsApi, health as healthApi, agent as agentApi } from '../api/client'
 import { catalogCache, installedCache, setCatalogCache, setInstalledCache } from '../catalogCache'
 import { useToast } from '@/composables/useToast'
 import type { CatalogEntry, AppStatus } from '../api/client'
@@ -950,9 +950,7 @@ const installedListStale = ref(false)  // set when installed-list refresh fails
 
 async function loadFailedInstalls() {
   try {
-    const res = await fetch('/api/v1/apps/installs/progress')
-    if (!res.ok) return
-    const data = await res.json()
+    const data = await appsApi.installsProgress()
     const apps: Record<string, any> = data.apps ?? {}
     const failed = Object.entries(apps)
       .filter(([, info]) => info.done === true && info.ok === false)
@@ -968,11 +966,8 @@ async function loadFailedInstalls() {
 
 async function loadDiagnoses() {
   try {
-    const res = await fetch('/api/v1/agent/diagnoses')
-    if (res.ok) {
-      const data = await res.json()
-      diagnoses.value = data.diagnoses ?? []
-    }
+    const data = await agentApi.diagnoses()
+    diagnoses.value = data.diagnoses ?? []
   } catch {
     // Diagnoses panel is best-effort — never surface errors to the user
   }
@@ -1150,15 +1145,12 @@ const sourceIssues = ref<Set<string>>(new Set())
 
 async function loadSourceIssues() {
   try {
-    const r = await fetch('/api/v1/health/sources')
-    if (r.ok) {
-      const d = await r.json()
-      sourceIssues.value = new Set(
-        (d.issues || [])
-          .filter((i: any) => i.source_type === 'docker_image')
-          .map((i: any) => i.resource_key)
-      )
-    }
+    const d = await healthApi.sources()
+    sourceIssues.value = new Set(
+      (d.issues || [])
+        .filter((i: any) => i.source_type === 'docker_image')
+        .map((i: any) => i.resource_key)
+    )
   } catch { /* source issues are advisory; ignore fetch errors */ }
 }
 function onSearch() {}
@@ -1181,12 +1173,8 @@ async function openPreflight() {
   batchProgress.value = []
   batchCompanionWarning.value = []
   try {
-    const res = await fetch('/api/v1/apps/batch/preflight', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys: [...selectedKeys.value] }),
-    })
-    preflightResult.value = await res.json()
+    const { data } = await appsApi.batchPreflight([...selectedKeys.value])
+    preflightResult.value = data
   } catch {
     toast.error('Could not run pre-flight check.')
   }
@@ -1216,12 +1204,8 @@ async function runBatchInstall() {
   }))
 
   try {
-    const installRes = await fetch('/api/v1/apps/batch/install', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys: [...selectedKeys.value] }),
-    })
-    const installData = installRes.ok ? await installRes.json() : null
+    const { ok: installOk, data: installBody } = await appsApi.batchInstall([...selectedKeys.value])
+    const installData = installOk ? installBody : null
     // Surface any required companions not yet installed — install continues in background
     if (installData?.required_companions?.length) {
       batchCompanionWarning.value = installData.required_companions

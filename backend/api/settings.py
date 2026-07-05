@@ -14,12 +14,26 @@ from typing import Any
 
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.core.config import config
+from backend.health import notifiers
+
+# .env I/O helpers + secret-key registries — extracted to settings_env.py (#1258, 800-line cap).
+# Re-imported here so `settings.<name>` (incl. the tests' monkeypatch.setattr(settings, …)) and the
+# route handlers' bare-name lookups keep resolving exactly as before the split.
+from backend.api.settings_env import (
+    _CONTROL_PLANE_ENV_KEY,
+    _CONTROL_PLANE_SETTING_KEY,
+    _read_env_file,
+    _SECRETS_KEYS,
+    _SENSITIVE_SECRET_KEYS,
+    _write_env_file,
+)
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -37,6 +51,10 @@ class SettingsPayload(BaseModel):
     ntfy_topic: str | None = None
     ntfy_url: str | None = None
     ntfy_enabled: bool | None = None
+    # Notifier provider selection (ntfy default; gotify alt) — see backend/health/notifiers.py
+    notifier_provider: str | None = None
+    gotify_url: str | None = None
+    gotify_token: str | None = None
     # LLM agent
     llm_enabled: bool | None = None
     llm_backend: str | None = None  # "ollama" | "llamacpp"
@@ -60,6 +78,9 @@ class SettingsOut(BaseModel):
     ntfy_topic: str
     ntfy_url: str
     ntfy_enabled: bool
+    # Notifier provider (gotify_token is a secret — never echoed back)
+    notifier_provider: str
+    gotify_url: str
     # LLM agent
     llm_enabled: bool
     llm_backend: str
@@ -116,6 +137,8 @@ def get_settings() -> SettingsOut:
         ntfy_topic = db.get_setting("ntfy_topic") or "slop"
         ntfy_url = db.get_setting("ntfy_url") or "http://ntfy:80"
         ntfy_enabled = _bool(db.get_setting("ntfy_enabled"), default=True)
+        notifier_provider = db.get_setting("notifier_provider") or "ntfy"
+        gotify_url = db.get_setting("gotify_url") or ""
         agent = _load_agent_config(db)
         cf_auto = _bool(db.get_setting("cf_auto_register_hostnames"), default=True)
         disk_warn = int(db.get_setting("disk_warn_percent") or "80")
@@ -145,6 +168,8 @@ def get_settings() -> SettingsOut:
         ntfy_topic=ntfy_topic,
         ntfy_url=ntfy_url,
         ntfy_enabled=ntfy_enabled,
+        notifier_provider=notifier_provider,
+        gotify_url=gotify_url,
         llm_enabled=_llm_enabled,
         llm_backend=_llm_backend,
         llm_ollama_url=agent.get("ollama_url", "http://localhost:11434"),
@@ -174,18 +199,21 @@ def update_settings(payload: SettingsPayload) -> SettingsOut:
 
         if payload.ntfy_topic is not None:
             db.set_setting("ntfy_topic", payload.ntfy_topic)
-        if payload.ntfy_url is not None:
-            _ntfy = payload.ntfy_url.strip()
-            if _ntfy and not _ntfy.startswith(("http://", "https://")):
-                from fastapi import HTTPException
-
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"ntfy_url must start with http:// or https://, got: '{_ntfy[:50]}'",
-                )
-            db.set_setting("ntfy_url", _ntfy)
         if payload.ntfy_enabled is not None:
             db.set_setting("ntfy_enabled", "true" if payload.ntfy_enabled else "false")
+        # ntfy_url + provider + gotify validated/persisted by the notifier registry (single owner).
+        try:
+            notifiers.apply_settings(
+                db,
+                ntfy_url=payload.ntfy_url,
+                provider=payload.notifier_provider,
+                gotify_url=payload.gotify_url,
+                gotify_token=payload.gotify_token,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=safe_detail(e, "Notifier settings rejected.", log=log)
+            ) from e
 
         # LLM agent config is a JSON blob
         if payload.llm_enabled is not None:
@@ -215,7 +243,10 @@ def update_settings(payload: SettingsPayload) -> SettingsOut:
         if payload.disk_error_percent is not None:
             db.set_setting("disk_error_percent", str(payload.disk_error_percent))
 
-    log.info("Settings updated: %s", payload.model_dump(exclude_none=True))
+    # Redact secrets — gotify_token must never reach the logs (mirrors SettingsOut omission).
+    log.info(
+        "Settings updated: %s", payload.model_dump(exclude_none=True, exclude={"gotify_token"})
+    )
     return get_settings()
 
 
@@ -353,98 +384,36 @@ def get_system_profile() -> dict[str, Any]:
 
 # ── Secrets (env file) ──────────────────────────────────────────────────────
 
-# Keys exposed in the Secrets UI — others are omitted for safety
-_SECRETS_KEYS = [
-    "CF_DNS_API_TOKEN",
-    "CF_ACCOUNT_ID",
-    "CF_TUNNEL_ID",
-    "CF_ZONE_ID",
-    "POSTGRES_PASSWORD",
-    "PLEX_CLAIM",
-    "KOMODO_JWT_SECRET",
-    "KOMODO_PASSKEY",
-    "DOCKHAND_DB_PASSWORD",
-    "TZ",
-    "CONFIG_ROOT",
-    "MEDIA_ROOT",
-    "MS_PORT",
-    "DOCKER_GID",
-    "HF_TOKEN",
-]
 
+def ensure_control_plane_token_provisioned() -> bool:
+    """Generate-if-absent the #976 control-plane token into .env (idempotent).
 
-def _unquote_env_val(val: str) -> str:
-    """Strip surrounding single or double quotes from a .env value."""
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
-        return val[1:-1]
-    return val
+    Mirrors the managed-service ``_ensure_env_secrets`` pattern (executor.py): the token is
+    generated ONCE, on first provision, and reused on every subsequent boot. Covers every
+    install path (deploy.sh seeds it directly; the Python installer + existing-install upgrades
+    get it here at startup) with a single seam — so ``enforce`` mode (#1251) always has a real
+    token to check, and the §C6 posture badge's provisioned-state is never spuriously unset.
 
+    Skips generation when a token already exists in either the .env file OR the StateDB
+    ``control_plane_token`` setting (auth.py's two configured sources), so an operator-set token
+    is never clobbered. Returns True iff it generated and wrote a new token.
+    """
+    import secrets as _secrets
 
-def _quote_env_val(val: str) -> str:
-    """Single-quote values containing $ so Docker Compose doesn't interpolate them."""
-    if "$" in val and not (val.startswith("'") and val.endswith("'")):
-        return "'" + val + "'"
-    return val
+    env = _read_env_file()
+    if env.get(_CONTROL_PLANE_ENV_KEY):
+        return False
+    try:
+        with StateDB() as db:
+            if db.get_setting(_CONTROL_PLANE_SETTING_KEY):
+                return False
+    except Exception as exc:  # StateDB unreadable → fall through and provision into .env
+        log.debug("control-plane provision: settings read failed: %s", exc)
 
-
-def _sanitize_env_val(val: str) -> str:
-    """Strip newlines (injection guard) then quote if needed."""
-    v = str(val).replace(chr(10), "").replace(chr(13), "")
-    return _quote_env_val(v)
-
-
-def _read_env_file() -> dict[str, str]:
-    """Read the .env file and return a {key: value} dict."""
-    env_path = config.env_file
-    result: dict[str, str] = {}
-    if not env_path.exists():
-        return result
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, val = line.partition("=")
-            result[key.strip()] = _unquote_env_val(val.strip())
-    return result
-
-
-def _write_env_file(updates: dict[str, str]) -> None:
-    """Update specific keys in the .env file, preserving all other content."""
-    env_path = config.env_file
-    # Create .env if it doesn't exist — first-run or test environment
-    if not env_path.exists():
-        try:
-            env_path.parent.mkdir(parents=True, exist_ok=True)
-            env_path.touch(mode=0o600)
-        except Exception as e:
-            raise FileNotFoundError(
-                f"Cannot create .env at {env_path}: {e}. "
-                f"Run deploy.sh to initialize the environment file."
-            ) from e
-
-    lines = env_path.read_text().splitlines(keepends=True)
-    written_keys: set[str] = set()
-    new_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("#") or "=" not in stripped:
-            new_lines.append(line)
-            continue
-        key = stripped.split("=", 1)[0].strip()
-        if key in updates:
-            new_lines.append(f"{key}={_sanitize_env_val(updates[key])}\n")
-            written_keys.add(key)
-        else:
-            new_lines.append(line)
-
-    # Append any keys that weren't already in the file
-    for key, val in updates.items():
-        if key not in written_keys:
-            new_lines.append(f"{key}={_sanitize_env_val(val)}\n")
-
-    env_path.write_text("".join(new_lines))
+    token = _secrets.token_urlsafe(32)
+    _write_env_file({_CONTROL_PLANE_ENV_KEY: token})
+    log.info("control-plane token: auto-provisioned into %s", config.env_file)
+    return True
 
 
 @router.get("/secrets")
@@ -454,14 +423,7 @@ def get_secrets() -> dict[str, Any]:
     """
     env = _read_env_file()
     result: dict[str, dict[str, Any]] = {}
-    sensitive = {
-        "CF_DNS_API_TOKEN",
-        "POSTGRES_PASSWORD",
-        "KOMODO_JWT_SECRET",
-        "KOMODO_PASSKEY",
-        "DOCKHAND_DB_PASSWORD",
-        "PLEX_CLAIM",
-    }
+    sensitive = _SENSITIVE_SECRET_KEYS
 
     for key in _SECRETS_KEYS:
         val = env.get(key, "")
@@ -518,7 +480,9 @@ def update_secrets(payload: SecretUpdate) -> dict[str, Any]:
     try:
         _write_env_file(payload.updates)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail=safe_detail(e, "Could not write settings.", log=log)
+        ) from e
 
     return {"ok": True, "updated": list(payload.updates.keys())}
 
@@ -554,7 +518,12 @@ def update_ai_safety(payload: SafetyUpdate) -> dict[str, Any]:
     try:
         set_safety_level(payload.action_type, payload.level)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise HTTPException(
+            status_code=422,
+            detail=safe_detail(
+                e, "Invalid action type or safety level (valid: observe, suggest, act).", log=log
+            ),
+        ) from e
     return {"ok": True, "action_type": payload.action_type, "level": payload.level}
 
 
@@ -591,7 +560,9 @@ def update_preapproval_tier(payload: TierDefaultUpdate) -> dict[str, Any]:
     try:
         set_tier_default(ActionTier.from_value(payload.tier), payload.pre_approved)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise HTTPException(
+            status_code=422, detail=safe_detail(e, "Invalid tier (must be 0-3).", log=log)
+        ) from e
     from backend.agent.policy import effective_policy_view
 
     return effective_policy_view()
@@ -616,7 +587,10 @@ def update_preapproval_app(payload: AppOverrideUpdate) -> dict[str, Any]:
     try:
         set_app_override(payload.app_key, ActionTier.from_value(payload.tier), payload.pre_approved)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise HTTPException(
+            status_code=422,
+            detail=safe_detail(e, "Invalid app override (tier must be 0-3).", log=log),
+        ) from e
     from backend.agent.policy import effective_policy_view
 
     return effective_policy_view()

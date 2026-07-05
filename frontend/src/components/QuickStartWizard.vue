@@ -137,6 +137,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import { quickstart } from '../api/client'
 
 const wizard = ref<any>({ show: false, phases: [], percent: 0, required_done: 0, total_required: 0 })
 const dismissed = ref(false)
@@ -144,24 +145,19 @@ const activePhase = ref<string | null>(null)
 
 async function load() {
   try {
-    const r = await fetch('/api/v1/quickstart')
-    if (r.ok) wizard.value = await r.json()
+    wizard.value = await quickstart.get()
   } catch { /* intentional: load failure leaves wizard empty */ }
 }
 
 async function markPhase(id: string, status: string) {
-  await fetch(`/api/v1/quickstart/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  })
+  await quickstart.markPhase(id, status)
   activePhase.value = null
   await load()
 }
 
 async function dismiss() {
   dismissed.value = true
-  await fetch('/api/v1/quickstart/dismiss', { method: 'POST' })
+  await quickstart.dismiss()
 }
 
 function phaseIcon(phase: any): string {

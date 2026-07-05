@@ -11,7 +11,7 @@ image_tag: latest
 linuxserver: false
 
 ports:
-  web: 5002
+  web: 5000
 
 volumes:
   config: /kavita/config
@@ -26,7 +26,7 @@ volumes:
 env:
   TZ: "${TZ}"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: kavita
 

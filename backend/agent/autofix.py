@@ -163,7 +163,7 @@ def apply_eligible_fixes(
                     row["diagnosis_class"],
                     fix_id,
                 )
-                result = apply_safe_fix(fix_id, row)
+                result = apply_safe_fix(fix_id, row, operational_level=operational_level)
                 results.append(
                     {
                         "fix_id": fix_id,

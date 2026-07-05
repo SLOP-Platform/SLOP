@@ -79,7 +79,7 @@ auto_secrets:
   - key: KOMODO_DB_PASSWORD
     length: 32
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: komodo
 

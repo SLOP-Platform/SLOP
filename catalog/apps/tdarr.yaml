@@ -40,7 +40,7 @@ env:
   ffmpegVersion: "6"
   nodeName: "MyInternalNode"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: tdarr
 

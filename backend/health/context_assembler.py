@@ -57,7 +57,6 @@ def _build(app_key: str, check_name: str, runtime: dict[str, Any]) -> str:
         _section_fix_history(db, app_key, cutoff, lines)
         _section_pending_fixes(db, app_key, check_name, lines)
         _section_notifications(db, lines)
-        _section_suppressed_actions(db, app_key, lines)
         _section_prev_llm_diagnoses(db, app_key, cutoff, lines)
         _section_app_wiring(db, app_key, lines)
         _section_service_deps(db, app_key, lines)
@@ -290,7 +289,7 @@ def _section_failure_duration(db: Any, app_key: str, check_name: str, lines: lis
 def _section_fix_history(db: Any, app_key: str, cutoff: int, lines: list[str]) -> None:
     try:
         fixes = db.execute(
-            """SELECT error_type, suggested_fix, outcome, created_at
+            """SELECT error_type, suggested_fix, outcome, created_at, rejection_reason
                FROM fix_history
                WHERE app_key = ? AND created_at >= ?
                ORDER BY created_at DESC LIMIT 10""",
@@ -316,6 +315,8 @@ def _section_fix_history(db: Any, app_key: str, cutoff: int, lines: list[str]) -
                     suffix = " — user ran manually, outcome unknown"
                 elif f["outcome"] == "pending":
                     suffix = " — fix applied but not yet verified"
+                if f["outcome"] == "failure" and f["rejection_reason"]:
+                    suffix = f" — rejected: {f['rejection_reason'][:60]}"
                 lines.append(f"  {ts} [{icon}] {f['suggested_fix'][:80]}{suffix}")
     except Exception as e:
         log.debug("diagnostic context section skipped: %s", e)
@@ -367,23 +368,10 @@ def _section_notifications(db: Any, lines: list[str]) -> None:
         log.debug("diagnostic context section skipped: %s", e)
 
 
-# ── 6b-iii. Suppressed actions (rejected ≥3 times) ──────────────────
-def _section_suppressed_actions(db: Any, app_key: str, lines: list[str]) -> None:
-    try:
-        _suppressed = db.execute(
-            """SELECT DISTINCT action_type FROM fix_history
-               WHERE app_key=? AND outcome='rejected'
-               GROUP BY action_type HAVING COUNT(*) >= 3""",
-            (app_key,),
-        ).fetchall()
-        if _suppressed:
-            _sup_list = [r["action_type"] for r in _suppressed]
-            lines.append(
-                f"SUPPRESSED ACTIONS (rejected >=3x by user — do NOT suggest these): "
-                f"{', '.join(_sup_list)}"
-            )
-    except Exception as e:
-        log.debug("diagnostic context section skipped: %s", e)
+# NOTE (#1164): rejection-learning is now wired — rejection_reason is captured
+# on fix_history rows (migration 024) and surfaced in _section_fix_history above.
+# Suppress-after-3 remains unbuilt: it needs a SEPARATE rejection signal that
+# preserves the failure-tally contract.
 
 
 # ── 7. Previous LLM diagnoses (routing log) ─────────────────────────

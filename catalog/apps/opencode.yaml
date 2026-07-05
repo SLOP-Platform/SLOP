@@ -13,8 +13,8 @@ icon: 💻
 version: "1.0"
 linuxserver: false
 
-image: node:24-trixie
-image_tag: latest
+image: node
+image_tag: "24-trixie"
 
 # npm install runs at container start — allow extra time before health checks
 start_grace_s: 60
@@ -59,7 +59,7 @@ install_prompts:
     required: false
     default: ""
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: opencode
 

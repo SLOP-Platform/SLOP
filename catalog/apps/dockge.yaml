@@ -24,15 +24,18 @@ volumes:
     - host: /var/run/docker.sock
       container: /var/run/docker.sock
       readonly: false
-    # IMPORTANT: stacks path must match inside and outside container
-    - host: /opt/stacks
-      container: /opt/stacks
+    # IMPORTANT: stacks path must match inside and outside container.
+    # Use ${CONFIG_ROOT} (docker-compose .env interpolation) so the SAME literal
+    # path is substituted on BOTH sides + in DOCKGE_STACKS_DIR — non-root,
+    # under the wizard-configured config_root (was root-required /opt/stacks).
+    - host: "${CONFIG_ROOT}/dockge/stacks"
+      container: "${CONFIG_ROOT}/dockge/stacks"
 
 env:
   TZ: "${TZ}"
-  DOCKGE_STACKS_DIR: /opt/stacks
+  DOCKGE_STACKS_DIR: "${CONFIG_ROOT}/dockge/stacks"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: dockge
 

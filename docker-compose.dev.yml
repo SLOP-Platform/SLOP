@@ -59,7 +59,7 @@ services:
 
   # ntfy — SLOP's internal notification service (push alerts to the UI and mobile)
   ntfy:
-    image: binwiederhier/ntfy
+    image: binwiederhier/ntfy  # last-verified: 2026-06-21 — intentional upstream-tracking float (matches catalog/apps/ntfy.yaml convention; #945)
     container_name: ntfy
     # `serve` is required — without a command the image just prints help and
     # exits 0, crash-looping under restart: unless-stopped (the /v1/health

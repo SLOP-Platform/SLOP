@@ -16,7 +16,7 @@ image_tag: latest
 linuxserver: false
 
 ports:
-  web: 3014
+  web: 3000
 
 volumes:
   config: /app/data
@@ -30,7 +30,7 @@ env:
   # Optional PostgreSQL — leave blank to use SQLite (recommended for single host)
   # DATABASE_URL: "postgresql://dockhand:${DOCKHAND_DB_PASSWORD}@postgres:5432/dockhand"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: dockhand
 

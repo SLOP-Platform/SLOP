@@ -29,7 +29,7 @@ volumes:
 env:
   DOCKER_HOST: /var/run/docker.sock
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: netdata
 

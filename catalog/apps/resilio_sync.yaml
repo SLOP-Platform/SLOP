@@ -16,7 +16,7 @@ volumes:
   config: /config
   sync: /sync
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: resilio
 

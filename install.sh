@@ -3,11 +3,11 @@
 #              install python3 + git, then exec to installer/main.py.
 #
 # curl|bash (headline path):
-#   curl -fsSL https://raw.githubusercontent.com/Nnyan/SLOP/main/install.sh \
+#   curl -fsSL https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/install.sh \
 #     | sudo bash -s -- --install-docker=yes
 #
 # git-clone (inspectable path):
-#   git clone https://github.com/Nnyan/SLOP.git
+#   git clone https://github.com/SLOP-Platform/SLOP.git
 #   cd SLOP && sudo ./install.sh
 
 set -euo pipefail
@@ -25,6 +25,7 @@ MS_INSTALL_DOCKER=""
 MS_VERSION_REF=""
 MS_FORCE=0
 MS_VERIFY=0
+MS_SKIP_TREE_VERIFY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,17 +51,30 @@ while [ $# -gt 0 ]; do
     ;;
   --force) MS_FORCE=1 ;;
   --verify) MS_VERIFY=1 ;;
-  *) ;;
+  --skip-tree-verify) MS_SKIP_TREE_VERIFY=1 ;;
+  *) ;; 
   esac
   shift
 done
-export MS_INSTALL_DIR MS_DATA_DIR MS_INSTALL_DOCKER MS_VERSION_REF MS_FORCE MS_VERIFY
+export MS_INSTALL_DIR MS_DATA_DIR MS_INSTALL_DOCKER MS_VERSION_REF MS_FORCE MS_VERIFY MS_SKIP_TREE_VERIFY
 
 # ── Step 2: Verify installer integrity (--verify) ────────────────────────────
+#
+# --verify checksums THIS bootstrap script (install.sh) against the
+# release-published install.sh.sha256.
+#
+# Tree integrity (the installer/backend tree cloned and run as root) is
+# verified separately by the Python installer: after cloning a tagged release,
+# fetch_repo() downloads a per-release tree.checksums manifest and runs
+# sha256sum -c against the cloned tree.  Verification is automatic for v5
+# tagged releases; use --skip-tree-verify to disable.
 if [ "$MS_VERIFY" -eq 1 ]; then
   _ref="${MS_VERSION_REF:-main}"
-  _checksum_url="https://github.com/Nnyan/SLOP/releases/download/${_ref}/install.sh.sha256"
+  _checksum_url="https://github.com/SLOP-Platform/SLOP/releases/download/${_ref}/install.sh.sha256"
   echo "Verifying installer integrity against ${_checksum_url} ..."
+  echo "NOTE: --verify covers THIS bootstrap script (install.sh) only." >&2
+  echo "      The cloned installer/backend tree is verified separately via a" >&2
+  echo "      per-release checksum manifest (automatic for tagged releases)." >&2
 
   if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     echo "ERROR: --verify requires curl or wget to download the checksum." >&2
@@ -94,7 +108,8 @@ if [ "$MS_VERIFY" -eq 1 ]; then
   _actual_hash="$(sha256sum "$0" | awk '{print $1}')"
 
   if [ "$_actual_hash" = "$_expected_hash" ]; then
-    echo "OK: installer checksum verified (${_actual_hash})."
+    echo "OK: bootstrap installer script (install.sh) checksum verified (${_actual_hash})."
+    echo "    The cloned tree will be verified separately via per-release checksum manifest."
   else
     echo "ERROR: checksum mismatch." >&2
     echo "  Expected: ${_expected_hash}" >&2
@@ -241,7 +256,7 @@ if git -C "$_SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   _REPO_DIR="$_SCRIPT_DIR"
 else
   _REPO_DIR="$(mktemp -d)"
-  git clone --branch "${MS_VERSION_REF:-main}" "https://github.com/Nnyan/SLOP.git" "$_REPO_DIR" --quiet
+  git clone --branch "${MS_VERSION_REF:-main}" "https://github.com/SLOP-Platform/SLOP.git" "$_REPO_DIR" --quiet
 fi
 
 # ── Hand off to the Python installer ─────────────────────────────────────────
@@ -253,4 +268,5 @@ _PY_ARGS=(install
 [ -n "$MS_INSTALL_DOCKER" ] && _PY_ARGS+=(--install-docker="$MS_INSTALL_DOCKER")
 [ -n "$MS_VERSION_REF" ] && _PY_ARGS+=(--version-ref="$MS_VERSION_REF")
 [ "$MS_FORCE" -eq 1 ] && _PY_ARGS+=(--force)
+[ "$MS_SKIP_TREE_VERIFY" -eq 1 ] && _PY_ARGS+=(--skip-tree-verify)
 cd "$_REPO_DIR" && exec "$_MS_PYTHON3" -m installer.main "${_PY_ARGS[@]}"

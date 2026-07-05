@@ -33,7 +33,10 @@ from typing import Literal
 # Which swap engine governs the slot.
 #   stateful  — has migratable state (users, hostnames) → swap_slot 6-step engine.
 #   stateless — config-only; a swap is a plain redeploy → set_active engine.
-SlotKind = Literal["stateful", "stateless"]
+#   selection — NOT a host-mutating infra slot; a registry of simultaneously-
+#               available providers selected per-request (the LLM router, #988).
+#               No deploy/remove/migrate lifecycle; neither swap engine governs it.
+SlotKind = Literal["stateful", "stateless", "selection"]
 
 # How the rest of SLOP is wired to the active provider. Each value is the actual
 # mechanism a provider in that slot uses today (cited per contract).
@@ -43,11 +46,14 @@ WiringKind = Literal[
     "env-injection",  # env-var injection into other services
     "network-mode",  # docker network_mode: service:<container> (vpn)
     "labels-route",  # plain Traefik Host(...) router labels (dashboard/management)
+    "api-router-chain",  # per-request router selection over a provider chain (llm)
 ]
 
 # Cardinality of the slot — how many providers may be active at once.
-#   one-active   — exactly one primary active; the rest of SLOP routes through it.
-Cardinality = Literal["one-active"]
+#   one-active     — exactly one primary active; the rest of SLOP routes through it.
+#   many-available — all registered providers are simultaneously available; the
+#                    router selects per-request (no single "active" provider).
+Cardinality = Literal["one-active", "many-available"]
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,11 @@ class SlotContract:
     # stateful swap_slot engine). Stateless slots use set_active and declare False.
     swap_applies: bool = False
     notes: str = ""
+    # For a `selection` slot only: the dotted ``module:attr`` path to the provider
+    # registry (a ``dict[str, ProviderSpec]``) the slot selects over. Empty for
+    # lifecycle (stateful/stateless) slots, which have no registry_ref. The
+    # selection conformance facet (C11) resolves and validates it (fail-closed).
+    registry_ref: str = ""
 
 
 # Always-implemented lifecycle methods — these are abstract on InfraProvider, so
@@ -114,7 +125,9 @@ class SlotContract:
 LIFECYCLE_METHODS: tuple[str, ...] = ("deploy", "remove", "verify")
 
 
-# ── The five live slot contracts (each field cited to real provider code) ──────
+# ── The slot contracts (each field cited to real provider code) ────────────────
+# Six deployable lifecycle slots (auth/tunnel/vpn/management/dashboard/reverse_proxy)
+# + one selection slot (llm, #988). deployable_slots()/selection_slots() partition them.
 
 SLOT_CONTRACTS: dict[str, SlotContract] = {
     # auth — forwardAuth middleware labels.
@@ -203,10 +216,11 @@ SLOT_CONTRACTS: dict[str, SlotContract] = {
         swap_applies=False,
         notes=(
             "Management UIs hold their own state in their own volumes; SLOP does "
-            "not migrate it. Config-only redeploy via set_active. NOTE: several "
-            "providers smuggle an upsert_app DB write into list_hostnames "
-            "(management_portainer.py:127-147, management_alternatives.py) — a "
-            "side-effect overload the C7 sentinel probe must not be fooled by."
+            "not migrate it. Config-only redeploy via set_active. App registration "
+            "(upsert_app) lives in each provider's deploy() — the canonical seam, "
+            "matching every other infra provider; list_hostnames is a pure read. "
+            "(#994 removed the prior upsert smuggled into the read-only "
+            "list_hostnames that the C7 sentinel had to be hardened against.)"
         ),
     ),
     # dashboard — plain Traefik Host(...) router labels.
@@ -228,6 +242,66 @@ SLOT_CONTRACTS: dict[str, SlotContract] = {
             "migrate it. Config-only redeploy via set_active. C8/C9 N/A (declared)."
         ),
     ),
+    # reverse_proxy — FOUNDATIONAL slot (other slots emit their route/forwardauth
+    # labels THROUGH the active provider). Traefik is the first provider.
+    #   wiring: the provider owns the raw `traefik.http.*` label emission seam
+    #           (emit_route_labels/emit_forwardauth_labels). Today compose.py emits
+    #           those labels directly (build_traefik_fragment:190 / _traefik_labels:584);
+    #           the provider WRAPS that logic in P1 and BECOMES the sole emitter in P2
+    #           (#990 staged inversion).
+    #   stateless: config-only — Traefik's routing is materialized from compose labels +
+    #           static traefik.yml, not a SLOP-migrated store. A swap is a plain redeploy
+    #           (set_active). TLS/cert state (acme.json) is consumed BY-REFERENCE and is
+    #           NOT in this contract's migration_pair (Traefik/Caddy cert formats differ —
+    #           folding it risks ACME data loss; #990 design §Contract).
+    "reverse_proxy": SlotContract(
+        slot="reverse_proxy",
+        slot_kind="stateless",
+        wiring_kind="labels-route",
+        cardinality="one-active",
+        required_methods=("emit_route_labels", "emit_forwardauth_labels"),
+        migration_pair=None,
+        health_probe=HealthProbe(method="verify", must_distinguish_unhealthy=True),
+        migration_applies=False,
+        swap_applies=False,
+        notes=(
+            "Foundational reverse-proxy slot (#990). The active provider owns the raw "
+            "Traefik label emission seam (emit_route_labels/emit_forwardauth_labels). "
+            "Stateless: cert/ACME state is by-reference (migration_pair=None), so a swap "
+            "is a redeploy via set_active. P1 (this) wires the provider additively "
+            "(it wraps compose.py); P2 inverts compose.py to emit BY-REFERENCE through it."
+        ),
+    ),
+    # llm — registry-backed SELECTION slot (#988), NOT a host-mutating infra slot.
+    #   wiring: the LLM router selects a provider per request over a fallback chain
+    #           (backend/agent/router/registry.py PROVIDER_REGISTRY → selector.py);
+    #           there is no Traefik label / network wiring and no deploy/remove.
+    #   selection: ~14 providers all simultaneously available; most are SaaS with
+    #           no lifecycle. Conforms via the selection-kind contract + C11 registry
+    #           validation, not an InfraProvider subclass. No migratable state.
+    "llm": SlotContract(
+        slot="llm",
+        slot_kind="selection",
+        wiring_kind="api-router-chain",
+        cardinality="many-available",
+        required_methods=(),
+        migration_pair=None,
+        health_probe=HealthProbe(method="verify", must_distinguish_unhealthy=True),
+        migration_applies=False,
+        swap_applies=False,
+        registry_ref="backend.agent.router.registry:PROVIDER_REGISTRY",
+        notes=(
+            "Selection slot (NOT a host-mutating infra slot). The LLM router's "
+            "providers (PROVIDER_REGISTRY) are all simultaneously available as a "
+            "per-request fallback chain — no deploy/remove/migrate, most are SaaS. "
+            "Conforms to the slot framework via the selection-kind contract + C11 "
+            "registry validation (tests/test_provider_conformance.py), NOT an "
+            "InfraProvider subclass (#988). Never persisted as an infra_slots DB "
+            "row (migration 001 CHECK excludes it); deployable_slots() omits it so "
+            "it never surfaces in the infra deploy API/UI. health_probe is inert "
+            "here (no provider exercises C6)."
+        ),
+    ),
 }
 
 
@@ -235,8 +309,29 @@ SLOT_CONTRACTS: dict[str, SlotContract] = {
 
 
 def all_slots() -> tuple[str, ...]:
-    """The canonical slot set — replaces the three hand-maintained literal lists."""
+    """The canonical slot set — replaces the three hand-maintained literal lists.
+
+    This is the FULL SSOT (deployable + selection). Infra-deploy consumers that
+    must exclude registry-backed selection slots use ``deployable_slots()``.
+    """
     return tuple(SLOT_CONTRACTS.keys())
+
+
+def deployable_slots() -> tuple[str, ...]:
+    """Host-mutating infra slots (deploy/swap-managed) — every slot EXCEPT
+    selection slots. This is the set the infra deploy API/UI surface and that
+    migration 001's ``infra_slots`` seed + CHECK enumerate; a selection slot
+    (e.g. ``llm``) is registry-backed and never persisted/deployed, so it is
+    excluded. Use this — not ``all_slots()`` — wherever the operand is a
+    deployable slot, so a selection slot can never leak into the deploy surface."""
+    return tuple(s for s, c in SLOT_CONTRACTS.items() if c.slot_kind != "selection")
+
+
+def selection_slots() -> tuple[str, ...]:
+    """Registry-backed selection slots (``slot_kind == "selection"``) — providers
+    are simultaneously available and selected per-request, with no deploy
+    lifecycle. The complement of ``deployable_slots()`` within ``all_slots()``."""
+    return tuple(s for s, c in SLOT_CONTRACTS.items() if c.slot_kind == "selection")
 
 
 def get_contract(slot: str) -> SlotContract:
@@ -259,6 +354,8 @@ __all__ = [
     "SlotKind",
     "WiringKind",
     "all_slots",
+    "deployable_slots",
     "get_contract",
     "required_methods_for",
+    "selection_slots",
 ]

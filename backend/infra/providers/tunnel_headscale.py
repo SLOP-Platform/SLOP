@@ -12,15 +12,18 @@ from backend.core.config import config
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.infra.base import InfraProvider, ProviderResult
+from backend.infra.registry import register
 
 log = get_logger(__name__)
 CONTAINER_NAME = "headscale"
 
 
+@register
 class HeadscaleProvider(InfraProvider):
     slot = "tunnel"
     key = "headscale"
     display_name = "Headscale"
+    category = "networking"
     description = (
         "Self-hosted Tailscale control server. Full WireGuard mesh — no Tailscale cloud dependency."
     )
@@ -126,7 +129,7 @@ dns_config:
             )
 
         fragment = {
-            "image": "headscale/headscale:latest",
+            "image": "headscale/headscale:latest",  # last-verified: 2026-06-21 — upstream-tracking float (#1228)
             "container_name": CONTAINER_NAME,
             "command": "headscale serve",
             "volumes": [
@@ -173,9 +176,9 @@ dns_config:
             with _SDB2() as _db2:
                 _db2.upsert_app(
                     "headscale",
-                    display_name="Headscale",
+                    display_name=self.display_name,
                     tier=0,  # tier 0 = infrastructure layer
-                    category="networking",
+                    category=self.category,
                     status="running",
                     image="headscale/headscale:latest",
                     image_tag="latest",

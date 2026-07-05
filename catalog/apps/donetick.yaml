@@ -19,7 +19,7 @@ volumes:
 env:
   DT_ENV: selfhosted
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: donetick
 

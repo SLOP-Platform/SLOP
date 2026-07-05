@@ -22,7 +22,7 @@ env:
   TZ: "${TZ}"
   BASE_URL: "https://changedetection.${DOMAIN}"
 
-traefik:
+reverse_proxy:
   enabled: true
   subdomain: changedetection
 

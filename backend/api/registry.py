@@ -19,11 +19,17 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from backend.api.rate_limit import limiter
 from pydantic import BaseModel
 
+from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
+from backend.core.path_guard import PathNotAllowed, safe_component
 from backend.core.state import StateDB
+from backend.core.url_guard import UrlNotAllowed, assert_not_metadata_url
+from backend.core.url_guard_httpx import pinned_async_client
 from backend.manifests.loader import (
     ManifestError,
     clear_cache,
@@ -76,9 +82,11 @@ def _get_registry_url() -> str:
     try:
         with StateDB() as db:
             url = db.get_setting("registry_url")
-        return url or "https://raw.githubusercontent.com/Nnyan/SLOP/main/catalog/registry.json"
+        return (
+            url or "https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/catalog/registry.json"
+        )
     except Exception:
-        return "https://raw.githubusercontent.com/Nnyan/SLOP/main/catalog/registry.json"
+        return "https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/catalog/registry.json"
 
 
 def _load_db_registry() -> list[dict[str, Any]]:
@@ -140,7 +148,7 @@ def list_registry() -> list[RegistryEntry]:
                     tier=m.tier,
                     service_type=m.service_type,
                     tags=m.tags[:5],
-                    source_url=f"https://raw.githubusercontent.com/Nnyan/SLOP/main/catalog/apps/{m.key}.yaml",
+                    source_url=f"https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/catalog/apps/{m.key}.yaml",
                     author="official",
                     verified=True,
                     installed=True,  # built-in = always installed
@@ -170,7 +178,8 @@ def list_registry() -> list[RegistryEntry]:
 
 
 @router.post("/sync", response_model=SyncResult)
-async def sync_registry() -> SyncResult:
+@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; external registry fetch (#1205 external-fetch tier)
+async def sync_registry(request: Request) -> SyncResult:
     """Fetch the latest registry from the remote URL and update the DB.
 
     The registry is a JSON file listing available manifests with their
@@ -181,8 +190,26 @@ async def sync_registry() -> SyncResult:
     added = 0
     updated = 0
 
+    # SSRF floor (#1193): registry_url is operator-settable, so a mis-set/hostile value
+    # could aim this server-side fetch at a cloud-metadata (169.254.169.254) or
+    # link-local endpoint. Block ONLY that policy-free always-deny set — a self-hosted
+    # private-LAN registry (192.168.x / 10.x) stays allowed (the broader policy is #1193
+    # DToC). Literal-only here (operator-config threat model; httpx resolves at connect).
     try:
-        async with httpx.AsyncClient(timeout=REGISTRY_TIMEOUT) as client:
+        assert_not_metadata_url(registry_url, resolve_dns=False)
+    except UrlNotAllowed as e:
+        log.warning("registry sync blocked (SSRF floor): %s", e)
+        return SyncResult(
+            ok=False,
+            added=0,
+            updated=0,
+            total=0,
+            registry_url=registry_url,
+            error="Registry URL points at a disallowed address (cloud-metadata/link-local).",
+        )
+
+    try:
+        async with pinned_async_client(timeout=REGISTRY_TIMEOUT) as client:
             resp = await client.get(registry_url)
             resp.raise_for_status()
             data = resp.json()
@@ -202,7 +229,7 @@ async def sync_registry() -> SyncResult:
             updated=0,
             total=0,
             registry_url=registry_url,
-            error=f"Could not fetch registry: {e}",
+            error=safe_detail(e, "Could not fetch registry.", log=log),
         )
 
     manifests = data.get("manifests", [])
@@ -292,7 +319,7 @@ def get_registry_entry(key: str) -> RegistryEntry:
                     tags=m.tags[:5],
                     author="official",
                     verified=True,
-                    source_url=f"https://raw.githubusercontent.com/Nnyan/SLOP/main/catalog/apps/{key}.yaml",
+                    source_url=f"https://raw.githubusercontent.com/SLOP-Platform/SLOP/main/catalog/apps/{key}.yaml",
                     installed=True,
                 )
         except Exception:  # noqa: S110  # best-effort local manifest fallback; raise 404 below if unavailable
@@ -334,12 +361,19 @@ def get_registry_entry(key: str) -> RegistryEntry:
 
 
 @router.post("/{key}/pull")
-async def pull_manifest(key: str) -> dict[str, Any]:
+@limiter.limit("10/minute")  # type: ignore[untyped-decorator]  # slowapi decorator is untyped; external manifest fetch (#1205 external-fetch tier)
+async def pull_manifest(request: Request, key: str) -> dict[str, Any]:
     """Download a manifest from the registry into the local custom catalog.
 
     After pulling, the app appears in the catalog and can be installed
     via the standard POST /api/apps/{key}/install endpoint.
     """
+    # Reject path-traversal in the key before it reaches any filesystem path.
+    try:
+        key = safe_component(key, field="key")
+    except PathNotAllowed as e:
+        raise HTTPException(status_code=400, detail=safe_detail(e, "Invalid key.", log=log)) from e
+
     # Get the source URL
     with StateDB() as db:
         row = db._c.execute(
@@ -359,7 +393,7 @@ async def pull_manifest(key: str) -> dict[str, Any]:
         import os as _os
 
         CUSTOM_CATALOG_DIR.mkdir(parents=True, exist_ok=True)
-        async with httpx.AsyncClient(timeout=REGISTRY_TIMEOUT) as client:
+        async with pinned_async_client(timeout=REGISTRY_TIMEOUT) as client:
             resp = await client.get(source_url)
             resp.raise_for_status()
             raw_text = resp.text
@@ -390,7 +424,9 @@ async def pull_manifest(key: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not download manifest: {e}") from e
+        raise HTTPException(
+            status_code=500, detail=safe_detail(e, "Could not download manifest.", log=log)
+        ) from e
 
     # Mark as installed in registry DB
     with StateDB() as db:
@@ -433,7 +469,7 @@ def list_custom_manifests() -> list[dict[str, Any]]:
                 {
                     "key": yaml_path.stem,
                     "display_name": yaml_path.stem,
-                    "error": str(e),
+                    "error": safe_detail(e, "Could not load manifest.", log=log),
                     "path": str(yaml_path),
                 }
             )
@@ -443,6 +479,10 @@ def list_custom_manifests() -> list[dict[str, Any]]:
 @router.delete("/custom/{key}")
 def remove_custom_manifest(key: str) -> dict[str, Any]:
     """Remove a custom manifest from the local catalog."""
+    try:
+        key = safe_component(key, field="key")
+    except PathNotAllowed as e:
+        raise HTTPException(status_code=400, detail=safe_detail(e, "Invalid key.", log=log)) from e
     path = CUSTOM_CATALOG_DIR / f"{key}.yaml"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Custom manifest '{key}' not found.")
