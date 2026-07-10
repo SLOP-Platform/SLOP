@@ -664,7 +664,12 @@ if _static.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa_fallback(full_path: str) -> FileResponse:
-        """Return index.html for all non-API GET requests (Vue Router client-side routing)."""
+        """Return index.html for all non-API GET requests (Vue Router client-side routing).
+
+        Sets Cache-Control: no-cache so browsers always revalidate index.html
+        after a deploy — the JS chunks inside it have content hashes, so a stale
+        index.html references deleted chunks and breaks lazy-loaded views.
+        """
         index = _static / "index.html"
         if not index.exists():
             from fastapi import HTTPException
@@ -672,7 +677,7 @@ if _static.exists():
             raise HTTPException(
                 status_code=503, detail="Frontend not built. Run: cd frontend && npm run build"
             )
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 else:
     log.warning(
         "Frontend static dir not found: %s — UI will not be available. "

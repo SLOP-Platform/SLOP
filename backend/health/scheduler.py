@@ -36,6 +36,8 @@ import json
 import subprocess
 import time
 
+from backend.platform.ollama_runtime import normalize_llm_agent_config
+
 log = get_logger(__name__)
 
 # Tracks the running scheduler task so the lifespan can cancel it
@@ -43,7 +45,9 @@ _scheduler_task: asyncio.Task[None] | None = None
 
 DEFAULT_INTERVAL = 60  # seconds between full check cycles
 PLATFORM_READY_POLL = 5  # seconds between platform-ready checks on startup
-MAX_STARTUP_WAIT = 300  # give up waiting for platform after 5 minutes
+# During the setup wizard the platform may remain pending for several minutes.
+# The scheduler should keep polling indefinitely rather than permanently exiting —
+# there is no scenario where a permanently dead scheduler is the right outcome.
 # Per-probe ceilings for the ambient post-cycle phase (#825). A probe that hangs
 # (e.g. a docker SDK call against a wedged daemon with no inner timeout) would
 # otherwise block asyncio.gather forever and stall the next cycle. Two budgets,
@@ -63,10 +67,11 @@ LONG_PROBE_TIMEOUT_SECONDS = 3600
 async def _wait_for_platform() -> bool:
     """Wait until the platform is configured and ready.
 
-    Returns True when ready, False if the timeout is exceeded.
+    Polls indefinitely — the setup wizard may run for several minutes and the
+    scheduler should automatically activate as soon as the platform is marked
+    ready, without requiring a process restart.
     """
-    deadline = time.monotonic() + MAX_STARTUP_WAIT
-    while time.monotonic() < deadline:
+    while True:
         try:
             from backend.core.state import StateDB
 
@@ -77,7 +82,6 @@ async def _wait_for_platform() -> bool:
         except Exception:  # noqa: S110  # best-effort platform status check; retry after sleep
             pass
         await asyncio.sleep(PLATFORM_READY_POLL)
-    return False
 
 
 async def _load_cycle_config() -> dict[str, Any]:
@@ -91,14 +95,14 @@ async def _load_cycle_config() -> dict[str, Any]:
             ntfy_topic = db.get_setting("ntfy_topic") or "slop"
             ntfy_url = db.get_setting("ntfy_url") or "http://ntfy:80"
         interval = int(interval_raw) if interval_raw else DEFAULT_INTERVAL
-        agent_cfg = json.loads(agent_raw) if agent_raw else {}
+        agent_cfg = normalize_llm_agent_config(json.loads(agent_raw) if agent_raw else {})
         _provider = agent_cfg.get("provider", "ollama")
         if _provider == "llamacpp":
             # Docker container hostname (correct default) — catalog key `llamacpp_server`
             # is the compose container_name; localhost is unreachable from the SLOP container.
             _llm_url = agent_cfg.get("llamacpp_url", "http://llamacpp_server:8081")
         else:
-            _llm_url = agent_cfg.get("ollama_url", "http://ollama:11434")
+            _llm_url = agent_cfg.get("ollama_url", "http://localhost:11434")
         return {
             "interval": max(30, interval),
             "ollama_url": _llm_url,
@@ -486,13 +490,7 @@ async def _scheduler_loop() -> None:
     cancel cleanly. Other exceptions are logged and the loop continues.
     """
     log.info("Health scheduler: waiting for platform to be ready…")
-    if not await _wait_for_platform():
-        log.warning(
-            "Health scheduler: platform not ready after %ds — "
-            "checks will not run until SLOP is restarted.",
-            MAX_STARTUP_WAIT,
-        )
-        return
+    await _wait_for_platform()
 
     log.info("Health scheduler started — platform is ready.")
 
@@ -607,14 +605,14 @@ async def _maybe_run_weekly_summary() -> None:
 
                 with SDB() as db:
                     _wcfg_raw = db.get_setting("llm_agent_config")
-                _wcfg = json.loads(_wcfg_raw) if _wcfg_raw else {}
+                _wcfg = normalize_llm_agent_config(json.loads(_wcfg_raw) if _wcfg_raw else {})
                 _wprovider = _wcfg.get("provider", "ollama")
                 if _wprovider == "llamacpp":
                     # Docker container hostname (correct default) — see _load_config above.
                     ollama_url = _wcfg.get("llamacpp_url", "http://llamacpp_server:8081")
                 else:
-                    ollama_url = _wcfg.get("ollama_url", "http://ollama:11434")
-                model = _wcfg.get("ollama_model") or "phi4-mini"
+                    ollama_url = _wcfg.get("ollama_url", "http://localhost:11434")
+                model = _wcfg.get("ollama_model") or _wcfg.get("model") or "phi4-mini"
                 async with pinned_async_client(timeout=60) as client:
                     resp = await client.post(
                         f"{ollama_url}/api/generate",

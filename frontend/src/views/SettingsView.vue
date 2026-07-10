@@ -166,7 +166,7 @@
                     <input
                       v-model="form.llm_ollama_url"
                       class="input text-xs"
-                      :placeholder="form.llm_backend === 'ollama' ? 'http://ollama:11434' : 'http://localhost:8081'"
+                      :placeholder="form.llm_backend === 'ollama' ? 'http://localhost:11434' : 'http://localhost:8081'"
                     >
                   </div>
                   <div>
@@ -206,19 +206,19 @@
                   <!-- Primary provider -->
                   <div>
                     <label class="label text-xs mb-2">Primary provider</label>
-                    <div class="space-y-2">
+                    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                       <div
-                        v-for="(p, key) in featuredProviders"
+                        v-for="(p, key) in orderedCloudProviders"
                         :key="key"
-                        :class="['border rounded-lg p-3 cursor-pointer transition-all',
-                                 llmPrimary === String(key) ? 'border-sky-400 bg-sky-50' : 'border-slate-200 hover:border-slate-300']"
+                        :class="['rounded-xl border p-3 transition-all',
+                                 llmPrimary === String(key) ? 'border-sky-400 bg-sky-50 shadow-sm shadow-sky-100/60' : 'border-slate-200 bg-white hover:border-slate-300']"
                         @click="llmPrimary = String(key)"
                       >
-                        <div class="flex items-center gap-3">
+                        <div class="flex items-start gap-3">
                           <input
                             type="radio"
                             :checked="llmPrimary === String(key)"
-                            class="w-3.5 h-3.5"
+                            class="mt-0.5 h-3.5 w-3.5 shrink-0"
                             readonly
                           >
                           <div class="flex-1 min-w-0">
@@ -240,14 +240,25 @@
                             <div class="text-xs text-slate-400 mt-0.5">
                               {{ p.notes }}
                             </div>
+                            <div class="mt-2 flex items-center gap-2 flex-wrap">
+                              <span :class="['badge text-[11px]', llmApiKeys[String(key)] ? 'badge-green' : 'badge-gray']">
+                                {{ llmApiKeys[String(key)] ? 'Key entered' : 'Key needed' }}
+                              </span>
+                              <span
+                                v-if="llmModels[String(key)]"
+                                class="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500"
+                              >
+                                {{ llmModels[String(key)] }}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <!-- Expanded config when selected -->
                         <div
                           v-if="llmPrimary === String(key)"
-                          class="mt-3 space-y-2 border-t border-slate-100 pt-3"
+                          class="mt-3 space-y-3 border-t border-slate-200/70 pt-3"
                         >
-                          <div class="grid grid-cols-2 gap-2">
+                          <div class="grid gap-2 sm:grid-cols-2">
                             <div>
                               <label class="label text-xs">API Key</label>
                               <input
@@ -332,8 +343,8 @@
                               ✗ {{ llmTestResults[String(key)].error }}
                             </span>
                             <a
-                              v-if="p.env_key"
-                              :href="PROVIDER_KEY_LINKS[String(key)]"
+                              v-if="providerSignupUrl(String(key), p)"
+                              :href="providerSignupUrl(String(key), p)"
                               target="_blank"
                               rel="noopener"
                               class="text-xs text-sky-600 underline ml-auto"
@@ -351,46 +362,52 @@
                       <span class="text-xs text-slate-400">If primary fails, try these in order</span>
                     </div>
                     <div class="flex flex-wrap gap-1.5">
-                      <template
-                        v-for="(p, pkey) in llmProviders.providers"
+                      <button
+                        v-for="(p, pkey) in cascadeCandidates"
                         :key="pkey"
+                        :class="['text-xs px-2.5 py-1 rounded-full border transition-all',
+                                 llmCascade.includes(String(pkey))
+                                   ? 'bg-slate-700 text-white border-slate-700'
+                                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
+                        @click="toggleCascade(String(pkey))"
                       >
-                        <button
-                          v-if="String(pkey) !== llmPrimary && !['z_ai','siliconflow','anthropic','openai','featherless'].includes(String(pkey))"
-                          :class="['text-xs px-2.5 py-1 rounded-full border transition-all',
-                                   llmCascade.includes(String(pkey))
-                                     ? 'bg-slate-700 text-white border-slate-700'
-                                     : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
-                          @click="toggleCascade(String(pkey))"
-                        >
-                          {{ p.label }}
-                        </button>
-                      </template>
+                        {{ p.label }}
+                      </button>
                     </div>
                     <p class="text-xs text-slate-400 mt-1.5">
                       Cascade order: <span class="font-mono">{{ llmPrimary }}{{ llmCascade.length ? ' → ' + llmCascade.join(' → ') : '' }}</span>
                     </p>
                   </div>
 
-                  <!-- Advanced: paid / CN providers -->
+                  <!-- Custom OpenAI-compatible provider -->
                   <details class="border-t border-slate-100 pt-3">
                     <summary class="text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600">
-                      Advanced providers (paid-only or CN-hosted)
+                      + Add custom provider (OpenAI-compatible)
                     </summary>
-                    <div class="mt-2 flex flex-wrap gap-1.5">
-                      <button
-                        v-for="pkey in ['anthropic','openai','featherless','z_ai','siliconflow']"
-                        :key="pkey"
-                        :class="['text-xs px-2.5 py-1 rounded-full border transition-all',
-                                 llmCascade.includes(pkey)
-                                   ? 'bg-slate-700 text-white border-slate-700'
-                                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
-                        @click="toggleCascade(pkey)"
-                      >
-                        {{ llmProviders.providers[pkey]?.label }}
+                    <div class="mt-2 space-y-2">
+                      <input v-model="customProviderForm.key" class="input text-xs" placeholder="provider-key (e.g. myprovider)">
+                      <input v-model="customProviderForm.label" class="input text-xs" placeholder="Display name (e.g. My Provider)">
+                      <input v-model="customProviderForm.base_url" class="input text-xs font-mono" placeholder="https://api.example.com/v1">
+                      <input v-model="customProviderForm.default_model" class="input text-xs font-mono" placeholder="model-id (e.g. gpt-4o-mini)">
+                      <button :disabled="!customProviderForm.key.trim() || !customProviderForm.base_url.trim() || savingCustomProvider" class="btn-secondary btn-sm text-xs" @click="addCustomProvider">
+                        {{ savingCustomProvider ? 'Adding…' : 'Add provider' }}
                       </button>
+                      <p v-if="customProviderError" class="text-xs text-red-500">{{ customProviderError }}</p>
                     </div>
                   </details>
+
+                  <!-- Saved custom providers -->
+                  <div v-if="Object.keys(customProviders).length" class="border-t border-slate-100 pt-3">
+                    <div class="text-xs text-slate-400 mb-2">Your custom providers</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button v-for="(meta, key) in customProviders" :key="key"
+                        :class="['text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1',
+                                 llmCascade.includes(String(key)) ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
+                        @click="toggleCascade(String(key))">
+                        {{ meta.label || key }}
+                      </button>
+                    </div>
+                  </div>
 
                   <button
                     :disabled="savingLLM"
@@ -481,49 +498,6 @@
       </div><!-- /secrets -->
 
       <div v-show="activeTab === 'ai'">
-        <!-- HuggingFace Token -->
-        <section class="card mb-3">
-          <div class="card-header">
-            <div class="font-semibold text-sm">
-              HuggingFace Token
-            </div>
-            <div class="text-xs text-slate-400 mt-0.5">
-              Required for gated models — Phi-4, Llama, and others
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="flex items-center gap-2">
-              <input
-                v-model="hfTokenInput"
-                type="password"
-                class="input text-xs flex-1 font-mono"
-                placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx"
-                autocomplete="off"
-              >
-              <span
-                v-if="hfTokenSaved"
-                class="badge badge-green text-xs shrink-0"
-              >Saved ✓</span>
-              <button
-                :disabled="!hfTokenInput || savingHFToken"
-                class="btn-primary btn-sm text-xs shrink-0"
-                @click="saveHFToken"
-              >
-                {{ savingHFToken ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-            <p class="text-xs text-slate-400 mt-1.5">
-              <a
-                href="https://huggingface.co/settings/tokens"
-                target="_blank"
-                class="text-sky-500 hover:underline"
-              >
-                Get a token at huggingface.co ↗
-              </a>
-            </p>
-          </div>
-        </section>
-
         <!-- Cloud LLM Providers -->
         <section class="card mb-3">
           <div class="card-header flex items-center justify-between">
@@ -545,92 +519,210 @@
           </div>
           <div
             v-if="cloudLLM"
-            class="card-body space-y-4"
+            class="card-body space-y-3"
           >
             <!-- Cost monitor -->
-            <div class="rounded-lg bg-slate-50 border border-slate-100 p-3">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-medium text-slate-600">Monthly spend</span>
-                <span class="text-xs font-mono text-slate-800">
-                  ${{ cloudLLM.total_spend_this_month.toFixed(4) }} / ${{ cloudLLM.monthly_limit_usd.toFixed(2) }} limit
-                </span>
+            <div class="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
+              <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-xs font-medium text-slate-600">Monthly spend</span>
+                  <span class="text-xs font-mono text-slate-800">
+                    ${{ cloudLLM.total_spend_this_month.toFixed(4) }} / ${{ cloudLLM.monthly_limit_usd.toFixed(2) }} limit
+                  </span>
+                </div>
+                <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-sky-500 transition-all"
+                    :style="`width: ${Math.min(100, (cloudLLM.total_spend_this_month / cloudLLM.monthly_limit_usd) * 100)}%`"
+                    :class="cloudLLM.total_spend_this_month / cloudLLM.monthly_limit_usd > 0.8 ? '!bg-amber-500' : ''"
+                  />
+                </div>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <label class="shrink-0 text-xs text-slate-500">Monthly limit: $</label>
+                  <input
+                    v-model.number="cloudMonthlyLimit"
+                    type="number"
+                    min="0"
+                    step="0.50"
+                    class="input w-24 text-xs"
+                  >
+                  <button
+                    class="btn-secondary btn-sm text-xs"
+                    @click="saveCloudLimit"
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
-              <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  class="h-full bg-sky-500 transition-all"
-                  :style="`width: ${Math.min(100, (cloudLLM.total_spend_this_month / cloudLLM.monthly_limit_usd) * 100)}%`"
-                  :class="cloudLLM.total_spend_this_month / cloudLLM.monthly_limit_usd > 0.8 ? '!bg-amber-500' : ''"
-                />
-              </div>
-              <div class="flex items-center gap-2 mt-2">
-                <label class="text-xs text-slate-500 shrink-0">Monthly limit: $</label>
-                <input
-                  v-model.number="cloudMonthlyLimit"
-                  type="number"
-                  min="0"
-                  step="0.50"
-                  class="input text-xs w-24"
-                >
-                <button
-                  class="btn-secondary btn-sm text-xs"
-                  @click="saveCloudLimit"
-                >
-                  Save
-                </button>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="rounded-xl border border-slate-100 bg-white p-3">
+                  <div class="text-[11px] uppercase tracking-wide text-slate-400">Providers</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-800">{{ totalCloudProviderCount }}</div>
+                  <div class="text-xs text-slate-400">available</div>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white p-3">
+                  <div class="text-[11px] uppercase tracking-wide text-slate-400">Configured</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-800">{{ configuredCloudProviderCount }}</div>
+                  <div class="text-xs text-slate-400">keys present</div>
+                </div>
               </div>
             </div>
             <!-- Provider list -->
-            <div class="space-y-2">
-              <div
-                v-for="(meta, provKey) in cloudLLM.providers"
-                :key="provKey"
-                class="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-100"
-              >
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium text-slate-800 flex items-center gap-2">
-                    {{ meta.label }}
-                    <span
-                      v-if="meta.free_tier"
-                      class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium"
-                    >FREE</span>
-                    <span
-                      v-if="meta.privacy === 'eu'"
-                      class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700"
-                    >EU</span>
-                    <span
-                      v-if="meta.privacy === 'cn'"
-                      class="text-xs px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700"
-                    >CN</span>
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <label class="label text-xs mb-0">Provider cards</label>
+                <span class="text-xs text-slate-400">Compact edit/test/save surface aligned with the LLM models area</span>
+              </div>
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div
+                  v-for="(meta, provKey) in orderedRuntimeCloudProviders"
+                  :key="provKey"
+                  :class="['card card-body !py-2.5 !px-3 transition-all cursor-pointer',
+                           cloudPrimary === String(provKey) ? 'border-l-2 border-l-sky-400 bg-sky-50/60' : 'hover:border-slate-300']"
+                  @click="cloudPrimary = String(provKey)"
+                >
+                  <div class="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      :checked="cloudPrimary === String(provKey)"
+                      class="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      readonly
+                    >
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-sm font-medium text-slate-900">{{ meta.label }}</span>
+                        <span
+                          v-if="meta.free_tier"
+                          class="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700"
+                        >FREE</span>
+                        <span
+                          v-if="meta.privacy"
+                          :class="['rounded-full px-1.5 py-0.5 text-[11px]',
+                                   meta.privacy === 'eu' ? 'bg-blue-100 text-blue-700' :
+                                   meta.privacy === 'cn' ? 'bg-orange-100 text-orange-700' :
+                                   'bg-slate-100 text-slate-500']"
+                        >{{ meta.privacy.toUpperCase() }}</span>
+                        <span :class="['badge text-[11px] shrink-0', cloudProviderEnabled(String(provKey)) ? 'badge-green' : 'badge-gray']">
+                          {{ cloudProviderEnabled(String(provKey)) ? 'Enabled' : 'Disabled' }}
+                        </span>
+                      </div>
+                      <p class="mt-1 text-xs text-slate-400">{{ meta.notes }}</p>
+                      <div class="mt-2 flex flex-wrap gap-1.5">
+                        <span :class="['badge text-[11px]', cloudApiKeys[String(provKey)] ? 'badge-green' : 'badge-gray']">
+                          {{ cloudApiKeys[String(provKey)] ? 'Key entered' : 'Key needed' }}
+                        </span>
+                        <span class="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 max-w-full">
+                          {{ cloudModels[String(provKey)] || meta.default_model || 'No model selected' }}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div class="text-xs text-slate-400 truncate">
-                    {{ meta.notes }}
+                  <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                    <span class="truncate font-mono">{{ meta.env_key || 'set in secrets' }}</span>
+                    <button
+                      type="button"
+                      :class="['w-8 h-4 rounded-full transition-colors shrink-0 relative', cloudProviderEnabled(String(provKey)) ? 'bg-sky-500' : 'bg-slate-200']"
+                      :aria-label="cloudProviderEnabled(String(provKey)) ? `Disable ${meta.label}` : `Enable ${meta.label}`"
+                      @click.stop="toggleCloudProvider(String(provKey))"
+                    >
+                      <span
+                        :class="['absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform', cloudProviderEnabled(String(provKey)) ? 'translate-x-4' : 'translate-x-0.5']"
+                      />
+                    </button>
+                  </div>
+                  <div
+                    v-if="cloudPrimary === String(provKey)"
+                    class="mt-3 space-y-3 border-t border-slate-200/70 pt-3"
+                  >
+                    <div class="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <label class="label text-xs">API Key</label>
+                        <input
+                          v-model="cloudApiKeys[String(provKey)]"
+                          type="password"
+                          class="input text-xs font-mono"
+                          :placeholder="meta.env_key || 'API key'"
+                          @click.stop
+                        >
+                      </div>
+                      <div>
+                        <label class="label text-xs">Model</label>
+                        <input
+                          v-model="cloudModels[String(provKey)]"
+                          class="input text-xs font-mono"
+                          :placeholder="meta.default_model || 'model-id'"
+                          @click.stop
+                        >
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        :disabled="llmTesting === String(provKey) || !cloudApiKeys[String(provKey)]"
+                        class="btn-secondary btn-sm text-xs"
+                        @click.stop="testCloudProvider(String(provKey))"
+                      >
+                        {{ llmTesting === String(provKey) ? 'Testing…' : 'Test connection' }}
+                      </button>
+                      <span
+                        v-if="llmTestResults[String(provKey)]?.ok"
+                        class="text-xs text-green-600"
+                      >
+                        ✓ Connected · {{ llmTestResults[String(provKey)].latency_ms }}ms
+                      </span>
+                      <span
+                        v-else-if="llmTestResults[String(provKey)]"
+                        class="text-xs text-red-600"
+                      >
+                        ✗ {{ llmTestResults[String(provKey)].error }}
+                      </span>
+                      <a
+                        v-if="providerSignupUrl(String(provKey), meta)"
+                        :href="providerSignupUrl(String(provKey), meta)"
+                        target="_blank"
+                        rel="noopener"
+                        class="ml-auto text-xs text-sky-600 underline"
+                        @click.stop
+                      >Get API key ↗</a>
+                    </div>
                   </div>
                 </div>
-                <span :class="['text-xs font-medium shrink-0', meta.configured ? 'text-green-600' : 'text-slate-300']">
-                  {{ meta.configured ? '✓ Key set' : 'No key' }}
-                </span>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+                <p class="text-xs text-slate-400">
+                  Primary provider stays active automatically. Add keys here or in <strong>Secrets</strong>.
+                </p>
+                <button
+                  :disabled="savingCloudProviders"
+                  class="btn-primary btn-sm ml-auto"
+                  @click="saveCloudProviders"
+                >
+                  {{ savingCloudProviders ? 'Saving…' : 'Save cloud providers' }}
+                </button>
               </div>
             </div>
-            <p class="text-xs text-slate-400">
-              Add API keys in the <strong>Secrets</strong> section above (GROQ_API_KEY, CEREBRAS_API_KEY, GOOGLE_AI_API_KEY, etc.)
-            </p>
             <!-- Recent calls -->
-            <div v-if="cloudLLM.recent_calls.length">
-              <p class="text-xs font-medium text-slate-500 mb-1">
+            <div
+              v-if="cloudLLM.recent_calls.length"
+              class="rounded-xl border border-slate-100 bg-slate-50 p-3"
+            >
+              <p class="mb-2 text-xs font-medium text-slate-500">
                 Recent calls
               </p>
-              <div class="space-y-0.5">
+              <div class="grid gap-2 lg:grid-cols-2">
                 <div
-                  v-for="call in cloudLLM.recent_calls.slice(0, 5)"
+                  v-for="call in cloudLLM.recent_calls.slice(0, 6)"
                   :key="call.created_at"
-                  class="flex items-center gap-2 text-xs text-slate-400"
+                  class="rounded-lg border border-white/80 bg-white px-3 py-2 text-xs text-slate-500"
                 >
-                  <span class="font-medium text-slate-600">{{ call.provider }}</span>
-                  <span>{{ call.total_tokens }} tokens</span>
-                  <span class="text-slate-300">·</span>
-                  <span>${{ call.cost_usd.toFixed(5) }}</span>
-                  <span class="text-slate-300">·</span>
-                  <span>{{ call.purpose }}</span>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-medium text-slate-700">{{ providerDisplayName(call.provider) }}</span>
+                    <span class="font-mono text-slate-400">${{ call.cost_usd.toFixed(5) }}</span>
+                  </div>
+                  <div class="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                    <span>{{ call.total_tokens }} tokens</span>
+                    <span class="text-slate-300">·</span>
+                    <span>{{ call.purpose }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -646,16 +738,18 @@
 
         <!-- AI Safety -->
         <section class="card mb-3">
-          <div class="card-header">
-            <div class="font-semibold text-sm">
-              AI Safety
-            </div>
-            <div class="text-xs text-slate-400 mt-0.5">
-              Control what the health agent can do automatically
+          <div class="card-header flex items-start justify-between gap-3">
+            <div>
+              <div class="font-semibold text-sm">
+                AI Safety
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5">
+                Control what the health agent can do automatically
+              </div>
             </div>
             <!-- #1250 / #976 Phase-C: control-plane auth posture (judge C6 freshness signal) -->
             <div
-              class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border"
+              class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border shrink-0"
               :class="{
                 'bg-red-50 border-red-200 text-red-700': cpBadgeColor === 'red',
                 'bg-amber-50 border-amber-200 text-amber-700': cpBadgeColor === 'amber',
@@ -677,7 +771,7 @@
             </div>
           </div>
           <div class="card-body space-y-4">
-            <div class="rounded-lg bg-sky-50 border border-sky-100 p-3 text-xs text-sky-800">
+            <div class="card card-body !py-2.5 !px-3 bg-sky-50/80 border-sky-100 text-xs text-sky-800">
               <strong>Three tiers:</strong>
               <strong> Observe</strong> — read-only, no suggestions.
               <strong> Suggest</strong> — proposes fixes, you approve (default).
@@ -685,20 +779,21 @@
             </div>
             <div
               v-if="safetyLevels"
-              class="space-y-3"
+              class="grid grid-cols-1 gap-2 md:grid-cols-2"
             >
               <div
                 v-for="(meta, actionType) in safetyLevels"
                 :key="actionType"
+                class="card card-body !py-2.5 !px-3"
               >
-                <div class="flex items-center justify-between mb-1">
-                  <div>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
                     <span class="text-sm font-medium text-slate-700 capitalize">{{ actionType.replace(/_/g, ' ') }}</span>
                     <p class="text-xs text-slate-400">
                       {{ meta.description }}
                     </p>
                   </div>
-                  <div class="flex gap-1">
+                  <div class="flex flex-wrap justify-end gap-1 shrink-0">
                     <button
                       v-for="level in (meta.can_auto_act ? ['observe', 'suggest', 'act'] : ['observe', 'suggest'])"
                       :key="level"
@@ -860,6 +955,58 @@
               >
                 Load pre-approval policy
               </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- HuggingFace Token (for GGUF model downloads, not LLM inference) -->
+        <section class="card mb-3">
+          <div class="card-header">
+            <div class="font-semibold text-sm">
+              HuggingFace Token
+            </div>
+            <div class="text-xs text-slate-400 mt-0.5">
+              For downloading gated GGUF models — not used for AI inference
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div class="mb-2 flex items-center justify-between gap-3">
+                  <span class="text-xs font-medium text-slate-600">Token</span>
+                  <span
+                    v-if="hfTokenSaved"
+                    class="badge badge-green text-[11px] shrink-0"
+                  >Saved ✓</span>
+                </div>
+                <input
+                  v-model="hfTokenInput"
+                  type="password"
+                  class="input flex-1 font-mono text-xs"
+                  placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx"
+                  autocomplete="off"
+                >
+                <p class="mt-2 text-xs text-slate-400">
+                  Used for gated GGUF downloads only.
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+                <a
+                  href="https://huggingface.co/settings/tokens"
+                  target="_blank"
+                  rel="noopener"
+                  class="btn-secondary btn-sm text-xs"
+                >
+                  Get token ↗
+                </a>
+                <button
+                  :disabled="!hfTokenInput || savingHFToken"
+                  class="btn-primary btn-sm text-xs"
+                  @click="saveHFToken"
+                >
+                  {{ savingHFToken ? 'Saving…' : 'Save token' }}
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -1541,56 +1688,37 @@
 
       <!-- Platform tab -->
       <div v-show="activeTab === 'platform'">
-        <div class="grid grid-cols-3 gap-3 mb-3">
+        <div class="grid grid-cols-4 gap-2 mb-3">
           <!-- Re-run wizard -->
           <section class="card">
-            <div class="card-body">
-              <div class="text-sm font-medium text-slate-800 mb-1">
-                Re-run Setup Wizard
-              </div>
-              <div class="text-xs text-slate-400 mb-4">
-                Reconfigure domain, certs, DNS, tunnels, or paths. Installed apps are not affected.
-              </div>
-              <RouterLink
-                to="/setup?force=true"
-                class="btn-secondary btn-sm text-xs"
-              >
-                Open wizard →
-              </RouterLink>
+            <div class="card-body !p-3">
+              <div class="text-sm font-medium text-slate-800 mb-1">Setup Wizard</div>
+              <div class="text-xs text-slate-400 mb-3">Reconfigure domain, DNS, or paths.</div>
+              <RouterLink to="/setup?force=true" class="btn-secondary btn-sm text-xs w-full text-center">Re-run wizard</RouterLink>
             </div>
           </section>
           <!-- Reset platform -->
           <section class="card">
-            <div class="card-body">
-              <div class="text-sm font-medium text-slate-800 mb-1">
-                Reset Platform
-              </div>
-              <div class="text-xs text-slate-400 mb-4">
-                Clears platform status to pending. Traefik keeps running. Installed apps unaffected.
-              </div>
-              <button
-                class="btn-secondary btn-sm text-xs text-red-600 hover:text-red-700"
-                @click="showResetConfirm = true"
-              >
-                Reset platform
-              </button>
+            <div class="card-body !p-3">
+              <div class="text-sm font-medium text-slate-800 mb-1">Reset Platform</div>
+              <div class="text-xs text-slate-400 mb-3">Stop infra containers, reset platform state.</div>
+              <button class="btn-secondary btn-sm text-xs w-full text-red-600" @click="showResetConfirm = true">Reset platform</button>
             </div>
           </section>
           <!-- Remove all apps -->
           <section class="card">
-            <div class="card-body">
-              <div class="text-sm font-medium text-slate-800 mb-1">
-                Remove All Apps
-              </div>
-              <div class="text-xs text-slate-400 mb-4">
-                Stops and removes all managed containers. Config folders on disk are kept.
-              </div>
-              <button
-                class="btn-secondary btn-sm text-xs text-red-600 hover:text-red-700"
-                @click="showRemoveAllConfirm = true"
-              >
-                Remove all apps
-              </button>
+            <div class="card-body !p-3">
+              <div class="text-sm font-medium text-slate-800 mb-1">Remove Apps</div>
+              <div class="text-xs text-slate-400 mb-3">Remove all app containers and volumes.</div>
+              <button class="btn-secondary btn-sm text-xs w-full text-red-600" @click="showRemoveAllConfirm = true">Remove all apps</button>
+            </div>
+          </section>
+          <!-- Factory reset -->
+          <section class="card border-red-200 bg-red-50">
+            <div class="card-body !p-3">
+              <div class="text-sm font-medium text-red-800 mb-1">⚠ Factory Reset</div>
+              <div class="text-xs text-red-700 mb-3">Nuke everything. Start from scratch.</div>
+              <button class="btn-danger btn-sm text-xs w-full" @click="showFullResetConfirm = true">Factory reset</button>
             </div>
           </section>
         </div>
@@ -1809,8 +1937,7 @@
             Reset platform?
           </h3>
           <p class="text-sm text-slate-500 mt-2">
-            Resets the platform status to pending so you can re-run the wizard.
-            Traefik keeps running. Installed apps are not affected.
+            Stops and removes all infrastructure containers (Traefik, auth, tunnels) and resets platform state. Installed apps will keep running.
           </p>
           <div class="flex gap-3 mt-4">
             <button
@@ -1874,6 +2001,41 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Factory reset confirm modal -->
+    <Teleport to="body">
+      <div
+        v-if="showFullResetConfirm"
+        class="fixed inset-0 z-50 flex items-center justify-center"
+      >
+        <div
+          class="absolute inset-0 bg-black/30 backdrop-blur-sm"
+          @click="showFullResetConfirm = false"
+        />
+        <div class="relative card w-full max-w-sm mx-4 card-body border-red-200">
+          <h3 class="font-semibold text-red-800">
+            Factory reset?
+          </h3>
+          <p class="text-sm text-red-700 mt-2">
+            This stops ALL containers, removes ALL compose fragments, deletes the entire database, and clears .env. You will start completely from scratch. <strong>This cannot be undone.</strong>
+          </p>
+          <div class="flex gap-3 mt-4">
+            <button
+              class="btn-secondary flex-1"
+              @click="showFullResetConfirm = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="btn-danger flex-1"
+              @click="doFullReset"
+            >
+              Reset everything
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1916,7 +2078,7 @@ const loading = ref(true)
 const router = useRouter()
 const activeTab = ref('health')
 watch(activeTab, (tab) => {
-  if (tab === 'ai' && !llmProviders.value) loadLLMProviders()
+  if (tab === 'ai' && !llmProviders.value) { loadLLMProviders(); loadCustomProviders() }
   if (tab === 'updates' && !updatesLoaded.value) loadUpdates()
 })
 
@@ -2018,9 +2180,48 @@ const profile = ref<Record<string, any> | null>(null)
 const loadingProfile = ref(false)
 const showResetConfirm = ref(false)
 const showRemoveAllConfirm = ref(false)
+const showFullResetConfirm = ref(false)
 const removingAll = ref(false)
 const removeCount = ref(0)
 const removeTotal = ref(0)
+
+const customProviderForm = ref({ key: '', label: '', base_url: '', default_model: '' })
+const customProviders = ref<Record<string, any>>({})
+const savingCustomProvider = ref(false)
+const customProviderError = ref('')
+
+async function addCustomProvider() {
+  savingCustomProvider.value = true
+  customProviderError.value = ''
+  try {
+    const body = { ...customProviderForm.value }
+    const res = await fetch('/api/v1/health/llm-providers/custom', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      customProviderError.value = (err as any).detail || 'Failed to add provider.'
+      return
+    }
+    customProviderForm.value = { key: '', label: '', base_url: '', default_model: '' }
+    await loadCustomProviders()
+    await loadLLMProviders()
+  } catch (e) {
+    customProviderError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    savingCustomProvider.value = false
+  }
+}
+
+async function loadCustomProviders() {
+  try {
+    const res = await fetch('/api/v1/health/llm-providers/custom')
+    if (res.ok) {
+      const data = await res.json()
+      customProviders.value = data.providers || {}
+    }
+  } catch { /* intentional: non-fatal */ }
+}
 
 const savingTraefik = ref(false)
 const safetyLevels = ref<Record<string, any> | null>(null)
@@ -2045,32 +2246,92 @@ const cloudModelList    = ref<Record<string, string[]>>({})
 const cloudModelFetching = ref<Record<string, boolean>>({})
 const cloudModelError   = ref<Record<string, string | null>>({})
 
-const PROVIDER_KEY_LINKS: Record<string,string> = {
-  groq:       'https://console.groq.com/keys',
-  cerebras:   'https://cloud.cerebras.ai/',
-  openrouter: 'https://openrouter.ai/keys',
-  mistral:    'https://console.mistral.ai/api-keys',
-  cohere:     'https://dashboard.cohere.com/api-keys',
-  google:     'https://aistudio.google.com/app/apikey',
-  anthropic:  'https://console.anthropic.com/settings/keys',
-  openai:     'https://platform.openai.com/api-keys',
-  featherless:'https://featherless.ai/account',
+type CloudProviderMeta = {
+  key?: string
+  label?: string
+  signup_url?: string
+  free_tier?: boolean
+  privacy?: string
+  notes?: string
+  env_key?: string
+  default_model?: string
+  active?: boolean
+  api_key?: string
+  models?: Array<{ id: string; label: string; recommended?: boolean }>
 }
-// providerKeyLinks available as PROVIDER_KEY_LINKS const
 
-const FEATURED_ORDER = ['groq','cerebras','openrouter','mistral','cohere','google']
-const featuredProviders = computed(() => {
-  if (!llmProviders.value?.providers) return {}
+const SIGNUP_URL_OVERRIDES: Record<string, string> = {
+  groq: 'https://console.groq.com/keys',
+  cerebras: 'https://cloud.cerebras.ai/',
+  openrouter: 'https://openrouter.ai/keys',
+  mistral: 'https://console.mistral.ai/api-keys',
+  cohere: 'https://dashboard.cohere.com/api-keys',
+  google: 'https://aistudio.google.com/app/apikey',
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  featherless: 'https://featherless.ai/account',
+}
+
+const orderedCloudProviders = computed<Record<string, CloudProviderMeta>>(() => {
+  const providers = (llmProviders.value?.providers || {}) as Record<string, CloudProviderMeta>
   return Object.fromEntries(
-    FEATURED_ORDER
-      .filter(k => llmProviders.value.providers[k])
-      .map(k => [k, llmProviders.value.providers[k]])
+    Object.entries(providers)
+      .sort(([, a], [, b]) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' }))
   )
 })
+
+const cascadeCandidates = computed<Record<string, CloudProviderMeta>>(() => Object.fromEntries(
+  Object.entries(orderedCloudProviders.value).filter(([key]) => key !== llmPrimary.value)
+))
+
+function providerSignupUrl(key: string, provider: CloudProviderMeta): string {
+  return SIGNUP_URL_OVERRIDES[key] || provider?.signup_url || ''
+}
+
+const orderedRuntimeCloudProviders = computed<Record<string, CloudProviderMeta & { configured?: boolean }>>(() => {
+  const providers = (cloudLLM.value?.providers || {}) as Record<string, CloudProviderMeta & { configured?: boolean }>
+  return Object.fromEntries(
+    Object.entries(providers)
+      .sort(([, a], [, b]) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' }))
+  )
+})
+
+const totalCloudProviderCount = computed(() => Object.keys(orderedRuntimeCloudProviders.value).length)
+
+const configuredCloudProviderCount = computed(() => Object.values(orderedRuntimeCloudProviders.value)
+  .filter(provider => Boolean(provider.configured)).length)
+
+function cloudProviderEnabled(key: string): boolean {
+  return cloudActiveProviders.value.includes(key)
+}
+
+function toggleCloudProvider(key: string) {
+  if (key === cloudPrimary.value) {
+    if (!cloudActiveProviders.value.includes(key)) cloudActiveProviders.value.push(key)
+    return
+  }
+  if (cloudActiveProviders.value.includes(key)) {
+    cloudActiveProviders.value = cloudActiveProviders.value.filter(provider => provider !== key)
+    return
+  }
+  cloudActiveProviders.value.push(key)
+}
+
+function providerDisplayName(key: string): string {
+  const runtimeProvider = orderedRuntimeCloudProviders.value[key]
+  if (runtimeProvider?.label) return runtimeProvider.label
+  const configuredProvider = orderedCloudProviders.value[key]
+  return configuredProvider?.label || key
+}
 
 
 const loadingCloud = ref(false)
 const cloudMonthlyLimit = ref(1.00)
+const cloudPrimary = ref('groq')
+const cloudActiveProviders = ref<string[]>([])
+const cloudApiKeys = ref<Record<string, string>>({})
+const cloudModels = ref<Record<string, string>>({})
+const savingCloudProviders = ref(false)
 const traefikSettings = ref<any>(null)
 const ghostData = ref<any>(null)
 const scanningGhosts = ref(false)
@@ -2091,7 +2352,7 @@ const form = ref<FormState>({
   gotify_token: '',
   llm_enabled: true,
   llm_backend: 'ollama',
-  llm_ollama_url: 'http://ollama:11434',
+  llm_ollama_url: 'http://localhost:11434',
   llm_llamacpp_url: 'http://localhost:8081',
   llm_model: 'phi4-mini',
   cf_auto_register_hostnames: false,
@@ -2117,15 +2378,13 @@ async function loadLLMProviders() {
       const rec = (p as any).models?.find((m: any) => m.recommended)
       if (rec && !llmModels.value[k]) llmModels.value[k] = rec.id
     }
-    // Load existing config
     try {
-      const d = await settings.get() as any
-      const cfg = JSON.parse(d.llm_agent_config || '{}')
-      if (cfg.provider && cfg.provider !== 'ollama') {
+      const cfg = await settings.cloudLlm() as any
+      if (cfg.primary_provider && cfg.primary_provider !== 'ollama') {
         llmTab.value = 'cloud'
-        llmPrimary.value = cfg.provider
-        if (cfg.api_key) llmApiKeys.value[cfg.provider] = cfg.api_key
-        if (cfg.model) llmModels.value[cfg.provider] = cfg.model
+        llmPrimary.value = cfg.primary_provider
+        if (cfg.providers?.[cfg.primary_provider]?.api_key) llmApiKeys.value[cfg.primary_provider] = cfg.providers[cfg.primary_provider].api_key
+        if (cfg.primary_model) llmModels.value[cfg.primary_provider] = cfg.primary_model
         llmCascade.value = cfg.cascade || []
       }
     } catch { /* intentional: per-provider config missing is non-fatal */ }
@@ -2155,20 +2414,20 @@ async function saveLLMConfig() {
   savingLLM.value = true
   llmSaveOk.value = false
   try {
-    const cfg = llmTab.value === 'cloud'
-      ? {
-          provider: llmPrimary.value,
-          api_key: llmApiKeys.value[llmPrimary.value] || '',
-          model: llmModels.value[llmPrimary.value] || '',
-          cascade: llmCascade.value,
-        }
-      : {
-          provider: form.value.llm_backend,
-          api_key: '',
-          model: form.value.llm_model,
-          cascade: [],
-        }
-    await settings.update({ llm_agent_config: JSON.stringify(cfg) })
+    if (llmTab.value === 'cloud') {
+      await settings.updateCloudLlm({
+        provider: llmPrimary.value,
+        model: llmModels.value[llmPrimary.value] || '',
+        active_providers: Array.from(new Set([...cloudActiveProviders.value, llmPrimary.value])).filter(Boolean),
+        api_keys: { ...cloudApiKeys.value, [llmPrimary.value]: llmApiKeys.value[llmPrimary.value] || '' },
+        cascade: llmCascade.value,
+      })
+    } else {
+      await settings.update({
+        llm_backend: form.value.llm_backend,
+        llm_model: form.value.llm_model,
+      })
+    }
     llmSaveOk.value = true
     setTimeout(() => { llmSaveOk.value = false }, 3000)
     toast.success('LLM configuration saved.')
@@ -2182,6 +2441,7 @@ function toggleCascade(key: string) {
   const i = llmCascade.value.indexOf(key)
   if (i >= 0) llmCascade.value.splice(i, 1)
   else llmCascade.value.push(key)
+  if (cloudLLM.value) cloudLLM.value.cascade = [...llmCascade.value]
 }
 
 // Fetch live model list from the provider's /v1/models endpoint
@@ -2219,6 +2479,15 @@ watch(
   },
   { deep: true }
 )
+
+watch(cloudPrimary, (newProvider) => {
+  if (!newProvider) return
+  if (!cloudActiveProviders.value.includes(newProvider)) cloudActiveProviders.value.push(newProvider)
+  if (!cloudModels.value[newProvider]) {
+    const meta = orderedRuntimeCloudProviders.value[newProvider]
+    cloudModels.value[newProvider] = meta?.default_model || ''
+  }
+})
 
 async function loadSecrets() {
   loadingSecrets.value = true
@@ -2264,6 +2533,17 @@ async function loadCloudLLM() {
   try {
     cloudLLM.value = await settings.cloudLlm()
     cloudMonthlyLimit.value = cloudLLM.value.monthly_limit_usd
+    cloudPrimary.value = cloudLLM.value.primary_provider || 'groq'
+    cloudActiveProviders.value = Array.isArray(cloudLLM.value.active_providers) ? [...cloudLLM.value.active_providers] : []
+    cloudApiKeys.value = {}
+    cloudModels.value = {}
+    for (const [providerKey, meta] of Object.entries(cloudLLM.value.providers || {})) {
+      cloudApiKeys.value[String(providerKey)] = String((meta as any).api_key || '')
+      cloudModels.value[String(providerKey)] = String((meta as any).model || (meta as any).default_model || '')
+    }
+    if (cloudPrimary.value && !cloudActiveProviders.value.includes(cloudPrimary.value)) {
+      cloudActiveProviders.value.push(cloudPrimary.value)
+    }
   } catch {
     toast.error('Could not load cloud LLM settings.')
   } finally {
@@ -2273,11 +2553,48 @@ async function loadCloudLLM() {
 
 async function saveCloudLimit() {
   try {
-    await settings.updateCloudLlm({ monthly_limit_usd: cloudMonthlyLimit.value })
-    if (cloudLLM.value) cloudLLM.value.monthly_limit_usd = cloudMonthlyLimit.value
+    cloudLLM.value = await settings.updateCloudLlm({ monthly_limit_usd: cloudMonthlyLimit.value })
+    if (cloudLLM.value) cloudMonthlyLimit.value = cloudLLM.value.monthly_limit_usd
     toast.success('Monthly limit updated.')
   } catch {
     toast.error('Could not save limit.')
+  }
+}
+
+async function saveCloudProviders() {
+  savingCloudProviders.value = true
+  try {
+    const activeProviders = Array.from(new Set([...cloudActiveProviders.value, cloudPrimary.value])).filter(Boolean)
+    cloudLLM.value = await settings.updateCloudLlm({
+      provider: cloudPrimary.value,
+      model: cloudModels.value[cloudPrimary.value] || '',
+      active_providers: activeProviders,
+      api_keys: cloudApiKeys.value,
+      cascade: cloudLLM.value?.cascade || [],
+    })
+    await loadCloudLLM()
+    toast.success('Cloud providers updated.')
+  } catch (e) {
+    toast.error('Could not save providers.', e instanceof Error ? e.message : String(e))
+  } finally {
+    savingCloudProviders.value = false
+  }
+}
+
+async function testCloudProvider(key: string) {
+  llmTesting.value = key
+  llmTestResults.value[key] = null
+  try {
+    const { data } = await healthApi.llmTest({
+      provider: key,
+      api_key: cloudApiKeys.value[key] || '',
+      model: cloudModels.value[key] || '',
+    })
+    llmTestResults.value[key] = data
+  } catch (e) {
+    llmTestResults.value[key] = { ok: false, error: String(e), latency_ms: 0 }
+  } finally {
+    llmTesting.value = null
   }
 }
 
@@ -2391,6 +2708,20 @@ async function doRemoveAll() {
   }
 }
 
+async function doFullReset() {
+  showFullResetConfirm.value = false
+  if (!confirm('FACTORY RESET: This stops ALL containers, removes ALL compose fragments, and wipes the database. This cannot be undone. Continue?')) return
+  try {
+    const { usePlatformStore } = await import('../stores/platform')
+    usePlatformStore().clearStatus()
+    await platformApi.resetFull()
+    toast.success('Factory reset complete. Reloading…')
+    setTimeout(() => window.location.reload(), 800)
+  } catch (e) {
+    toast.error('Factory reset failed.', e instanceof Error ? e.message : String(e))
+  }
+}
+
 async function doReset() {
   showResetConfirm.value = false
   try {
@@ -2419,7 +2750,7 @@ async function load() {
       gotify_token: '',  // secret — never returned by GET; blank means "leave unchanged" on save
       llm_enabled: data.llm_enabled ?? true,
       llm_backend: data.llm_backend ?? 'ollama',
-      llm_ollama_url: data.llm_ollama_url ?? 'http://ollama:11434',
+      llm_ollama_url: data.llm_ollama_url ?? 'http://localhost:11434',
       llm_llamacpp_url: data.llm_llamacpp_url ?? 'http://localhost:8081',
       llm_model: data.llm_model ?? 'phi4-mini',
       cf_auto_register_hostnames: data.cf_auto_register_hostnames ?? false,

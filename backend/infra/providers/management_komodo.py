@@ -23,6 +23,7 @@ from backend.core.state import StateDB
 from backend.infra.base import ProviderResult
 from backend.infra.providers.management_alternatives import (
     _ManagementProvider,
+    _docker_gid,
     _register_management_app,
 )
 from backend.infra.registry import register
@@ -138,6 +139,7 @@ class KomodoProvider(_ManagementProvider):
             "container_name": "komodo-periphery",
             "restart": "unless-stopped",
             "networks": [network],
+            "group_add": [str(_docker_gid())],
             "volumes": [
                 "/var/run/docker.sock:/var/run/docker.sock",
                 f"{periphery_root}:/etc/komodo",

@@ -1423,7 +1423,7 @@ async def _check_app_inner(
 
 
 async def run_health_cycle(
-    ollama_url: str = "http://ollama:11434",  # Docker container hostname (correct default)
+    ollama_url: str = "http://localhost:11434",
     ntfy_url: str = "http://ntfy:80",
     ntfy_topic: str = "slop",
 ) -> HealthRun:
@@ -1506,11 +1506,23 @@ async def _probe_agent_connectivity(run: HealthRun) -> None:
 
     Updates health_checks (subject_type='agent') so /health/summary and
     /health/agent return live status rather than the bootstrap "unknown".
+
+    Also updates _llm_state so /health/llm-agent reflects the current runtime
+    state immediately instead of staying "unknown" until an app fails.
     """
     try:
         from backend.core.agent import check_agent_connectivity
 
-        run.llm_agent_state = await check_agent_connectivity()
+        result = await check_agent_connectivity()
+        run.llm_agent_state = result
+        _llm_state["status"] = "active" if result == "running" else result
+        if result == "running":
+            _llm_state["consecutive_failures"] = 0
+            _llm_state["last_error"] = ""
+            _llm_state["last_error_type"] = ""
+            import time as _chrono
+
+            _llm_state["last_success_at"] = int(_chrono.time())
     except Exception as _ae:
         log.warning("Agent connectivity check failed: %s", _ae)
 

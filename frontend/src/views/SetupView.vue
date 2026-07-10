@@ -107,7 +107,7 @@
           </div>
           <span class="text-xs text-slate-400">{{ currentStage + 1 }} / {{ STAGES.length }}</span>
         </div>
-        <div class="card-body space-y-4">
+        <div class="card-body space-y-4" style="min-height: 340px">
           <!-- Stage 0: Prerequisites -->
           <template v-if="currentStage === 0">
             <div class="space-y-3">
@@ -261,23 +261,34 @@
                   class="input"
                 >
               </div>
-              <div>
+              <div class="tz-wrapper">
                 <label class="label">Timezone</label>
+                <p class="text-xs text-slate-400 mt-1 mb-1">
+                  {{ form.timezone && form.timezone !== 'Etc/UTC' ? 'Detected: ' + form.timezone : 'Browser-detected; type to change' }}
+                </p>
                 <input
-                  v-model="form.timezone"
-                  type="text"
-                  class="input"
-                  list="tz-list"
+                  v-model="timezoneFilter"
+                  type="search"
+                  class="timezone-search"
                   autocomplete="off"
-                  placeholder="America/Los_Angeles"
+                  placeholder="Type to search timezones (e.g. Los_Angeles)"
+                  @focus="(e: any) => { e.target.select(); timezoneFilter = '' }"
+                  @input="timezoneFilter = ($event.target as HTMLInputElement).value"
                 >
-                <datalist id="tz-list">
-                  <option
-                    v-for="tz in timezones"
+                <div v-if="timezoneFilter.length >= 2" class="timezone-dropdown">
+                  <div
+                    v-for="tz in filteredTimezones"
                     :key="tz"
-                    :value="tz"
-                  />
-                </datalist>
+                    class="timezone-option"
+                    @mousedown.prevent="selectTimezone(tz)"
+                  >
+                    {{ tz }}
+                  </div>
+                  <div v-if="filteredTimezones.length === 0" class="timezone-option text-slate-400">
+                    No matches
+                  </div>
+                </div>
+                <input v-model="form.timezone" type="hidden">
               </div>
             </div>
             <div>
@@ -392,11 +403,18 @@
               <div
                 v-for="slot in INFRA_SLOTS"
                 :key="slot.slot"
-                class="border border-slate-200 rounded-lg p-3"
+                :class="['rounded-lg p-3 border',
+                         slot.core ? 'border-sky-200 bg-sky-50/50' : 'border-slate-200']"
               >
                 <div class="mb-2">
-                  <div class="text-sm font-medium text-slate-700">
-                    {{ slot.label }}
+                  <div class="flex items-center gap-2">
+                    <div class="text-sm font-medium text-slate-700">
+                      {{ slot.label }}
+                    </div>
+                    <span
+                      v-if="slot.core"
+                      class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700"
+                    >Core</span>
                   </div>
                   <div class="text-xs text-slate-400">
                     {{ slot.description }}
@@ -427,16 +445,38 @@
                   <button
                     v-for="opt in slot.options"
                     :key="opt.value"
-                    :class="['text-xs px-3 py-1.5 rounded-lg border transition-all',
+                    :class="['text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1',
                              form.infra[slot.slot] === opt.value
                                ? 'bg-sky-500 text-white border-sky-500'
                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300']"
                     @click="form.infra[slot.slot] = opt.value"
                   >
-                    {{ opt.label }}
+                    <span v-if="form.infra[slot.slot] === opt.value">✓</span>
+                    <span>{{ opt.label }}</span>
                   </button>
                 </div>
               </div>
+            </div>
+
+            <!-- *arr auth bypass — enable to let SLOP manage *arr apps without per-app API keys -->
+            <div class="rounded-lg border border-slate-200 p-3 mt-3">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  v-model="form.arr_auth_bypass"
+                  type="checkbox"
+                  class="mt-0.5 w-4 h-4 rounded border-slate-300 text-sky-500 focus:ring-sky-400 shrink-0"
+                >
+                <div>
+                  <div class="text-sm font-medium text-slate-700">
+                    Disable *arr apps' internal authentication
+                  </div>
+                  <div class="text-xs text-slate-400 mt-0.5">
+                    When enabled, Sonarr/Radarr/Lidarr/Prowlarr config files are edited during setup to set
+                    AuthenticationMethod=External so SLOP can manage them via API without a separate API key.
+                    Apps remain protected by {{ form.infra.auth === 'tinyauth' ? 'TinyAuth' : form.infra.auth === 'authelia' ? 'Authelia' : form.infra.auth === 'authentik' ? 'Authentik' : 'oauth2-proxy' }}.
+                  </div>
+                </div>
+              </label>
             </div>
           </template>
 
@@ -761,7 +801,7 @@
                   class="flex items-center gap-2 text-slate-600"
                 >
                   <span class="text-green-500 shrink-0">✓</span>
-                  <span>{{ form.infra.auth === 'tinyauth' ? 'TinyAuth' : 'Authelia' }} — authentication</span>
+                  <span>{{ form.infra.auth === 'tinyauth' ? 'TinyAuth' : form.infra.auth === 'authelia' ? 'Authelia' : form.infra.auth === 'authentik' ? 'Authentik' : 'oauth2-proxy' }} — authentication</span>
                 </div>
                 <div
                   v-for="t in form.tunnels"
@@ -819,46 +859,92 @@
           <!-- Stage 7: Platform Deploy -->
           <template v-if="currentStage === 7">
             <div class="space-y-2">
+              <!-- Live progress: show the most recent step while running -->
               <div
-                v-for="step in stepResults"
-                :key="step.step"
-                class="flex items-start gap-3"
+                v-if="running && stepResults.length"
+                class="flex items-center gap-3"
               >
-                <div
-                  :class="['w-5 h-5 rounded-full flex items-center justify-center text-xs mt-0.5 shrink-0',
-                           step.status === 'ok' ? 'bg-green-100 text-green-600' :
-                           step.status === 'skipped' ? 'bg-slate-100 text-slate-400' :
-                           'bg-red-100 text-red-600']"
-                >
-                  {{ step.status === 'ok' ? '✓' : step.status === 'skipped' ? '−' : '✗' }}
-                </div>
+                <div class="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin shrink-0" />
                 <div class="flex-1 min-w-0">
-                  <div
-                    :class="['text-sm font-medium',
-                             step.status === 'error' ? 'text-red-700' :
-                             step.status === 'skipped' ? 'text-slate-400' : 'text-slate-700']"
-                  >
-                    {{ step.message }}
-                  </div>
-                  <div
-                    v-if="step.detail"
-                    class="text-xs text-slate-400 mt-0.5 font-mono break-all"
-                  >
-                    {{ step.detail }}
+                  <div class="text-sm font-medium text-slate-700">
+                    {{ stepResults[stepResults.length - 1].message }}
                   </div>
                 </div>
               </div>
               <div
                 v-if="running"
+                class="text-xs text-slate-400"
+              >
+                Deploying platform…
+              </div>
+
+              <!-- Running spinner when no steps yet -->
+              <div
+                v-if="running && !stepResults.length"
                 class="flex items-center gap-2 text-sm text-slate-400"
               >
                 <div class="w-4 h-4 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
                 Deploying platform…
               </div>
             </div>
+
+            <!-- Detailed step log — collapsed by default after success -->
+            <details
+              v-if="!running && stepResults.length"
+              class="mt-3"
+            >
+              <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 select-none">
+                Show deployment log ({{ stepResults.length }} steps)
+              </summary>
+              <div class="space-y-1.5 mt-2 pl-2 border-l-2 border-slate-100">
+                <div
+                  v-for="step in stepResults"
+                  :key="step.step"
+                  class="flex items-start gap-2 text-xs"
+                >
+                  <span
+                    :class="['shrink-0 mt-px',
+                             step.status === 'ok' ? 'text-green-500' :
+                             step.status === 'skipped' ? 'text-slate-300' :
+                             'text-red-500']"
+                  >
+                    {{ step.status === 'ok' ? '✓' : step.status === 'skipped' ? '−' : '✗' }}
+                  </span>
+                  <span :class="step.status === 'skipped' ? 'text-slate-400' : 'text-slate-600'">
+                    {{ step.message }}
+                  </span>
+                </div>
+              </div>
+            </details>
+
+            <!-- Running progress (expanded view) -->
+            <div
+              v-if="running && stepResults.length"
+              class="mt-2 space-y-1.5 pl-2 border-l-2 border-sky-100"
+            >
+              <div
+                v-for="step in stepResults"
+                :key="step.step"
+                class="flex items-start gap-2 text-xs"
+              >
+                <span
+                  :class="['shrink-0 mt-px',
+                           step.status === 'ok' ? 'text-green-500' :
+                           step.status === 'skipped' ? 'text-slate-300' :
+                           'text-red-500']"
+                >
+                  {{ step.status === 'ok' ? '✓' : step.status === 'skipped' ? '−' : '✗' }}
+                </span>
+                <span :class="step.status === 'skipped' ? 'text-slate-400' : 'text-slate-600'">
+                  {{ step.message }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Error block -->
             <div
               v-if="setupError"
-              class="rounded-xl border border-red-200 bg-red-50 p-4"
+              class="rounded-xl border border-red-200 bg-red-50 p-4 mt-3"
             >
               <p class="text-sm font-medium text-red-800">
                 Deployment failed
@@ -881,48 +967,29 @@
               <p class="text-green-800 font-medium text-center mb-2">
                 ✅ Platform deployed!
               </p>
-              <div class="space-y-1">
+              <div class="space-y-2">
                 <div class="flex items-center gap-2 text-xs text-green-700">
-                  <span>✓</span><span>Traefik running — reverse proxy ready</span>
-                </div>
-                <!-- DNS/cert status -->
-                <div
-                  v-if="certStatus?.cert_found"
-                  class="flex items-center gap-2 text-xs text-green-700 bg-green-100 rounded px-2 py-1.5 mt-1"
-                >
-                  <span>🔒</span><span>{{ certStatus.message }}</span>
+                  <span>✓</span><span>SSL certificates issued for *.{{ form.domain }}</span>
                 </div>
                 <div
-                  v-else
-                  class="flex items-center gap-2 text-xs text-sky-700 bg-sky-50 rounded px-2 py-1.5 mt-1"
+                  v-if="certStatus && !certStatus.cert_found"
+                  class="flex items-center gap-2 text-xs text-sky-600"
                 >
-                  <span
-                    v-if="!certStatus"
-                    class="w-3 h-3 border border-sky-400 border-t-transparent rounded-full animate-spin shrink-0"
-                  />
-                  <span>🔒</span>
-                  <span v-if="certStatus">{{ certStatus.message }}</span>
-                  <span v-else>Checking certificate status…</span>
-                </div>
-                <div
-                  v-if="form.tunnels.length > 0"
-                  class="flex items-center gap-2 text-xs text-green-700"
-                >
-                  <span>✓</span><span>Tunnel: {{ form.tunnels.join(", ") }}</span>
+                  <span class="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span>Checking certificate status…</span>
                 </div>
                 <div
                   v-if="form.infra.auth && form.infra.auth !== 'none'"
-                  class="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1"
+                  class="text-xs text-slate-600 bg-slate-50 rounded px-2 py-1"
                 >
-                  <span>⚠</span>
-                  <span>{{ form.infra.auth === 'tinyauth' ? 'TinyAuth' : 'Authelia' }} is protecting your apps.
-                    If Chrome prompts for a username/password, check the generated password in Secrets or disable auth temporarily.</span>
+                  {{ form.infra.auth === 'tinyauth' ? 'TinyAuth' : form.infra.auth === 'authelia' ? 'Authelia' : form.infra.auth === 'authentik' ? 'Authentik' : 'oauth2-proxy' }}
+                  is protecting your apps. Log in with the username / password you chose on the Secrets page.
                 </div>
                 <div
-                  v-if="form.infra.dashboard && form.infra.dashboard !== 'none'"
-                  class="flex items-center gap-2 text-xs text-green-700"
+                  v-if="form.tunnels.length > 0"
+                  class="text-xs text-slate-600"
                 >
-                  <span>✓</span><span>Dashboard: {{ form.infra.dashboard }}</span>
+                  External access via {{ form.tunnels.join(", ") }}.
                 </div>
               </div>
             </div>
@@ -982,100 +1049,74 @@
                 </div>
               </div>
 
-              <!-- App cards grid -->
-              <div class="grid gap-2">
+              <!-- App cards grid — compact multi-column layout -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                 <div
                   v-for="app in stackAppsToInstall"
                   :key="app"
-                  :class="['rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-colors',
-                           appInstallStatus[app] === 'ok' ? 'border-green-200 bg-green-50' :
+                  :class="['rounded-lg border px-3 py-2.5 flex items-center gap-2.5 transition-colors duration-300',
+                           appInstallStatus[app] === 'ok' ? 'border-green-200 bg-white' :
                            appInstallStatus[app] === 'error' ? 'border-red-200 bg-red-50' :
-                           appInstallStatus[app] === 'running' ? 'border-sky-200 bg-sky-50' :
+                           appInstallStatus[app] === 'running' ? 'border-sky-200 bg-white' :
                            'border-slate-100 bg-white']"
                 >
-                  <!-- Icon -->
-                  <div class="text-xl shrink-0 w-8 text-center">
+                  <div class="text-lg shrink-0">
                     {{ appIcon(app) }}
                   </div>
-                  <!-- Name + status -->
                   <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2">
-                      <span class="text-sm font-medium text-slate-700">{{ appDisplayName(app) }}</span>
-                      <!-- Status badge -->
+                    <div class="text-xs font-medium text-slate-700 truncate">
+                      {{ appDisplayName(app) }}
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-0.5">
                       <span
                         v-if="appInstallStatus[app] === 'ok'"
-                        class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full"
-                      >Installed</span>
+                        class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"
+                      />
                       <span
                         v-else-if="appInstallStatus[app] === 'error'"
-                        class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full"
-                      >Failed</span>
+                        class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"
+                      />
                       <span
                         v-else-if="appInstallStatus[app] === 'running'"
-                        class="text-xs bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded-full flex items-center gap-1"
-                      >
-                        <span class="w-2 h-2 border border-sky-400 border-t-transparent rounded-full animate-spin" />
-                        Installing
-                      </span>
+                        class="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0 animate-pulse"
+                      />
                       <span
-                        v-else-if="appInstallStatus[app] === 'queued'"
-                        class="text-xs text-slate-400"
-                      >Queued</span>
-                    </div>
-                    <!-- Progress message or error -->
-                    <div
-                      v-if="appInstallStatus[app] === 'running' && appInstallProgress[app]"
-                      class="text-xs text-sky-500 mt-0.5"
-                    >
-                      {{ appInstallProgress[app] }}
-                    </div>
-                    <!-- Compact step counter when steps are available -->
-                    <div
-                      v-if="appInstallStatus[app] === 'running' && appInstallSteps[app]?.length > 0"
-                      class="flex gap-1 mt-1 flex-wrap"
-                    >
+                        v-else
+                        class="w-1.5 h-1.5 rounded-full bg-slate-200 shrink-0"
+                      />
                       <span
-                        v-for="step in appInstallSteps[app].slice(-5)"
-                        :key="step.step"
-                        :class="['text-xs px-1 py-0.5 rounded',
-                                 step.status === 'ok' ? 'bg-green-100 text-green-600' :
-                                 step.status === 'warning' ? 'bg-amber-100 text-amber-600' :
-                                 step.status === 'error' ? 'bg-red-100 text-red-500' :
-                                 step.status === 'skipped' ? 'bg-slate-100 text-slate-400' :
-                                 'bg-sky-100 text-sky-600']"
+                        :class="['text-[11px]',
+                                 appInstallStatus[app] === 'ok' ? 'text-green-600' :
+                                 appInstallStatus[app] === 'error' ? 'text-red-500' :
+                                 appInstallStatus[app] === 'running' ? 'text-sky-500' :
+                                 'text-slate-400']"
                       >
-                        {{ step.status === 'ok' ? '✓' : step.status === 'error' ? '✗' : step.status === 'skipped' ? '—' : '…' }}
-                        {{ step.name || step.step }}
+                        {{ appInstallStatus[app] === 'ok' ? 'Done' :
+                           appInstallStatus[app] === 'error' ? 'Failed' :
+                           appInstallStatus[app] === 'running' ? appInstallProgress[app] || 'Installing…' :
+                           'Queued' }}
                       </span>
                     </div>
-                    <div
-                      v-if="appInstallStatus[app] === 'error' && appInstallError[app]"
-                      class="text-xs text-red-500 mt-0.5 break-all"
-                    >
-                      {{ appInstallError[app] }}
-                    </div>
-                  </div>
-                  <!-- Status icon -->
-                  <div class="shrink-0 text-base">
-                    <span
-                      v-if="appInstallStatus[app] === 'ok'"
-                      class="text-green-500"
-                    >✓</span>
-                    <span
-                      v-else-if="appInstallStatus[app] === 'error'"
-                      class="text-red-400"
-                    >✗</span>
-                    <span
-                      v-else-if="appInstallStatus[app] === 'running'"
-                      class="block w-4 h-4 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"
-                    />
-                    <span
-                      v-else
-                      class="text-slate-200"
-                    >○</span>
                   </div>
                 </div>
               </div>
+
+              <!-- Error detail for failed apps — collapsed -->
+              <details
+                v-if="stackAppsToInstall.some(k => appInstallStatus[k] === 'error')"
+                class="mt-2"
+              >
+                <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 select-none">
+                  Show error details
+                </summary>
+                <div
+                  v-for="app in stackAppsToInstall.filter(k => appInstallStatus[k] === 'error')"
+                  :key="app"
+                  class="text-xs text-red-500 mt-1 break-all"
+                >
+                  <span class="font-medium">{{ app }}:</span> {{ appInstallError[app] }}
+                </div>
+              </details>
 
               <!-- Footer actions -->
               <div
@@ -1095,10 +1136,10 @@
             </div>
           </template>
 
-          <!-- Stage 9: AI / LLM — Ollama install only (auto-skipped for non-Ollama providers) -->
+          <!-- Stage 9: AI Agent — mandatory; content varies by provider -->
           <template v-if="currentStage === 9">
             <p class="text-xs text-slate-500 mb-3">
-              Installing Ollama as your AI monitoring agent. This was selected in the Secrets step — you can skip and configure later if needed.
+              The SLOP AI agent monitors your stack and diagnoses problems. It requires a local LLM.
             </p>
             <div class="border border-sky-200 rounded-lg p-3 bg-sky-50 space-y-3">
               <div class="flex items-center gap-2 text-sm font-medium text-sky-700">
@@ -1202,14 +1243,7 @@
                   </button>
                 </div>
 
-                <!-- Skip for now — visible while install is in progress or failed -->
-                <button
-                  v-if="form.llm_provider === 'ollama' && (ollamaSetupJob || ollamaSetupJobId)"
-                  class="text-xs text-slate-500 underline hover:text-slate-700 mt-2"
-                  @click="form.llm_provider = 'none'"
-                >
-                  Skip for now — configure later in Settings
-                </button>
+                <!-- AI is mandatory — no skip option -->
 
                 <!-- Start button (before job begins) -->
                 <button
@@ -1223,7 +1257,7 @@
                   v-if="ollamaSetupJob?.ok"
                   class="flex items-center gap-1.5 text-xs text-green-600"
                 >
-                  <span>✓</span><span>Ready — AI agent will activate after first health cycle</span>
+                  <span>✓</span><span>Ready — activating AI agent now</span>
                 </div>
               </div>
             </div>
@@ -1316,26 +1350,19 @@
         </button>
       </div>
 
-      <!-- Continue-blocked hint — shown when Continue is disabled -->
-      <p
-        v-if="!canAdvance && advanceBlockReason"
-        class="text-center text-xs text-amber-600 mt-2 animate-pulse"
-      >
-        ⚠ {{ advanceBlockReason }}
-      </p>
-
-      <!-- Skip to catalog link -->
-      <p
-        v-if="currentStage === 9 && form.llm_provider === 'ollama' && !ollamaSetupJob?.ok"
-        class="text-center text-xs text-slate-400 mt-2"
-      >
-        <button
-          class="text-sky-500 hover:underline"
-          @click="form.llm_provider = 'none'"
+      <!-- Continue-blocked hint — shown when Continue is disabled.
+           Pin a stable min-height so the page doesn't jump when the
+           message disappears after the last required field is filled. -->
+      <div class="text-center mt-2" style="min-height: 2.5rem">
+        <p
+          v-if="!canAdvance && advanceBlockReason"
+          class="text-xs text-amber-600"
         >
-          Skip AI monitoring — set up Ollama later
-        </button>
-      </p>
+          ⚠ {{ advanceBlockReason }}
+        </p>
+      </div>
+
+
       <p
         v-if="currentStage < 6"
         class="text-center text-xs text-slate-400 mt-3"
@@ -1372,7 +1399,7 @@
                 ↺ Re-run wizard
               </div>
               <p class="text-xs text-slate-500">
-                Resets platform status so you can reconfigure. Clears infra slots, Traefik fragment, health data. <strong>Installed apps keep running.</strong>
+                Resets platform status to pending so you can reconfigure. Stops and removes all infrastructure containers (Traefik, auth, tunnels, dashboard). Wipes health data and infra state. <strong>Installed apps are not affected.</strong>
               </p>
               <button
                 class="btn-secondary btn-sm mt-2 w-full"
@@ -1383,16 +1410,16 @@
             </div>
             <div class="rounded-lg border border-red-200 bg-red-50 p-3">
               <div class="font-medium text-sm text-red-800 mb-1">
-                ⚠ Full factory reset
+                ⚠ Factory reset
               </div>
               <p class="text-xs text-red-700">
-                Stops ALL containers, removes all compose fragments, wipes entire DB, clears .env. Irreversible — use only if starting completely fresh.
+                Destroys everything. Stops ALL containers, removes all compose fragments, deletes the entire database, and clears .env. You will start completely from scratch. <strong>This cannot be undone.</strong>
               </p>
               <button
                 class="btn-danger btn-sm mt-2 w-full"
                 @click="doFullReset"
               >
-                Full factory reset
+                Factory reset
               </button>
             </div>
           </div>
@@ -1466,16 +1493,30 @@ const STAGES = [
   { id: 'review',     label: 'Review',        description: 'Confirm your configuration before deploying' },
   { id: 'deploy',     label: 'Deploy',        description: 'Deploy Traefik and infrastructure' },
   { id: 'apps',       label: 'Apps',          description: 'Install selected quick stacks' },
-  { id: 'ai',         label: 'AI Monitoring', description: 'Optional: install Ollama AI agent (if selected in Secrets)' },
+  { id: 'ai',         label: 'AI Agent',    description: 'Mandatory: configure the SLOP AI agent' },
   { id: 'storage',    label: 'Storage',       description: 'Optional: configure shared storage' },
 ]
 
 // Tunnel supports multi-select (you can run cloudflared + tailscale simultaneously)
 const INFRA_SLOTS = [
-  { slot: 'auth', label: 'Authentication', description: 'Protect apps with a login page', multi: false,
-    options: [{ value: 'none', label: 'None' }, { value: 'tinyauth', label: 'TinyAuth (simple)' }, { value: 'authelia', label: 'Authelia (full SSO)' }] },
+  { slot: 'auth', label: 'Authentication', description: 'Enabled by default — protects all apps with a login page. Choose your auth provider.', multi: false, core: true,
+    options: [
+      { value: 'tinyauth', label: 'TinyAuth (simple)' },
+      { value: 'authelia', label: 'Authelia (full SSO)' },
+      { value: 'authentik', label: 'Authentik (enterprise)' },
+      { value: 'oauth2-proxy', label: 'oauth2-proxy (social login)' }
+    ] },
   { slot: 'tunnel', label: 'External Access Tunnel', description: 'Expose apps without port forwarding. Select all that apply.', multi: true,
-    options: [{ value: 'none', label: 'None' }, { value: 'cloudflared', label: 'Cloudflare Tunnel' }, { value: 'tailscale', label: 'Tailscale' }, { value: 'headscale', label: 'Headscale (self-hosted)' }] },
+    options: [
+      { value: 'none', label: 'None' },
+      { value: 'cloudflared', label: 'Cloudflare Tunnel' },
+      { value: 'tailscale', label: 'Tailscale' },
+      { value: 'headscale', label: 'Headscale (self-hosted)' },
+      { value: 'netbird', label: 'NetBird' },
+      { value: 'zerotier', label: 'ZeroTier' },
+      { value: 'pangolin', label: 'Pangolin' },
+      { value: 'nebula', label: 'Nebula' }
+    ] },
   { slot: 'vpn', label: 'VPN (for download clients)', description: 'Route torrent/usenet traffic through VPN', multi: false,
     options: [{ value: 'none', label: 'None' }, { value: 'gluetun', label: 'Gluetun' }] },
   { slot: 'dashboard', label: 'Dashboard', description: 'Homepage for your homelab', multi: false,
@@ -1505,11 +1546,13 @@ const form = reactive({
   ntfy_url: 'http://ntfy:80',
   ntfy_topic: 'slop',
   ntfy_enabled: true,  // pre-enable since http://ntfy:80 is the correct default
-  infra: { auth: 'none', vpn: 'none', dashboard: 'none', management: 'none' } as Record<string, string>,
+  infra: { auth: 'tinyauth', vpn: 'none', dashboard: 'none', management: 'none' } as Record<string, string>,
   tunnels: [] as string[],  // multi-select: can have cloudflared + tailscale simultaneously
   selectedStacks: [] as string[],
   secrets: {} as Record<string, string>,
-  llm_provider: 'none',
+  arr_auth_bypass: true,
+  arr_auth_provider: 'tinyauth',
+  llm_provider: 'ollama',
   groq_api_key: '',
   groq_model: 'llama-3.3-70b-versatile',
   awan_model: 'Meta-Llama-3.1-8B-Instruct',
@@ -1522,7 +1565,7 @@ const form = reactive({
   awan_api_key: '',
   ollama_model: 'phi4-mini',
   ollama_server: 'local',
-  ollama_url: 'http://ollama:11434',
+  ollama_url: 'http://localhost:11434',
   nfs_enabled: false,
   nfs_server: '',
   nfs_export: '',
@@ -1628,11 +1671,6 @@ async function nextStage() {
 
   currentStage.value++
   maxReachedStage.value = Math.max(maxReachedStage.value, currentStage.value)
-  // Auto-skip Stage 9 (Ollama install) when AI provider is not Ollama
-  if (currentStage.value === 9 && form.llm_provider !== 'ollama') {
-    currentStage.value = 10
-    maxReachedStage.value = Math.max(maxReachedStage.value, 10)
-  }
 }
 
 const finishing = ref(false)
@@ -1640,23 +1678,23 @@ const wizardLLMProviders = ref<any>(null)
 
 async function finish() {
   finishing.value = true
-  await saveLLMConfig()
-  // Save NFS storage if configured
+  clearDraft()
+  saveLLMConfig().catch(() => {})
   if (form.nfs_enabled && form.nfs_server && form.nfs_export) {
-    try {
-      await storageApi.add({
-        name: 'NFS Media',
-        type: 'nfs',
-        host: form.nfs_server,
-        path: form.nfs_export,
-        mount_point: form.media_root,
-        enabled: true,
-      })
-    } catch { /* intentional: non-fatal */ }
+    storageApi.add({
+      name: 'NFS Media',
+      type: 'nfs',
+      host: form.nfs_server,
+      path: form.nfs_export,
+      mount_point: form.media_root,
+      enabled: true,
+    }).catch(() => {})
   }
-  await platformStore.fetchStatus()
-  await new Promise(r => setTimeout(r, 500))
+  try {
+    await platformStore.fetchStatus()
+  } catch { /* non-fatal — navigate anyway */ }
   router.push('/')
+  finishing.value = false
 }
 
 const canAdvance = computed(() => {
@@ -1675,8 +1713,12 @@ const canAdvance = computed(() => {
   if (currentStage.value === 7) return setupSuccess.value
   if (currentStage.value === 8) return stackInstallDone.value
   if (currentStage.value === 9) {
-    // Stage 9 only reached when form.llm_provider === 'ollama' (others auto-skip to Stage 10)
-    return ollamaSetupJob.value?.ok === true
+    // AI is mandatory: block on 'none', require Ollama setup for local install
+    if (form.llm_provider === 'none') return false
+    if (form.llm_provider === 'ollama' && form.ollama_server === 'local') {
+      return ollamaSetupJob.value?.ok === true
+    }
+    return true
   }
   return true
 })
@@ -1700,7 +1742,11 @@ const advanceBlockReason = computed((): string => {
   }
   if (currentStage.value === 7) return 'Waiting for platform deployment to complete'
   if (currentStage.value === 8) return 'Waiting for app installations to complete'
-  if (currentStage.value === 9) return 'Complete the Ollama install and model download above'
+  if (currentStage.value === 9) {
+    if (form.llm_provider === 'none') return 'Select an AI provider in the Secrets step before continuing'
+    if (form.llm_provider === 'ollama' && form.ollama_server === 'local') return 'Complete the Ollama install and model download above'
+    return ''
+  }
   return ''
 })
 
@@ -1738,16 +1784,8 @@ async function runPrereqChecks() {
     }
     // Auto-select recommended model
     if (sys.recommended_model) form.ollama_model = sys.recommended_model
-    // Auto-advance to Stage 1 after 500ms when all checks pass and we're still on Stage 0
-    const allPass = prereqChecks.value.length > 0 && !prereqChecks.value.some(c => c.status === 'error')
-    if (allPass && currentStage.value === 0) {
-      setTimeout(() => {
-        if (currentStage.value === 0) {
-          currentStage.value = 1
-          maxReachedStage.value = Math.max(maxReachedStage.value, 1)
-        }
-      }, 500)
-    }
+    // Prerequisite results remain on screen; user clicks Continue → to advance.
+    // (canAdvance already enables the button when all checks pass.)
   } catch (e) {
     prereqError.value = String(e)
   } finally {
@@ -1797,6 +1835,30 @@ const requiredSecrets = computed(() => {
       link: 'https://headscale.net/docs/ref/preauthkeys/', placeholder: 'xxxx',
       note: 'Generate with: headscale preauthkeys create --reusable' })
   }
+  if (form.tunnels.includes('netbird')) {
+    secrets.push({ key: 'NETBIRD_SETUP_KEY', label: 'NetBird Setup Key', required: true,
+      link: 'https://app.netbird.io/', placeholder: 'setup-key-…' })
+  }
+  if (form.tunnels.includes('zerotier')) {
+    secrets.push({ key: 'ZEROTIER_NETWORK_ID', label: 'ZeroTier Network ID', required: true,
+      placeholder: '8056c2e21c000001', note: 'Network ID from your ZeroTier controller.' })
+  }
+  if (form.tunnels.includes('pangolin')) {
+    secrets.push({ key: 'PANGOLIN_CONTROLLER_URL', label: 'Pangolin Controller URL', required: true,
+      placeholder: 'https://pangolin.example.com' })
+    secrets.push({ key: 'PANGOLIN_ENROLLMENT_TOKEN', label: 'Pangolin Enrollment Token', required: true,
+      type: 'password', placeholder: 'pangolin-token-…' })
+  }
+  if (form.tunnels.includes('nebula')) {
+    secrets.push({ key: 'NEBULA_CONFIG_YAML', label: 'Nebula config.yml', required: true,
+      type: 'password', placeholder: 'Paste config YAML', note: 'Paste the full node config YAML.' })
+    secrets.push({ key: 'NEBULA_CA_CRT', label: 'Nebula CA Certificate', required: true,
+      type: 'password', placeholder: '-----BEGIN CERTIFICATE-----' })
+    secrets.push({ key: 'NEBULA_HOST_CRT', label: 'Nebula Host Certificate', required: true,
+      type: 'password', placeholder: '-----BEGIN NEBULA CERTIFICATE-----' })
+    secrets.push({ key: 'NEBULA_HOST_KEY', label: 'Nebula Host Private Key', required: true,
+      type: 'password', placeholder: '-----BEGIN PRIVATE KEY-----' })
+  }
   // Gluetun VPN credentials — protocol choice determines which fields are needed
   if (form.infra.vpn === 'gluetun') {
     secrets.push({ key: 'VPN_SERVICE_PROVIDER', label: 'VPN Provider', required: true,
@@ -1817,6 +1879,9 @@ const requiredSecrets = computed(() => {
     secrets.push({ key: 'SERVER_COUNTRIES', label: 'Server Country (optional)', required: false,
       type: 'text', placeholder: '',
       note: 'Preferred exit country. Leave blank for automatic selection.' })
+    secrets.push({ key: 'SERVER_CITIES', label: 'Server City (optional)', required: false,
+      type: 'text', placeholder: '',
+      note: 'Preferred exit city within the selected country. Leave blank for automatic selection.' })
   }
   // Komodo requires JWT secret and passkey (auto-generated)
   if (form.infra.management === 'komodo') {
@@ -1829,18 +1894,46 @@ const requiredSecrets = computed(() => {
     secrets.push({ key: 'TINYAUTH_SECRET', label: 'TinyAuth Session Secret', required: true,
       auto_generated: true, note: 'Auto-generated signing key. Do not share.' })
     // Username and password for TinyAuth login
-    secrets.push({ key: 'TINYAUTH_USERNAME', label: 'Admin username', required: true,
+    secrets.push({ key: 'TINYAUTH_USERNAME', label: 'Login username (protects all apps)', required: true,
       placeholder: 'admin', type: 'text',
-      note: 'Username for the TinyAuth login page.' })
-    secrets.push({ key: 'TINYAUTH_PASSWORD', label: 'Admin password', required: true,
+      note: 'You will use this username and password to access every app that TinyAuth protects.' })
+    secrets.push({ key: 'TINYAUTH_PASSWORD', label: 'Login password (protects all apps)', required: true,
       placeholder: 'Choose a strong password',
-      note: 'Password for the TinyAuth login page. This will be bcrypt-hashed.' })
+      note: 'You will use this password to access all your self-hosted apps. This will be bcrypt-hashed.' })
   }
   if (form.infra.auth === 'authelia') {
     secrets.push({ key: 'AUTHELIA_JWT_SECRET', label: 'Authelia JWT Secret', required: true,
       auto_generated: true, note: 'Auto-generated. Change only if migrating existing install.' })
     secrets.push({ key: 'AUTHELIA_SESSION_SECRET', label: 'Authelia Session Secret', required: true,
       auto_generated: true })
+  }
+  if (form.infra.auth === 'authentik') {
+    secrets.push({ key: 'AUTHENTIK_SECRET_KEY', label: 'Authentik Secret Key', required: true,
+      auto_generated: true, note: 'Auto-generated. Required for Authentik server.' })
+    secrets.push({ key: 'AUTHENTIK_POSTGRES_PASSWORD', label: 'Authentik PostgreSQL Password', required: true,
+      auto_generated: true, note: 'Password for the PostgreSQL database.' })
+    secrets.push({ key: 'AUTHENTIK_EMAIL', label: 'Admin Email', required: true,
+      placeholder: 'admin@example.com', type: 'email',
+      note: 'Email address for the initial admin account.' })
+    secrets.push({ key: 'AUTHENTIK_PASSWORD', label: 'Admin Password', required: true,
+      type: 'password',
+      note: 'Password for the initial admin account.' })
+  }
+  if (form.infra.auth === 'oauth2-proxy') {
+    secrets.push({ key: 'OAUTH2_PROXY_PROVIDER', label: 'OAuth Provider', required: true,
+      placeholder: 'google', note: 'google, github, azure, or oidc' })
+    secrets.push({ key: 'OAUTH2_PROXY_CLIENT_ID', label: 'Client ID', required: true,
+      note: 'OAuth2 client ID from your provider.' })
+    secrets.push({ key: 'OAUTH2_PROXY_CLIENT_SECRET', label: 'Client Secret', required: true,
+      type: 'password', note: 'OAuth2 client secret from your provider.' })
+    secrets.push({ key: 'OAUTH2_PROXY_OIDC_ISSUER_URL', label: 'OIDC Issuer URL', required: false,
+      placeholder: 'https://accounts.google.com',
+      note: 'Required for OIDC provider.' })
+    secrets.push({ key: 'OAUTH2_PROXY_COOKIE_SECRET', label: 'Cookie Secret', required: true,
+      auto_generated: true, note: 'Auto-generated. Used for cookie encryption.' })
+    secrets.push({ key: 'OAUTH2_PROXY_EMAIL_DOMAINS', label: 'Allowed Email Domains', required: false,
+      placeholder: 'example.com,example.org',
+      note: 'Comma-separated. Blank = any email allowed.' })
   }
   secrets.push({ key: 'POSTGRES_PASSWORD', label: 'PostgreSQL Password', required: true,
     auto_generated: true, note: 'Used by Immich, Paperless-ngx, Authelia if selected.' })
@@ -1887,6 +1980,16 @@ watch(
       if (!form.secrets['AUTHELIA_JWT_SECRET']) form.secrets['AUTHELIA_JWT_SECRET'] = hex(32)
       if (!form.secrets['AUTHELIA_SESSION_SECRET']) form.secrets['AUTHELIA_SESSION_SECRET'] = hex(32)
     }
+    if (auth === 'authentik') {
+      if (!form.secrets['AUTHENTIK_SECRET_KEY']) form.secrets['AUTHENTIK_SECRET_KEY'] = hex(32)
+      if (!form.secrets['AUTHENTIK_POSTGRES_PASSWORD']) form.secrets['AUTHENTIK_POSTGRES_PASSWORD'] = hex(16)
+      if (!form.secrets['AUTHENTIK_EMAIL']) form.secrets['AUTHENTIK_EMAIL'] = 'admin@example.com'
+      if (!form.secrets['AUTHENTIK_PASSWORD']) form.secrets['AUTHENTIK_PASSWORD'] = hex(12)
+    }
+    if (auth === 'oauth2-proxy') {
+      if (!form.secrets['OAUTH2_PROXY_PROVIDER']) form.secrets['OAUTH2_PROXY_PROVIDER'] = 'google'
+      if (!form.secrets['OAUTH2_PROXY_COOKIE_SECRET']) form.secrets['OAUTH2_PROXY_COOKIE_SECRET'] = hex(32)
+    }
     if (!form.secrets['POSTGRES_PASSWORD']) form.secrets['POSTGRES_PASSWORD'] = hex(16)
   },
   { immediate: true }
@@ -1899,10 +2002,21 @@ watch(
 const WIZARD_DRAFT_KEY = 'slop-wizard-draft'
 const hasDraft = ref(false)
 
+// Config-only secrets keys safe to persist across sessions — these are
+// user selections (provider name, protocol, location), never credentials.
+const _NON_SECRET_CONFIG_KEYS = new Set([
+  'VPN_SERVICE_PROVIDER', 'VPN_TYPE', 'SERVER_COUNTRIES', 'SERVER_CITIES',
+])
+
 function saveDraft() {
   try {
+    const safeSecrets: Record<string, string> = {}
+    for (const key of _NON_SECRET_CONFIG_KEYS) {
+      const val = form.secrets[key]
+      if (val !== undefined && val !== null) safeSecrets[key] = val
+    }
     localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify({
-      form: { ...JSON.parse(JSON.stringify(form)), secrets: {} },  // secrets excluded — never persist credentials to localStorage
+      form: { ...JSON.parse(JSON.stringify(form)), secrets: safeSecrets },
       stage: currentStage.value,
       maxStage: maxReachedStage.value,
     }))
@@ -1991,7 +2105,31 @@ const stackInstallDone = ref(false)
 const installStarted = ref(false)
 const appSearch = ref('')
 const catalogApps = ref<any[]>([])
+// Fallback timezone list — used when the API call fails so the datalist is never empty.
+// Kept in sync with the backend's fallback subset (platform.py list_timezones).
+const TIMEZONES_FALLBACK: string[] = [
+  "Africa/Johannesburg", "America/Chicago", "America/Denver", "America/Los_Angeles",
+  "America/New_York", "America/Sao_Paulo", "Asia/Kolkata", "Asia/Seoul", "Asia/Shanghai",
+  "Asia/Tokyo", "Australia/Melbourne", "Australia/Sydney", "Europe/Amsterdam",
+  "Europe/Berlin", "Europe/London", "Europe/Paris", "Europe/Rome", "Pacific/Auckland",
+  "UTC", "Etc/UTC",
+]
 const timezones = ref<string[]>([])
+const effectiveTimezones = computed(() => {
+  const list = timezones.value.length > 0 ? timezones.value : TIMEZONES_FALLBACK
+  return list.slice(0, 200)
+})
+const timezoneFilter = ref('')
+const filteredTimezones = computed(() => {
+  const q = timezoneFilter.value.toLowerCase()
+  if (q.length < 2) return effectiveTimezones.value.slice(0, 30)
+  const hits = effectiveTimezones.value.filter(tz => tz.toLowerCase().includes(q.replace(' ', '_')))
+  return hits.slice(0, 30)
+})
+function selectTimezone(tz: string) {
+  form.timezone = tz
+  timezoneFilter.value = tz
+}
 const activeStageBtn = ref<HTMLElement | null>(null)
 const stageNavRef = ref<HTMLElement | null>(null)
 const setupError = ref<string | null>(null)
@@ -2046,6 +2184,8 @@ async function runWizard() {
       ntfy_topic: form.ntfy_topic,
       ntfy_enabled: form.ntfy_enabled,
       secrets: form.secrets,
+      arr_auth_bypass: form.arr_auth_bypass,
+      arr_auth_provider: form.infra.auth,
       infra_selections: { ...form.infra, tunnels: form.tunnels },
       selected_stacks: form.selectedStacks,
     }
@@ -2171,13 +2311,12 @@ async function installStacks() {
     appInstallSteps.value[key] = []
     // Thread install_prompts values into the request body (id=816)
     const userVolumePaths = form.installPromptValues[key] ?? {}
-    try {
-      await appsApi.install(key, Object.keys(userVolumePaths).length > 0 ? { user_volume_paths: userVolumePaths } : {})
-    } catch (e) {
-      appInstallStatus[key] = 'error'
-      appInstallError[key] = e instanceof Error ? e.message : String(e)
-      appInstallProgress.value[key] = ''
-    }
+      try {
+        await appsApi.install(key, Object.keys(userVolumePaths).length > 0 ? { user_volume_paths: userVolumePaths } : {})
+      } catch (e) {
+        appInstallStatus[key] = 'error'
+        appInstallError[key] = e instanceof Error ? e.message : String(e)
+      }
   }))
 
   // Poll the bulk progress endpoint to update all app statuses from a single request.
@@ -2203,7 +2342,6 @@ async function installStacks() {
           if (appInstallStatus[key] === 'running' || appInstallStatus[key] === 'queued') {
             appInstallStatus[key] = 'error'
             appInstallError[key] = 'Timed out waiting for install'
-            appInstallProgress.value[key] = ''
           }
         }
         resolve()
@@ -2245,7 +2383,7 @@ async function installStacks() {
               if (!resolved) {
                 appInstallStatus[key] = 'error'
                 appInstallError[key] = info.error || 'Install failed'
-                appInstallProgress.value[key] = ''
+                // Keep progress + steps visible so user sees where it died
               }
             }
           }
@@ -2297,7 +2435,7 @@ async function _installStacksViaEventSources(keys: string[]) {
           } catch { /* intentional: non-fatal */ }
           appInstallStatus[key] = 'error'
           appInstallError[key] = error || 'Install failed'
-          appInstallProgress.value[key] = ''
+          // Keep progress + steps visible so user sees where it died
         }
         resolve()
       }
@@ -2332,7 +2470,6 @@ async function _installStacksViaEventSources(keys: string[]) {
             clearInterval(poll)
             appInstallStatus[key] = 'error'
             appInstallError[key] = String(e)
-            appInstallProgress.value[key] = ''
             resolve()
           }
         }, 500)
@@ -2355,7 +2492,7 @@ const ALL_OLLAMA_MODELS = [
   { value: 'smollm2:1.7b',  label: 'SmolLM2 1.7B (1.1GB)',  ram: 1.2, desc: 'fastest, minimal RAM' },
   { value: 'qwen2.5:3b',    label: 'Qwen 2.5 3B (1.9GB)',    ram: 2.2, desc: 'good balance' },
   { value: 'llama3.2:3b',   label: 'Llama 3.2 3B (2.0GB)',   ram: 2.5, desc: 'strong reasoning' },
-  { value: 'phi4-mini',     label: 'Phi-4 Mini (2.5GB)',      ram: 3.0, desc: 'recommended for ≥8GB RAM' },
+  { value: 'phi4-mini',     label: 'Phi-4 Mini (2.5GB)',      ram: 3.0, desc: 'fits ≥8GB RAM' },
   { value: 'llama3.1:8b',   label: 'Llama 3.1 8B (4.7GB)',   ram: 5.0, desc: 'best quality, needs ≥12GB RAM or GPU' },
 ]
 
@@ -2429,6 +2566,13 @@ async function startOllamaSetup() {
         if (status.done) {
           clearInterval(ollamaSetupPoll!)
           ollamaSetupPoll = null
+          // Trigger a health cycle so the AI agent activates immediately
+          // instead of waiting for the next scheduled cycle.
+          if (status.ok) {
+            try {
+              await fetch('/api/v1/health/run', { method: 'POST' })
+            } catch { /* intentional: non-fatal background fire-and-forget */ }
+          }
         }
       } catch { /* intentional: non-fatal */ }
     }, 1500)
@@ -2495,13 +2639,16 @@ async function retryFailedApps() {
   // Re-use the same per-app install logic as installStacks: start + poll
   async function retryOne(key: string) {
     appInstallStatus[key] = 'running'
+    // Preserve previous step history so the user can see prior attempts;
+    // clear only the live progress message.
     appInstallProgress.value[key] = 'Starting…'
     try {
       const r = await appsApi.installRaw(key, {}, true)
       if (!r.ok) {
         appInstallStatus[key] = 'error'
         appInstallError[key] = r.data?.detail || `HTTP ${r.status}`
-        appInstallProgress.value[key] = ''
+        // Keep appInstallProgress and appInstallSteps visible so the user
+        // can see exactly which step the prior attempt reached.
         return
       }
       await new Promise<void>((resolve) => {
@@ -2520,7 +2667,7 @@ async function retryFailedApps() {
               } else {
                 appInstallStatus[key] = 'error'
                 appInstallError[key] = pdata.error || 'Install failed'
-                appInstallProgress.value[key] = ''
+                // Keep progress + steps visible on failure so user sees where it died
               }
               resolve()
             }
@@ -2528,7 +2675,7 @@ async function retryFailedApps() {
             clearInterval(poll)
             appInstallStatus[key] = 'error'
             appInstallError[key] = String(e)
-            appInstallProgress.value[key] = ''
+            // Keep progress + steps visible on failure
             resolve()
           }
         }, 800)
@@ -2536,7 +2683,7 @@ async function retryFailedApps() {
     } catch (e) {
       appInstallStatus[key] = 'error'
       appInstallError[key] = String(e)
-      appInstallProgress.value[key] = ''
+      // Keep progress + steps visible on failure
     }
   }
   await Promise.all(failed.map(retryOne))
@@ -2630,6 +2777,23 @@ async function loadStacks() {
 
 onMounted(async () => {
   restoreDraft()  // restore before prereq checks (may change currentStage)
+  // Discard stale draft when platform is pending AND the draft points past
+  // the Deploy stage (7), OR when platform is already ready (setup is done —
+  // the draft is leftover from the completed session and the banner is confusing
+  // on the 'Platform is configured' screen).
+  if (hasDraft.value) {
+    try {
+      const status: any = await platformApi.status()
+      if (status.status === 'ready' || (status.status === 'pending' && maxReachedStage.value >= 7)) {
+        clearDraft()
+        if (status.status === 'pending') {
+          currentStage.value = 0
+          maxReachedStage.value = 0
+          form.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+        }
+      }
+    } catch { /* intentional: non-fatal */ }
+  }
   // Pre-fill from current platform config when re-running wizard with no saved draft.
   // Only fires when platform is already ready (force=true re-run) and no draft exists,
   // so we don't overwrite a partially-completed wizard session.
@@ -2657,7 +2821,10 @@ onMounted(async () => {
   try {
     const d = await platformApi.timezones()
     timezones.value = d.timezones || []
-  } catch { /* intentional: non-fatal */ }
+  } catch (e) {
+    /* non-fatal: fallback TIMEZONES_FALLBACK keeps the datalist usable */
+    console.warn('Timezone list fetch failed — using fallback:', e)
+  }
   try {
     const d: Array<{ key: string; name: string; env: string[] }> = await platformApi.dnsProviders()
     if (Array.isArray(d) && d.length > 0) {
@@ -2686,7 +2853,7 @@ onMounted(async () => {
     const d: any = await settingsApi.system()
     systemProfile.value = {
       ram_gb: Math.round((d.total_ram_mb || 0) / 1024),
-      recommended_model: d.recommended_model || 'phi4-mini',
+      recommended_model: d.recommended_llm_model || d.recommended_model || 'phi4-mini',
     }
   } catch { /* intentional: non-fatal */ }
 })

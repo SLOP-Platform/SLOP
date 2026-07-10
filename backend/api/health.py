@@ -26,6 +26,7 @@ from backend.api import health_proposals
 from backend.api.rate_limit import limiter
 from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 from backend.core.state import StateDB, is_scheduler_paused, set_scheduler_paused
 from backend.core.url_guard import UrlNotAllowed, assert_not_metadata_url
 from backend.core.url_guard_httpx import pinned_async_client
@@ -393,12 +394,12 @@ def _run_health_cycle_bg() -> None:
     try:
         with StateDB() as db:
             cfg = db.get_setting("llm_agent_config")
-        agent_cfg = json.loads(cfg) if cfg else {}
+        agent_cfg = normalize_llm_agent_config(json.loads(cfg) if cfg else {})
         _provider = agent_cfg.get("provider", "ollama")
         if _provider == "llamacpp":
             ollama_url = agent_cfg.get("llamacpp_url", "http://localhost:8081")
         else:
-            ollama_url = agent_cfg.get("ollama_url", "http://ollama:11434")
+            ollama_url = agent_cfg.get("ollama_url", "http://localhost:11434")
         ntfy_topic = agent_cfg.get("ntfy_topic", "slop")
         asyncio.run(
             run_health_cycle(
@@ -1183,11 +1184,11 @@ def get_agent_config() -> dict[str, Any]:
 
     with StateDB() as db:
         raw = db.get_setting("llm_agent_config")
-    cfg = _json.loads(raw) if raw else {}
+    cfg = normalize_llm_agent_config(_json.loads(raw) if raw else {})
     return {
         "provider": cfg.get("provider", "ollama"),
         "ollama_url": cfg.get("ollama_url", "http://localhost:11434"),
-        "model": cfg.get("ollama_model", ""),
+        "model": cfg.get("ollama_model") or cfg.get("model", ""),
         "api_key": cfg.get("api_key", ""),
     }
 
@@ -1206,13 +1207,14 @@ def put_agent_config(
     try:
         with StateDB() as db:
             raw = db.get_setting("llm_agent_config")
-            cfg = _json.loads(raw) if raw else {}
+            cfg = normalize_llm_agent_config(_json.loads(raw) if raw else {})
             if provider is not None:
                 cfg["provider"] = provider
             if ollama_url is not None:
                 cfg["ollama_url"] = ollama_url
             if model is not None:
                 cfg["ollama_model"] = model
+                cfg["model"] = model
             if api_key is not None:
                 cfg["api_key"] = api_key
             db.set_setting("llm_agent_config", _json.dumps(cfg))
@@ -1236,7 +1238,7 @@ async def ping_llm() -> dict[str, Any]:
 
     with StateDB() as db:
         cfg_raw = db.get_setting("llm_agent_config")
-    cfg = _json.loads(cfg_raw) if cfg_raw else {}
+    cfg = normalize_llm_agent_config(_json.loads(cfg_raw) if cfg_raw else {})
     provider = cfg.get("provider", "ollama")
     if provider == "llamacpp":
         base_url = cfg.get("llamacpp_url", "http://localhost:8081")
@@ -1244,15 +1246,17 @@ async def ping_llm() -> dict[str, Any]:
         base_url = cfg.get("ollama_url", "http://localhost:11434")
     api_key = cfg.get("api_key", "")
 
-    try:
-        from backend.core.llm_router import best_model_for
-
-        rec = best_model_for("reasoning")
-        model = (rec.ollama_name or rec.filename.replace(".gguf", "")) if rec else None
-    except Exception:
-        model = None
+    model = cfg.get("ollama_model") or cfg.get("model", "")
     if not model:
-        model = cfg.get("ollama_model", "")
+        try:
+            from backend.core.llm_router import best_model_for
+
+            rec = best_model_for("reasoning")
+            model = rec.ollama_name if rec and rec.ollama_name else None
+        except Exception:
+            model = None
+    if not model:
+        model = ""
 
     INSTALL = {
         "ollama": "curl -fsSL https://ollama.com/install.sh | sh && ollama pull [model-name]",
@@ -2031,9 +2035,10 @@ def llm_providers() -> dict[str, Any]:
         ],
     }
 
-    result = {}
-    for key, meta in PROVIDERS.items():
-        result[key] = {
+    result: dict[str, Any] = {}
+
+    def _provider_row(key: str, meta: dict[str, Any]) -> dict[str, Any]:
+        return {
             **meta,
             "key": key,
             "models": MODELS.get(
@@ -2042,7 +2047,95 @@ def llm_providers() -> dict[str, Any]:
             ),
         }
 
-    return {"providers": result}
+    for key, meta in sorted(PROVIDERS.items(), key=lambda item: str(item[1].get("label") or item[0]).lower()):
+        result[key] = _provider_row(key, meta)
+
+    # Merge custom user-defined providers
+    import json as _json_merge
+    from backend.core.state import StateDB as _SDB
+
+    try:
+        with _SDB() as _db:
+            custom_raw = _db.get_setting("custom_llm_providers") or "{}"
+        custom = _json_merge.loads(custom_raw) if isinstance(custom_raw, str) else (custom_raw or {})
+        for key, meta in custom.items():
+            result[key] = _provider_row(key, meta)
+    except Exception:
+        pass
+
+    sorted_result = dict(
+        sorted(result.items(), key=lambda item: str(item[1].get("label") or item[0]).lower())
+    )
+    return {"providers": sorted_result}
+
+
+@router.get("/llm-providers/custom")
+def get_custom_providers() -> dict[str, Any]:
+    """Return user-defined OpenAI-compatible custom providers."""
+    import json as _json
+
+    with StateDB() as db:
+        raw = db.get_setting("custom_llm_providers") or "{}"
+    return {"providers": _json.loads(raw) if isinstance(raw, str) else (raw or {})}
+
+
+class CustomProviderRequest(BaseModel):
+    key: str = Field(..., description="Unique provider key (slug)")
+    label: str = Field("", description="Display name")
+    base_url: str = Field(..., description="OpenAI-compatible base URL")
+    api_key: str = Field("", description="API key")
+    default_model: str = Field("", description="Default model ID")
+
+
+@router.post("/llm-providers/custom")
+def save_custom_provider(req: CustomProviderRequest) -> dict[str, Any]:
+    """Add or update a user-defined OpenAI-compatible provider."""
+    import json as _json
+    from backend.core.url_guard import UrlNotAllowed, assert_allowed_url
+
+    key = req.key.strip().lower()
+    if not key or key == "ollama" or key == "llamacpp":
+        raise HTTPException(status_code=400, detail="Invalid provider key.")
+    if not req.base_url or not req.base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="base_url must be an HTTP or HTTPS URL.")
+
+    try:
+        assert_allowed_url(req.base_url, schemes=("http", "https"), allow_private=False)
+    except UrlNotAllowed as err:
+        raise HTTPException(status_code=400, detail=safe_detail(err, "base_url not allowed.")) from err
+
+    with StateDB() as db:
+        raw = db.get_setting("custom_llm_providers") or "{}"
+        providers = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+        providers[key] = {
+            "key": key,
+            "label": req.label or key,
+            "base_url": req.base_url.rstrip("/") + "/v1" if not req.base_url.rstrip("/").endswith("/v1") else req.base_url.rstrip("/"),
+            "env_key": f"{key.upper()}_API_KEY",
+            "default_model": req.default_model or "gpt-4o-mini",
+            "free_tier": False,
+            "privacy": "custom",
+            "signup_url": "",
+            "notes": "Custom OpenAI-compatible provider.",
+        }
+        db.set_setting("custom_llm_providers", _json.dumps(providers))
+
+    return {"ok": True, "provider": providers[key]}
+
+
+@router.delete("/llm-providers/custom/{provider_key}")
+def delete_custom_provider(provider_key: str) -> dict[str, Any]:
+    """Remove a user-defined custom provider."""
+    import json as _json
+
+    with StateDB() as db:
+        raw = db.get_setting("custom_llm_providers") or "{}"
+        providers = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if provider_key not in providers:
+            raise HTTPException(status_code=404, detail=f"No custom provider '{provider_key}'.")
+        del providers[provider_key]
+        db.set_setting("custom_llm_providers", _json.dumps(providers))
+    return {"ok": True}
 
 
 @router.get("/apps/{key}/container-status")

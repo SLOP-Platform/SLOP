@@ -22,6 +22,7 @@ import re
 import time
 
 from backend.core.logging import get_logger
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 from backend.core.url_guard_httpx import pinned_async_client
 
 import httpx
@@ -365,7 +366,7 @@ async def find_replacement(
 
     with StateDB() as db:
         cfg_raw = db.get_setting("llm_agent_config")
-    cfg = _json.loads(cfg_raw) if cfg_raw else {}
+    cfg = normalize_llm_agent_config(_json.loads(cfg_raw) if cfg_raw else {})
     provider = cfg.get("provider", "ollama")
     if provider == "llamacpp":
         base_url = cfg.get("llamacpp_url", "http://localhost:8081")
@@ -427,7 +428,7 @@ Respond ONLY with the JSON object, no other text."""
                     "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
                     "gai": "gemini-2.0-flash",
                 }
-                model = cfg.get("ollama_model") or _defaults.get(provider, "")
+                model = cfg.get("ollama_model") or cfg.get("model") or _defaults.get(provider, "")
                 call_url = _cloud_urls.get(provider, f"{base_url}/v1/chat/completions")
                 hdrs = dict(headers)
                 if api_key:

@@ -26,6 +26,7 @@ from backend.core.url_guard_httpx import pinned_async_client
 from backend.core.logging import get_logger
 from backend.health.swallow_counter import record_swallow
 from backend.manifests.executor import PERF_THRESHOLDS
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 
 # Transport layer (extracted) — re-exported so `checker_llm._call_*` /
 # `checker_llm._dispatch_llm_call` and the checker.py re-export chain keep resolving.
@@ -47,7 +48,7 @@ _llm_state: dict[str, Any] = {
     "last_checked": 0,
     "last_error": "",  # human-readable last error
     "last_error_type": "",  # connection | timeout | parse | auth | dns | unknown
-    "ollama_url": "http://ollama:11434",  # Docker container hostname
+    "ollama_url": "http://localhost:11434",
     "model_tried": "",  # which model was requested
     "last_success_at": 0,  # unix timestamp of last successful call
     "configured_provider": "",  # provider name from llm_agent_config
@@ -117,10 +118,12 @@ def _load_provider_config() -> tuple[str, str, str, set[str]]:
         from backend.core.state import StateDB
 
         with StateDB() as _db:
-            _cfg = _jcfg.loads(_db.get_setting("llm_agent_config") or "{}")
+            _cfg = normalize_llm_agent_config(
+                _jcfg.loads(_db.get_setting("llm_agent_config") or "{}")
+            )
         _provider = _cfg.get("provider", "ollama")
         _api_key = _cfg.get("api_key", "")
-        _model_cfg = _cfg.get("model", "")
+        _model_cfg = _cfg.get("ollama_model") or _cfg.get("model", "")
         _llm_state["configured_provider"] = _provider
         _llm_state["configured_model"] = _model_cfg
         from backend.core.cloud_llm import PROVIDERS as _PROV_MAP
@@ -360,7 +363,7 @@ async def _llm_diagnose(
     app_key: str,
     check_result: Any,
     logs: str,
-    ollama_url: str = "http://ollama:11434",  # Docker container hostname (correct default)
+    ollama_url: str = "http://localhost:11434",
     model: str = "phi4-mini",
 ) -> str | None:
     """Query the LLM agent for a diagnosis. Never raises — returns None on any failure.

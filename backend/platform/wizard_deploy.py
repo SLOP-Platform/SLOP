@@ -58,37 +58,63 @@ def _try_deploy_one(
 def _deploy_tunnels(
     inp: Any, domain: str, network: str, deployed: list[str], failed: list[str]
 ) -> None:
-    """Deploy tunnel providers (cloudflared, tailscale, headscale) —
-    must be up before auth routing so Traefik can route through them."""
+    """Deploy tunnel providers before auth so Traefik can route through them."""
     for tunnel in inp.tunnels or []:
         cfg: dict[str, Any] = {"domain": domain, "network": network}
         if tunnel == "cloudflared":
             cfg["tunnel_token"] = inp.secrets.get("CF_TUNNEL_TOKEN", "") if inp.secrets else ""
-        elif tunnel in ("tailscale", "headscale"):
-            cfg["auth_key"] = (
-                (
-                    inp.secrets.get("TAILSCALE_AUTH_KEY", "")
-                    or inp.secrets.get("HEADSCALE_AUTH_KEY", "")
-                )
-                if inp.secrets
-                else ""
+        elif tunnel == "tailscale":
+            cfg["auth_key"] = inp.secrets.get("TAILSCALE_AUTH_KEY", "") if inp.secrets else ""
+        elif tunnel == "headscale":
+            cfg["pre_auth_key"] = inp.secrets.get("HEADSCALE_AUTH_KEY", "") if inp.secrets else ""
+            cfg["server_url"] = f"https://headscale.{domain}" if domain else ""
+        elif tunnel == "netbird":
+            cfg["setup_key"] = inp.secrets.get("NETBIRD_SETUP_KEY", "") if inp.secrets else ""
+        elif tunnel == "zerotier":
+            cfg["network_id"] = inp.secrets.get("ZEROTIER_NETWORK_ID", "") if inp.secrets else ""
+        elif tunnel == "pangolin":
+            cfg["enrollment_token"] = (
+                inp.secrets.get("PANGOLIN_ENROLLMENT_TOKEN", "") if inp.secrets else ""
             )
+            cfg["controller_url"] = (
+                inp.secrets.get("PANGOLIN_CONTROLLER_URL", "") if inp.secrets else ""
+            )
+        elif tunnel == "nebula":
+            if inp.secrets:
+                cfg["config_yaml"] = inp.secrets.get("NEBULA_CONFIG_YAML", "")
+                cfg["ca_crt"] = inp.secrets.get("NEBULA_CA_CRT", "")
+                cfg["host_crt"] = inp.secrets.get("NEBULA_HOST_CRT", "")
+                cfg["host_key"] = inp.secrets.get("NEBULA_HOST_KEY", "")
         _try_deploy_one("tunnel", tunnel, cfg, deployed, failed)
 
 
 def _deploy_auth(
     inp: Any, domain: str, network: str, deployed: list[str], failed: list[str]
 ) -> None:
-    """Deploy the auth provider (tinyauth, authelia) — after tunnels."""
+    """Deploy the auth provider (tinyauth, authelia, authentik, oauth2-proxy) — after tunnels."""
     if not inp.auth or inp.auth == "none":
         return
     cfg: dict[str, Any] = {
         "domain": domain,
         "network": network,
-        "users": "",  # filled from TINYAUTH_AUTH_USERS in .env when relevant
     }
     if inp.auth == "tinyauth" and inp.secrets:
         cfg["users"] = inp.secrets.get("TINYAUTH_AUTH_USERS", "")
+    elif inp.auth == "authelia" and inp.secrets:
+        cfg["jwt_secret"] = inp.secrets.get("AUTHELIA_JWT_SECRET", "")
+        cfg["session_secret"] = inp.secrets.get("AUTHELIA_SESSION_SECRET", "")
+    elif inp.auth == "authentik" and inp.secrets:
+        cfg["secret_key"] = inp.secrets.get("AUTHENTIK_SECRET_KEY", "")
+        cfg["postgres_password"] = inp.secrets.get("AUTHENTIK_POSTGRES_PASSWORD", "")
+        cfg["email"] = inp.secrets.get("AUTHENTIK_EMAIL", "")
+        cfg["password"] = inp.secrets.get("AUTHENTIK_PASSWORD", "")
+    elif inp.auth == "oauth2-proxy" and inp.secrets:
+        cfg["provider"] = inp.secrets.get("OAUTH2_PROXY_PROVIDER", "google")
+        cfg["client_id"] = inp.secrets.get("OAUTH2_PROXY_CLIENT_ID", "")
+        cfg["client_secret"] = inp.secrets.get("OAUTH2_PROXY_CLIENT_SECRET", "")
+        cfg["oidc_issuer_url"] = inp.secrets.get("OAUTH2_PROXY_OIDC_ISSUER_URL", "")
+        cfg["cookie_secret"] = inp.secrets.get("OAUTH2_PROXY_COOKIE_SECRET", "")
+        cfg["email_domains"] = inp.secrets.get("OAUTH2_PROXY_EMAIL_DOMAINS", "")
     _try_deploy_one("auth", inp.auth, cfg, deployed, failed)
 
 

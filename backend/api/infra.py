@@ -29,7 +29,6 @@ from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
 import backend.infra.providers  # noqa: F401 — triggers @register
-from backend.api.infra_schemas import PROVIDER_CONFIG_SCHEMAS
 from backend.infra.slots import deployable_slots
 from backend.infra.registry import (
     get_provider,
@@ -384,7 +383,7 @@ def get_provider_schema(slot: str) -> list[dict[str, Any]]:
             "key": p["key"],
             "display_name": p["display_name"],
             "slot": p["slot"],
-            "fields": PROVIDER_CONFIG_SCHEMAS.get(p["key"], []),
+            "fields": getattr(get_provider(p["slot"], p["key"]), "fields", []),
         }
         for p in providers
     ]

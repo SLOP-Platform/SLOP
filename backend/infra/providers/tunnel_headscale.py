@@ -30,28 +30,29 @@ class HeadscaleProvider(InfraProvider):
 
     fields: ClassVar = [
         {
-            "key": "domain",
-            "label": "Headscale domain",
+            "key": "server_url",
+            "label": "Headscale server URL",
             "type": "text",
-            "placeholder": "headscale.example.com",
+            "placeholder": "https://headscale.example.com",
             "required": True,
-            "help": "Public domain where Headscale will be reachable. Must be publicly accessible.",
+            "help": "Public URL where Headscale is reachable. Must be publicly accessible.",
         },
         {
-            "key": "noise_private_key",
-            "label": "Noise private key path",
+            "key": "pre_auth_key",
+            "label": "Pre-auth key",
             "type": "text",
-            "placeholder": "/etc/headscale/noise_private.key",
-            "required": False,
-            "help": "Path to the Noise protocol private key. Auto-generated if blank.",
+            "placeholder": "from headscale preauthkeys create",
+            "required": True,
+            "secret": True,
+            "help": "Reusable pre-auth key used by the node to join your Headscale network.",
         },
         {
-            "key": "ip_prefixes",
-            "label": "IP prefix",
+            "key": "hostname",
+            "label": "Node hostname (optional)",
             "type": "text",
-            "placeholder": "100.64.0.0/10",
+            "placeholder": "slop",
             "required": False,
-            "help": "CGNAT IP range for the mesh network. Default: 100.64.0.0/10",
+            "help": "How this node appears in your Headscale network. Defaults to 'slop'.",
         },
         {
             "type": "info",
@@ -66,9 +67,12 @@ class HeadscaleProvider(InfraProvider):
     ]
 
     def deploy(self, cfg: dict[str, Any]) -> ProviderResult:
-        domain = cfg.get("domain", "").strip()
-        if not domain:
-            return ProviderResult.failure("Domain is required.", "")
+        server_url = cfg.get("server_url", "").strip()
+        if not server_url and cfg.get("domain"):
+            server_url = f"https://{cfg['domain']}"
+        if not server_url:
+            return ProviderResult.failure("Headscale server URL is required.", "")
+        domain = server_url.replace("https://", "").replace("http://", "").strip("/")
 
         with StateDB() as db:
             _p = db.get_platform()
@@ -195,6 +199,20 @@ dns_config:
             f"Headscale deployed at {domain}. "
             "Create a user: docker exec headscale headscale users create admin"
         )
+
+    def register_hostname(self, hostname: str, target: str) -> ProviderResult:
+        return ProviderResult.success(
+            f"Headscale exposes the host on your tailnet; Traefik continues routing {hostname} -> {target}."
+        )
+
+    def unregister_hostname(self, hostname: str) -> ProviderResult:
+        return ProviderResult.success("Headscale hostname management is handled by Traefik.")
+
+    def list_hostnames(self) -> ProviderResult:
+        return ProviderResult.success("Headscale does not maintain per-app hostnames.", data={})
+
+    def pre_migration_snapshot(self) -> ProviderResult:
+        return ProviderResult.success("Headscale tunnel state is external; no local snapshot required.", data={})
 
     def remove(self) -> ProviderResult:
         try:

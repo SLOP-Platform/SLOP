@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.rate_limit import limiter
 from fastapi.responses import StreamingResponse
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 
 # Request/response DTOs extracted to models_schemas.py (#1302 linecount drain).
 # Re-exported (redundant-alias idiom) so response_model= refs, handler bodies,
@@ -160,7 +161,7 @@ def list_models() -> list[GGUFFileInfo]:
     try:
         with _SDB() as db:
             cfg_raw = db.get_setting("llm_agent_config")
-        cfg = _json.loads(cfg_raw) if cfg_raw else {}
+        cfg = normalize_llm_agent_config(_json.loads(cfg_raw) if cfg_raw else {})
         ollama_url = cfg.get("ollama_url", "http://localhost:11434")
         if not ollama_url.startswith(("http://", "https://")):
             raise ValueError(f"Unsupported Ollama URL scheme: {ollama_url}")

@@ -15,7 +15,7 @@ version: "1.0"
 #   URL: http://zilean:8181/api/v1/scrapers/prowlarr
 #   API Key: (any string, not validated)
 
-image: ghcr.io/iPromKnight/zilean
+image: ipromknight/zilean
 image_tag: latest
 linuxserver: false
 

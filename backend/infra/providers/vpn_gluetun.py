@@ -113,6 +113,8 @@ class GluetunProvider(InfraProvider):
             env["WIREGUARD_PRIVATE_KEY"] = cfg["wireguard_private_key"]
         if cfg.get("server_countries"):
             env["SERVER_COUNTRIES"] = cfg["server_countries"]
+        if cfg.get("server_cities"):
+            env["SERVER_CITIES"] = cfg["server_cities"]
 
         fragment = {
             "image": "qmcgaw/gluetun:latest",  # last-verified: 2026-06-21 — upstream-tracking float (#1228)

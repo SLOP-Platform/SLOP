@@ -28,7 +28,7 @@
               S.L.O.P.
             </div>
             <div class="text-xs text-slate-400 mt-0.5">
-              v5
+              {{ versionText }}
             </div>
           </div>
         </div>
@@ -132,6 +132,17 @@ const platformStore = usePlatformStore()
 const route = useRoute()
 const notification = ref<{ type: string; message: string } | null>(null)
 const healthCounts = ref({ ok: 0, warning: 0, error: 0 })
+const versionText = ref<string>('SLOP')
+
+async function loadVersion() {
+  try {
+    const r = await fetch('/api/ping')
+    if (r.ok) {
+      const d = await r.json()
+      if (d.version) versionText.value = `v${d.version}`
+    }
+  } catch { /* offline — keep default */ }
+}
 
 const healthSummary = computed(() => {
   const { ok, warning, error } = healthCounts.value
@@ -221,6 +232,7 @@ watch(route, async () => {
 
 onMounted(async () => {
   await platformStore.fetchStatus()
+  await loadVersion()
   await loadHealthSummary()
   setInterval(loadHealthSummary, 60_000)
 

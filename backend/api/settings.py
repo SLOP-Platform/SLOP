@@ -22,6 +22,7 @@ from backend.core.logging import get_logger
 from backend.core.state import StateDB
 from backend.core.config import config
 from backend.health import notifiers
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 
 # .env I/O helpers + secret-key registries — extracted to settings_env.py (#1258, 800-line cap).
 # Re-imported here so `settings.<name>` (incl. the tests' monkeypatch.setattr(settings, …)) and the
@@ -108,7 +109,7 @@ class SettingsOut(BaseModel):
 
 def _load_agent_config(db: StateDB) -> dict[str, Any]:
     raw = db.get_setting("llm_agent_config")
-    return json.loads(raw) if raw else {}
+    return normalize_llm_agent_config(json.loads(raw) if raw else {})
 
 
 def _save_agent_config(db: StateDB, cfg: dict[str, Any]) -> None:
@@ -174,7 +175,7 @@ def get_settings() -> SettingsOut:
         llm_backend=_llm_backend,
         llm_ollama_url=agent.get("ollama_url", "http://localhost:11434"),
         llm_llamacpp_url=agent.get("llamacpp_url", "http://localhost:8081"),
-        llm_model=agent.get("model", "phi4-mini"),
+        llm_model=agent.get("ollama_model") or agent.get("model", "phi4-mini"),
         llm_budget=float(agent.get("llm_budget", 0.0)),
         free_tier_priority=agent.get("free_tier_priority", ["ollama"]),
         scheduler_running=sched["running"],
@@ -619,22 +620,29 @@ def get_cloud_llm_settings() -> dict[str, Any]:
     with StateDB() as db:
         cascade_str = db.get_setting("cloud_llm_cascade") or ",".join(DEFAULT_CASCADE)
         monthly_limit = float(db.get_setting("cloud_llm_monthly_limit_usd") or "1.00")
+        agent_cfg = _load_agent_config(db)
 
-        # Get configured provider keys (those with API keys in .env)
-        from backend.core.config import config as _cfg
-
-        configured: list[str] = []
-        if _cfg.env_file.exists():
-            env_lines = _cfg.env_file.read_text()
-            for key, meta in PROVIDERS.items():
-                env_key = meta["env_key"]
-                if f"{env_key}=" in env_lines:
-                    val = ""
-                    for line in env_lines.splitlines():
-                        if line.strip().startswith(f"{env_key}="):
-                            val = line.strip().split("=", 1)[1].strip()
-                    if val:
-                        configured.append(key)
+    env_values = _read_env_file()
+    active_provider_set = {
+        provider.strip()
+        for provider in agent_cfg.get("active_providers", [])
+        if isinstance(provider, str) and provider.strip() in PROVIDERS
+    }
+    primary_provider = str(agent_cfg.get("provider") or "ollama")
+    if primary_provider in PROVIDERS:
+        active_provider_set.add(primary_provider)
+    primary_model = str(agent_cfg.get("model") or "")
+    provider_rows: dict[str, Any] = {}
+    for key, meta in PROVIDERS.items():
+        api_key = str(env_values.get(str(meta["env_key"]), "")).strip()
+        provider_rows[key] = {
+            **meta,
+            "configured": bool(api_key),
+            "active": key in active_provider_set,
+            "api_key_present": bool(api_key),
+            "api_key": api_key,
+            "model": primary_model if key == primary_provider else "",
+        }
 
     # Monthly spend data
     first_of_month = int(
@@ -665,18 +673,25 @@ def get_cloud_llm_settings() -> dict[str, Any]:
         recent_calls = []
 
     return {
-        "providers": {k: {**v, "configured": k in configured} for k, v in PROVIDERS.items()},
+        "providers": provider_rows,
         "cascade": cascade_str.split(","),
         "monthly_limit_usd": monthly_limit,
         "total_spend_this_month": total_spend,
         "spend_by_provider": spend_by_provider,
         "recent_calls": recent_calls,
+        "primary_provider": primary_provider,
+        "primary_model": primary_model,
+        "active_providers": sorted(active_provider_set),
     }
 
 
 class CloudLLMUpdate(BaseModel):
     cascade: list[str] | None = None
     monthly_limit_usd: float | None = None
+    provider: str | None = None
+    model: str | None = None
+    active_providers: list[str] | None = None
+    api_keys: dict[str, str] | None = None
 
 
 @router.put("/cloud-llm")
@@ -685,7 +700,10 @@ def update_cloud_llm_settings(payload: CloudLLMUpdate) -> dict[str, Any]:
     from backend.core.cloud_llm import PROVIDERS
     from backend.core.state import StateDB
 
+    env_updates: dict[str, str] = {}
+
     with StateDB() as db:
+        agent_cfg = _load_agent_config(db)
         if payload.cascade is not None:
             unknown = [p for p in payload.cascade if p not in PROVIDERS]
             if unknown:
@@ -693,13 +711,57 @@ def update_cloud_llm_settings(payload: CloudLLMUpdate) -> dict[str, Any]:
 
                 raise HTTPException(422, f"Unknown providers: {unknown}")
             db.set_setting("cloud_llm_cascade", ",".join(payload.cascade))
+            agent_cfg["cascade"] = payload.cascade
         if payload.monthly_limit_usd is not None:
             if payload.monthly_limit_usd < 0:
                 from fastapi import HTTPException
 
                 raise HTTPException(422, "Monthly limit must be >= 0")
             db.set_setting("cloud_llm_monthly_limit_usd", str(round(payload.monthly_limit_usd, 2)))
-    return {"ok": True}
+        if payload.active_providers is not None:
+            unknown = [p for p in payload.active_providers if p not in PROVIDERS]
+            if unknown:
+                from fastapi import HTTPException
+
+                raise HTTPException(422, f"Unknown providers: {unknown}")
+            agent_cfg["active_providers"] = payload.active_providers
+        if payload.api_keys is not None:
+            unknown = [p for p in payload.api_keys if p not in PROVIDERS]
+            if unknown:
+                from fastapi import HTTPException
+
+                raise HTTPException(422, f"Unknown providers: {unknown}")
+            for provider_key, api_key in payload.api_keys.items():
+                env_updates[str(PROVIDERS[provider_key]["env_key"])] = str(api_key).strip()
+        if payload.provider is not None:
+            if payload.provider not in PROVIDERS:
+                from fastapi import HTTPException
+
+                raise HTTPException(422, f"Unknown primary provider: {payload.provider}")
+            agent_cfg["provider"] = payload.provider
+            active = [
+                p for p in agent_cfg.get("active_providers", []) if isinstance(p, str) and p in PROVIDERS
+            ]
+            if payload.provider not in active:
+                active.append(payload.provider)
+            agent_cfg["active_providers"] = active
+        if payload.model is not None:
+            agent_cfg["model"] = payload.model.strip()
+
+        if any(
+            field is not None
+            for field in (
+                payload.cascade,
+                payload.provider,
+                payload.model,
+                payload.active_providers,
+                payload.api_keys,
+            )
+        ):
+            _save_agent_config(db, normalize_llm_agent_config(agent_cfg))
+    if env_updates:
+        _write_env_file(env_updates)
+    return get_cloud_llm_settings()
 
 
 # ── Traefik settings ────────────────────────────────────────────────────────

@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.agent.taxonomy import DETECTION_PATTERNS, ErrorClass
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 
 # Legacy flat confidence the evidence-ranked scorer replaces.
 # Kept as the shadow-mode fallback and the baseline logged for the shadow gate.
@@ -176,13 +177,13 @@ async def _query_llm_for_diagnosis(prompt: str) -> str | None:
 
         with StateDB() as _db:
             cfg_raw = _db.get_setting("llm_agent_config")
-        cfg = _json.loads(cfg_raw) if cfg_raw else {}
+        cfg = normalize_llm_agent_config(_json.loads(cfg_raw) if cfg_raw else {})
         if provider == "llamacpp":
             base_url = cfg.get("llamacpp_url", "http://localhost:8081")
         else:
             base_url = cfg.get("ollama_url", "http://localhost:11434")
         if not model:
-            model = cfg.get("ollama_model", "phi4-mini")
+            model = cfg.get("ollama_model") or cfg.get("model") or "phi4-mini"
 
         async with pinned_async_client(timeout=30) as client:
             # route_and_dispatch routes every per-provider call through

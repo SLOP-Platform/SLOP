@@ -27,6 +27,17 @@ from backend.infra.base import InfraProvider, ProviderResult
 from backend.infra.registry import register
 
 
+def _docker_gid() -> int:
+    """Return the GID of /var/run/docker.sock so containers can join the docker group.
+
+    Falls back to 999 (common Docker group default) if the socket is unreadable.
+    """
+    try:
+        return os.stat("/var/run/docker.sock").st_gid
+    except Exception:
+        return 999
+
+
 def _register_management_app(
     key: str, display_name: str, image: str, container_name: str, host_port: int
 ) -> None:
@@ -144,6 +155,7 @@ class DockhandProvider(_ManagementProvider):
             "restart": "unless-stopped",
             "networks": [network],
             "ports": [f"{host_port}:3000"],
+            "group_add": [str(_docker_gid())],
             "volumes": [
                 "/var/run/docker.sock:/var/run/docker.sock",
                 f"{data_path}:/app/data",
@@ -286,6 +298,7 @@ class DockgeProvider(_ManagementProvider):
             "restart": "unless-stopped",
             "networks": [network],
             "ports": [f"{host_port}:5001"],
+            "group_add": [str(_docker_gid())],
             "volumes": [
                 "/var/run/docker.sock:/var/run/docker.sock",
                 f"{data_path}:/app/data",

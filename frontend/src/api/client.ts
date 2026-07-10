@@ -421,7 +421,7 @@ export const settings = {
   // HTTP non-ok vs network catch 'Save failed.'; reads only r.ok, so via requestRaw).
   updateSecretsRaw: (updates: Record<string, string>) =>
     requestRaw<unknown>('/settings/secrets', { method: 'PUT', body: JSON.stringify({ updates }) }),
-  updateCloudLlm: (body: { monthly_limit_usd: number }) =>
+  updateCloudLlm: (body: { monthly_limit_usd?: number; provider?: string; model?: string; active_providers?: string[]; api_keys?: Record<string, string>; cascade?: string[] }) =>
     request('/settings/cloud-llm', { method: 'PUT', body: JSON.stringify(body) }),
   updateAiSafety: (body: { action_type: string; level: string }) =>
     request('/settings/ai-safety', { method: 'PUT', body: JSON.stringify(body) }),

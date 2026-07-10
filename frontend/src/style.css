@@ -61,4 +61,13 @@
 
   .nav-link { @apply flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors duration-100; }
   .nav-link-active { @apply nav-link bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800; }
+
+  /* Vue <Transition name="fade-slide"> */
+  .fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s ease; }
+  .fade-slide-enter-from, .fade-slide-leave-to { opacity: 0; transform: translateY(-4px); }
+
+  .tz-wrapper { position: relative; }
+  .timezone-search { @apply block w-full px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400 transition; }
+  .timezone-dropdown { @apply absolute left-0 right-0 z-50 mt-1 border border-slate-200 rounded-lg bg-white shadow-lg max-h-48 overflow-y-auto; }
+  .timezone-option { @apply px-3 py-1.5 text-sm cursor-pointer hover:bg-sky-50 text-slate-700; }
 }

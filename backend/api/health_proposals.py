@@ -21,6 +21,7 @@ from backend.api.rate_limit import limiter
 from backend.core.error_detail import safe_detail
 from backend.core.logging import get_logger
 from backend.core.path_guard import PathNotAllowed, safe_component
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 from backend.core.url_guard_httpx import pinned_async_client
 
 log = get_logger(__name__)
@@ -95,17 +96,17 @@ Start with: import pytest
 
             with StateDB() as db:
                 _agent_cfg_raw = db.get_setting("llm_agent_config")
-            _agent_cfg = (
+            _agent_cfg = normalize_llm_agent_config((
                 _json.loads(_agent_cfg_raw)
                 if isinstance(_agent_cfg_raw, str)
                 else (_agent_cfg_raw or {})
-            )
+            ))
             _provider = _agent_cfg.get("provider", "ollama")
             if _provider == "llamacpp":
                 ollama_url = _agent_cfg.get("llamacpp_url", "http://localhost:8081")
             else:
-                ollama_url = _agent_cfg.get("ollama_url", "http://ollama:11434")
-            model = _agent_cfg.get("model", "phi4-mini")
+                ollama_url = _agent_cfg.get("ollama_url", "http://localhost:11434")
+            model = _agent_cfg.get("ollama_model") or _agent_cfg.get("model", "phi4-mini")
             async with pinned_async_client(timeout=60) as client:
                 resp = await client.post(
                     f"{ollama_url}/api/generate",

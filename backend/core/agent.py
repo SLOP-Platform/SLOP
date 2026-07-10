@@ -30,6 +30,7 @@ from typing import Any
 
 from backend.core.logging import get_logger
 from backend.core.state import StateDB
+from backend.platform.ollama_runtime import normalize_llm_agent_config
 
 log = get_logger(__name__)
 
@@ -140,6 +141,16 @@ _CLOUD_PROVIDERS: frozenset[str] = frozenset(
         "google",
         "anthropic",
         "openai",
+        "opencode",
+        "neuralwatt",
+        "nanogpt",
+        "cline_pass",
+        "commandcode",
+        "minimax",
+        "chutes",
+        "trae",
+        "deepinfra",
+        "synthetic_new",
         "nim",
         "gai",
     }
@@ -186,7 +197,7 @@ async def check_agent_connectivity() -> str:
     try:
         with StateDB() as _db:
             _raw = _db.get_setting("llm_agent_config")
-        cfg: dict[str, Any] = _json.loads(_raw) if _raw else {}
+        cfg: dict[str, Any] = normalize_llm_agent_config(_json.loads(_raw) if _raw else {})
     except Exception:
         cfg = {}
 

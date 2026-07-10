@@ -38,6 +38,11 @@ from backend.core.config import config
 from backend.core.logging import get_logger
 from backend.core.system_eval import evaluate_system
 from backend.core.state import StateDB
+from backend.platform.ollama_runtime import (
+    ensure_local_ollama_runtime,
+    local_ollama_runtime_url,
+    normalize_llm_agent_config,
+)
 
 log = get_logger(__name__)
 
@@ -103,11 +108,20 @@ class WizardInput:
     # Tunnel selections (multi-select list)
     tunnels: list[str] | None = None  # ["cloudflared", "tailscale"]
     # Infra slot selections (stored for context; deployment happens via wizard_install_stacks)
-    auth: str = "none"  # auth provider: tinyauth | authelia | none
+    auth: str = "tinyauth"  # auth provider: tinyauth | authelia | authentik | oauth2-proxy
     vpn: str = "none"  # vpn provider: gluetun | none
     dashboard: str = "none"  # dashboard: glance | homepage | none
     management: str = "none"  # container mgmt: dockhand | dockge | none
     traefik_dashboard_port: int = 8081
+    # LLM backend selection (automatic Ollama install during wizard)
+    llm_provider: str = "ollama"  # ollama | groq | cerebras | openai | etc.
+    ollama_model: str = "phi4-mini"  # model to pull after Ollama install
+    ollama_server: str = "local"  # local | remote
+    ollama_url: str = "http://ollama:11434"  # Ollama API URL (local container or remote)
+    llamacpp_url: str = "http://localhost:8081"  # llama.cpp server URL
+    # *arr apps auth bypass (disable onboard auth so SLOP can manage them)
+    arr_auth_bypass: bool = False  # True = set AuthenticationMethod=External, AuthenticationRequired=Disabled
+    arr_auth_provider: str = "none"  # none | tinyauth | traefik (which auth to use instead)
     # Secrets collected by Stage 5 — written verbatim to .env
     secrets: dict[str, str] | None = None
 
@@ -456,19 +470,35 @@ def _handle_existing_traefik(cfg_hash: str) -> tuple[StepResult | None, bool]:
     try:
         import subprocess as _sp
 
-        down = _sp.run(
-            ["docker", "compose", "-f", str(compose_file), "down"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if down.returncode != 0:
-            return StepResult(
-                step="traefik_deploy",
-                status="error",
-                message="Traefik config changed but could not stop the running container.",
-                detail=_clean_docker_output(down.stderr or down.stdout),
-            ), True
+        # If the compose fragment is missing (e.g. after a cleanup),
+        # stop the container by name directly instead of failing.
+        if not compose_file.exists():
+            _sp.run(
+                ["docker", "stop", "traefik"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            _sp.run(
+                ["docker", "rm", "traefik"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        else:
+            down = _sp.run(
+                ["docker", "compose", "-f", str(compose_file), "down"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if down.returncode != 0:
+                return StepResult(
+                    step="traefik_deploy",
+                    status="error",
+                    message="Traefik config changed but could not stop the running container.",
+                    detail=_clean_docker_output(down.stderr or down.stdout),
+                ), True
     except Exception as e:
         return StepResult(
             step="traefik_deploy",
@@ -615,6 +645,143 @@ def step_traefik_healthy(inp: WizardInput, timeout: int = 60) -> StepResult:
     )
 
 
+def step_ollama_deploy(inp: WizardInput) -> StepResult:
+    """Install Ollama and pull the selected model when llm_provider=ollama and ollama_server=local.
+
+    Runs automatically during the wizard (like Traefik) so the SLOP AI agent
+    has a working LLM backend without requiring a separate manual step.
+    Skipped when the user selected a cloud provider or remote Ollama.
+    """
+    # Only deploy Ollama locally when the user chose local Ollama in the wizard
+    if inp.llm_provider != "ollama" or inp.ollama_server != "local":
+        return StepResult(
+            step="ollama_deploy",
+            status="skipped",
+            message="LLM provider is not local Ollama — skipping Ollama install.",
+            detail=f"Provider={inp.llm_provider}, server={inp.ollama_server}",
+        )
+
+    model = (inp.ollama_model or "phi4-mini").strip()
+    result = ensure_local_ollama_runtime(model, network_name=inp.network_name or STACK_NETWORK)
+    if not result.ok:
+        return StepResult(
+            step="ollama_deploy",
+            status="error",
+            message=result.message,
+            detail=result.detail,
+        )
+
+    return StepResult(
+        step="ollama_deploy",
+        status="ok",
+        message=result.message,
+        detail=result.detail or f"Ollama running at {local_ollama_runtime_url()} with model {model}.",
+    )
+
+
+def step_arr_auth_bypass(inp: WizardInput) -> StepResult:
+    """Disable *arr apps' onboard auth so SLOP can manage them via API.
+
+    Edits each app's config.xml (with container stopped) to set:
+      <AuthenticationMethod>External</AuthenticationMethod>
+      <AuthenticationRequired>Disabled</AuthenticationRequired>
+
+    This lets SLOP call the *arr APIs without needing an API key.
+    The app remains protected by Traefik + TinyAuth (if configured).
+
+    Skipped when ``inp.arr_auth_bypass`` is False.
+    """
+    if not inp.arr_auth_bypass:
+        return StepResult(
+            step="arr_auth_bypass",
+            status="skipped",
+            message="*arr auth bypass not requested — skipping.",
+            detail="Set arr_auth_bypass=True in wizard input to enable.",
+        )
+
+    _ARR_APPS = ["radarr", "sonarr", "lidarr", "prowlarr", "bazarr"]
+    _CONFIG_BASE = inp.config_root or "/srv/slop/data/config"
+    _AUTH_PROVIDER = (inp.arr_auth_provider or "none").strip()
+
+    import subprocess as _sp
+    import time as _time
+
+    _stopped: list[str] = []
+    _failed: list[str] = []
+
+    # ── Phase 1: Stop containers ─────────────────────────────────────
+    for _app in _ARR_APPS:
+        try:
+            _r = _sp.run(
+                ["docker", "stop", _app],
+                capture_output=True, text=True, timeout=30,
+            )
+            if _r.returncode == 0:
+                _stopped.append(_app)
+            else:
+                _failed.append(f"{_app}: stop failed ({_r.stderr.strip()[:50]})")
+        except Exception as e:
+            _failed.append(f"{_app}: {str(e)[:50]}")
+
+    if _failed:
+        return StepResult(
+            step="arr_auth_bypass",
+            status="error",
+            message=f"Failed to stop containers: {', '.join(_failed)}",
+            detail="Fix and retry wizard.",
+        )
+
+    _time.sleep(3)  # wait for Docker to release file locks
+
+    # ── Phase 2: Edit config.xml ───────────────────────────────────
+    for _app in _stopped:
+        _cfg = f"{_CONFIG_BASE}/{_app}/config.xml"
+        try:
+            # Use sed to replace the auth tags in-place on the host filesystem
+            for _old, _new in [
+                (r"<AuthenticationMethod>.*</AuthenticationMethod>",
+                 "<AuthenticationMethod>External</AuthenticationMethod>"),
+                (r"<AuthenticationRequired>.*</AuthenticationRequired>",
+                 "<AuthenticationRequired>Disabled</AuthenticationRequired>"),
+            ]:
+                _r = _sp.run(
+                    ["sed", "-i", f"s|{_old}|{_new}|", _cfg],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if _r.returncode != 0:
+                    _failed.append(f"{_app}: sed failed ({_r.stderr.strip()[:50]})")
+                    break
+        except Exception as e:
+            _failed.append(f"{_app}: {str(e)[:50]}")
+
+    # ── Phase 3: Restart containers ─────────────────────────────────
+    for _app in _stopped:
+        try:
+            _r = _sp.run(
+                ["docker", "start", _app],
+                capture_output=True, text=True, timeout=30,
+            )
+            if _r.returncode != 0:
+                _failed.append(f"{_app}: start failed ({_r.stderr.strip()[:50]})")
+        except Exception as e:
+            _failed.append(f"{_app}: {str(e)[:50]}")
+
+    if _failed:
+        return StepResult(
+            step="arr_auth_bypass",
+            status="error",
+            message=f"Auth bypass partial: {', '.join(_failed)}",
+            detail="Some apps may need manual config.",
+        )
+
+    return StepResult(
+        step="arr_auth_bypass",
+        status="ok",
+        message=f"*arr auth bypassed for: {', '.join(_stopped)}.",
+        detail="SLOP can now manage these apps via API without auth.",
+    )
+
+
 def step_complete(inp: WizardInput) -> StepResult:
     """Mark the platform as ready in the state database."""
     try:
@@ -633,6 +800,13 @@ def step_complete(inp: WizardInput) -> StepResult:
                 installed_at=int(time.time()),
                 traefik_version="v3.3",
             )
+        # Kickstart the health scheduler if it timed out waiting for platform
+        # readiness during startup (common on first-time wizard runs > 5 min).
+        try:
+            from backend.health.scheduler import start_scheduler
+            start_scheduler()
+        except Exception:
+            pass  # non-fatal — scheduler may already be running
         return StepResult(
             step="complete",
             status="ok",
@@ -880,9 +1054,12 @@ def step_write_env(inp: WizardInput) -> StepResult:
 
 
 def step_persist_settings(inp: WizardInput) -> StepResult:
-    """Persist notification and system settings to DB after platform is ready."""
+    """Persist notification, system, and LLM agent settings to DB after platform is ready."""
     try:
+        import json as _json
+
         with StateDB() as db:
+            # System settings
             db.set_setting("ntfy_url", inp.ntfy_url)
             db.set_setting("ntfy_topic", inp.ntfy_topic)
             db.set_setting("ntfy_enabled", "true" if inp.ntfy_enabled else "false")
@@ -890,6 +1067,17 @@ def step_persist_settings(inp: WizardInput) -> StepResult:
             db.set_setting("pgid", str(inp.pgid))
             db.set_setting("timezone", inp.timezone)
             db.set_setting("traefik_dashboard_port", str(inp.traefik_dashboard_port or 8081))
+            # LLM agent config — enables the AI agent automatically after wizard
+            _llm_cfg = normalize_llm_agent_config({
+                "enabled": True,
+                "provider": inp.llm_provider or "ollama",
+                "model": inp.ollama_model or "phi4-mini",
+                "ollama_model": inp.ollama_model or "phi4-mini",
+                "ollama_url": local_ollama_runtime_url() if inp.ollama_server == "local" else (inp.ollama_url or "http://localhost:11434"),
+                "llamacpp_url": inp.llamacpp_url or "http://localhost:8081",
+                "api_key": "",  # populated later for cloud providers
+            })
+            db.set_setting("llm_agent_config", _json.dumps(_llm_cfg))
         return StepResult("persist_settings", "ok", "Settings saved to database.", "")
     except Exception as e:
         return StepResult("persist_settings", "error", "Could not save settings.", str(e))
@@ -935,6 +1123,7 @@ def _deploy_vpn(
         cfg["openvpn_password"] = inp.secrets.get("OPENVPN_PASSWORD", "")
         cfg["wireguard_private_key"] = inp.secrets.get("WIREGUARD_PRIVATE_KEY", "")
         cfg["server_countries"] = inp.secrets.get("SERVER_COUNTRIES", "")
+        cfg["server_cities"] = inp.secrets.get("SERVER_CITIES", "")
     if inp.vpn == "gluetun" and not cfg.get("vpn_service_provider"):
         if skipped is not None:
             skipped.append("gluetun")
@@ -1080,14 +1269,22 @@ def step_verify_running(inp: WizardInput) -> StepResult:
     infra_containers = {
         "tinyauth": "tinyauth",
         "authelia": "authelia",
+        "authentik": "authentik",
+        "oauth2-proxy": "oauth2-proxy",
         "cloudflared": "cloudflared",
         "tailscale": "tailscale",
         "headscale": "headscale",
+        "netbird": "netbird",
+        "zerotier": "zerotier",
+        "pangolin": "pangolin",
+        "nebula": "nebula",
         "gluetun": "gluetun",
         "glance": "glance",
         "homepage": "homepage",
         "dockge": "dockge",
         "portainer": "portainer",
+        "dockhand": "dockhand",
+        "komodo": "komodo",
     }
     # Check all selected infra: tunnels, auth, vpn, dashboard, management
     all_selected = list(getattr(inp, "tunnels", []) or [])
@@ -1139,6 +1336,8 @@ STEPS = [
     ("traefik_config", step_traefik_config),
     ("traefik_deploy", step_traefik_deploy),
     ("traefik_healthy", step_traefik_healthy),
+    ("ollama_deploy", step_ollama_deploy),
+    ("arr_auth_bypass", step_arr_auth_bypass),
     ("deploy_infra", step_deploy_infra),
     ("dns_validation", step_dns_validation),
     ("persist_settings", step_persist_settings),

@@ -36,6 +36,11 @@ from backend.api.jobs_store import (
     load_wizard_job as _load_wizard_job_from_db,
     persist_job as _persist_job,
 )
+from backend.platform.ollama_runtime import (
+    ensure_local_ollama_runtime,
+    local_ollama_runtime_url,
+    normalize_llm_agent_config,
+)
 
 
 log = get_logger(__name__)
@@ -409,7 +414,7 @@ class WizardLLMRequest(BaseModel):
     )
     api_key: str = Field("", description="API key for cloud providers")
     model: str = Field("", description="Model name override")
-    ollama_url: str = Field("http://ollama:11434", description="Ollama base URL")
+    ollama_url: str = Field("http://localhost:11434", description="Ollama base URL")
     llamacpp_url: str = Field("http://localhost:8081", description="llama.cpp base URL")
 
 
@@ -452,6 +457,16 @@ STEP_DESCRIPTIONS: list[StepInfo] = [
         name="traefik_healthy",
         title="Verify Traefik",
         description="Wait for Traefik to start and confirm it is healthy.",
+    ),
+    StepInfo(
+        name="ollama_deploy",
+        title="Deploy Ollama",
+        description="Install Ollama and pull the recommended LLM model for the AI agent.",
+    ),
+    StepInfo(
+        name="arr_auth_bypass",
+        title="Configure *Arr Apps",
+        description="Disable *Arr app authentication so SLOP can manage them via API.",
     ),
     StepInfo(
         name="complete",
@@ -626,6 +641,11 @@ def wizard_validate(req: WizardRequest) -> ValidateResponse:
 
     Call this before /wizard/run to surface problems before starting.
     """
+    _tunnels = req.infra_selections.get("tunnels", [])
+    if isinstance(_tunnels, str):
+        _tunnels = [_tunnels] if _tunnels and _tunnels != "none" else []
+    _tunnels = [t for t in _tunnels if t and t != "none"]
+
     inp = WizardInput(
         domain=req.domain,
         config_root=req.config_root,
@@ -643,7 +663,11 @@ def wizard_validate(req: WizardRequest) -> ValidateResponse:
         ntfy_url=req.ntfy_url,
         ntfy_topic=req.ntfy_topic,
         ntfy_enabled=req.ntfy_enabled,
-        tunnels=list(req.infra_selections.get("tunnels", [])),
+        auth=req.infra_selections.get("auth") or "tinyauth",
+        tunnels=_tunnels,
+        vpn=req.infra_selections.get("vpn") or "none",
+        dashboard=req.infra_selections.get("dashboard") or "none",
+        management=req.infra_selections.get("management") or "none",
         secrets=dict(req.secrets) if req.secrets else {},
     )
     issues = validate_wizard(inp)
@@ -705,6 +729,10 @@ def wizard_run(request: Request, req: WizardRequest) -> WizardRunResponse:
         ntfy_url=req.ntfy_url,
         ntfy_topic=req.ntfy_topic,
         ntfy_enabled=req.ntfy_enabled,
+        auth=req.infra_selections.get("auth") or "tinyauth",
+        vpn=req.infra_selections.get("vpn") or "none",
+        dashboard=req.infra_selections.get("dashboard") or "none",
+        management=req.infra_selections.get("management") or "none",
         tunnels=_tunnels,
         secrets=all_secrets,
     )
@@ -949,6 +977,10 @@ def reset_platform(
         "cloudflared",
         "tailscale",
         "headscale",
+        "netbird",
+        "zerotier",
+        "pangolin",
+        "nebula",
         "gluetun",
         "glance",
         "homepage",
@@ -958,6 +990,7 @@ def reset_platform(
         "portainer",
         "portainer_be",
         "ollama",
+        "slop-ollama-agent",
     ]
 
     # Step 1: Stop all infra containers directly by name (faster + more reliable
@@ -970,7 +1003,7 @@ def reset_platform(
     # Step 3: Remove all infra compose fragments
     removed_frags = []
     if _cfg.compose_dir.exists():
-        for frag_name in [*INFRA_CONTAINERS, "traefik"]:
+        for frag_name in [*INFRA_CONTAINERS, "traefik", "ollama-agent"]:
             frag = _cfg.compose_dir / f"{frag_name}.yaml"
             if frag.exists():
                 try:
@@ -1701,7 +1734,7 @@ def wizard_run_async(request: Request, req: WizardRequest) -> dict[str, Any]:
             acme_email=req.acme_email or f"admin@{req.domain}",
             dns_provider=req.dns_provider or "",
             secrets=all_secrets,
-            auth=req.infra_selections.get("auth") or "none",
+            auth=req.infra_selections.get("auth") or "tinyauth",
             tunnels=_tunnels,
             vpn=req.infra_selections.get("vpn") or "none",
             dashboard=req.infra_selections.get("dashboard") or "none",
@@ -1810,7 +1843,7 @@ _ollama_jobs_lock = _threading.Lock()
 
 @router.post("/wizard/setup-ollama")
 def wizard_setup_ollama(req: OllamaSetupRequest) -> dict[str, Any]:
-    """Install Ollama from catalog and pull the requested model.
+    """Provision the platform-owned Ollama runtime and pull the requested model.
 
     Runs in a background thread so the frontend can poll progress.
     Returns a job_id for GET /wizard/ollama-status/{job_id}.
@@ -1842,170 +1875,42 @@ def wizard_setup_ollama(req: OllamaSetupRequest) -> dict[str, Any]:
         _persist_job(job_id, "ollama", _snapshot)
 
     def _run() -> None:
-        import subprocess as _sp
-        from backend.manifests.executor import install_app as _install_app
-
-        # ── Phase 0: Check if Ollama is already reachable ────────────────
-        import httpx as _httpx
-
-        _already_running = False
         try:
-            _chk = _httpx.get("http://ollama:11434/api/version", timeout=3)
-            if _chk.status_code == 200:
-                _already_running = True
-                _update(phase="installing", progress=30, message="✓ Ollama is already running.")
-        except Exception as e:
-            log.debug("platform best-effort step skipped: %s", e)
-
-        if not _already_running:
-            import subprocess as _sp_oll
-
-            # Check if Ollama container already exists (even if API not responding yet)
-            # This handles the retry case: container started but API still initializing
-            _container_exists = False
-            try:
-                _cex = _sp_oll.run(
-                    ["docker", "ps", "-a", "--filter", "name=ollama", "--format", "{{.Names}}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                _container_exists = "ollama" in _cex.stdout
-            except Exception as e:
-                log.debug("platform best-effort step skipped: %s", e)
-
-            if not _container_exists:
-                # ── Phase 1: Install Ollama container ────────────────────
-                _update(phase="installing", progress=5, message="Installing Ollama container…")
-                try:
-                    r = _install_app("ollama")
-                    if not r.ok:
-                        _update(
-                            phase="error",
-                            done=True,
-                            ok=False,
-                            errorDetail=getattr(r, "detail", None)
-                            or r.error
-                            or "Ollama install failed",
-                            message=getattr(r, "detail", None) or r.error or "Install failed",
-                        )
-                        return
-                except Exception as e:
-                    _update(
-                        phase="error",
-                        done=True,
-                        ok=False,
-                        errorDetail=safe_detail(e, "Install error.", log=log),
-                        message="Install error.",
-                    )
-                    return
-            else:
-                # Container exists but API wasn't responding — it's still initializing
-                _update(
-                    phase="installing",
-                    progress=20,
-                    message="Ollama container found — waiting for API to initialize…",
-                )
-
-            _update(phase="installing", progress=30, message="Waiting for Ollama API to be ready…")
-
-            # ── Phase 2: Wait for Ollama API (up to 180s for GPU init) ──────
-            # AMD iGPU (Vega 7, 780M) with Mesa drivers can take 2-3min on first start
-            for attempt in range(90):  # up to 180s
-                _time.sleep(2)
-                try:
-                    r2 = _httpx.get("http://ollama:11434/api/version", timeout=5)
-                    if r2.status_code == 200:
-                        break
-                except Exception as e:
-                    log.debug("platform best-effort step skipped: %s", e)
-                elapsed = (attempt + 1) * 2
-                _update(
-                    progress=30 + min(attempt, 30),
-                    message=f"Waiting for Ollama API… ({elapsed}s elapsed, up to 180s)",
-                )
-            else:
-                _update(
-                    phase="error",
-                    done=True,
-                    ok=False,
-                    errorDetail="Ollama API did not respond within 120s",
-                    message=(
-                        "Ollama started but API not reachable after 180s. "
-                        "Check: docker logs ollama\n"
-                        "Note: First start on AMD/NVIDIA GPU can take 2+ minutes. "
-                        "Click Retry — Ollama may now be ready."
-                    ),
-                )
-                return
-
-        _update(
-            phase="pulling",
-            progress=35,
-            message=f"Pulling model {model}… (this may take several minutes)",
-        )
-
-        # ── Phase 3: Pull model via docker exec ──────────────────────────
-        # Stream docker exec output to track progress
-        try:
-            proc = _sp.Popen(
-                ["docker", "exec", "ollama", "ollama", "pull", model],
-                stdout=_sp.PIPE,
-                stderr=_sp.STDOUT,
-                text=True,
+            result = ensure_local_ollama_runtime(
+                model,
+                progress=lambda phase, progress, message: _update(
+                    phase=phase,
+                    progress=progress,
+                    message=message,
+                ),
             )
-            last_pct = 35
-            assert proc.stdout is not None  # stdout=PIPE guarantees non-None at runtime
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                # Ollama pull output: "pulling sha256:xxx... 14% ▕████   ▏ 562 MB/3.8 GB"
-                import re as _re
-
-                m = _re.search(r"(\d+)%", line)
-                if m:
-                    pct = int(m.group(1))
-                    last_pct = 35 + int(pct * 0.60)  # map 0-100% → 35-95%
-                _update(progress=last_pct, message=f"Downloading {model}: {line[:80]}")
-
-            proc.wait(timeout=600)
-            if proc.returncode != 0:
-                _update(
-                    phase="error",
-                    done=True,
-                    ok=False,
-                    errorDetail=f"ollama pull {model} exited with code {proc.returncode}",
-                    message=f"Model pull failed. Run: docker exec ollama ollama pull {model}",
-                )
-                return
-        except _sp.TimeoutExpired:
-            proc.kill()
+        except Exception as exc:
             _update(
                 phase="error",
                 done=True,
                 ok=False,
-                errorDetail="Model download timed out after 10 minutes",
-                message="Download too slow. Try again or pick a smaller model.",
+                errorDetail=safe_detail(exc, "Ollama setup failed.", log=log),
+                message="Ollama setup failed.",
             )
             return
-        except Exception as e:
+
+        if not result.ok:
             _update(
                 phase="error",
                 done=True,
                 ok=False,
-                errorDetail=safe_detail(e, "Pull error.", log=log),
-                message="Pull error.",
+                errorDetail=result.detail or result.message,
+                message=result.message,
             )
             return
 
-        # ── Phase 4: Verify model is available ───────────────────────────
         _update(
             phase="done",
             progress=100,
             done=True,
             ok=True,
-            message=f"✓ Ollama ready. Model {model} loaded and available.",
+            errorDetail=None,
+            message=result.message,
         )
 
     _threading.Thread(target=_run, daemon=True).start()
@@ -2191,13 +2096,14 @@ def wizard_save_llm(req: WizardLLMRequest) -> dict[str, Any]:
                 }
             elif provider == "ollama":
                 model_name = req.model or "phi4-mini"
-                ollama_url = req.ollama_url or "http://ollama:11434"
-                cfg = {
+                ollama_url = req.ollama_url or local_ollama_runtime_url()
+                cfg = normalize_llm_agent_config({
                     "provider": "ollama",
                     "api_key": "",
                     "model": model_name,
+                    "ollama_model": model_name,
                     "ollama_url": ollama_url,
-                }
+                })
             elif provider == "llamacpp":
                 llamacpp_url = req.llamacpp_url or "http://localhost:8081"
                 model_name = req.model or "phi-4-mini"

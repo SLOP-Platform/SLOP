@@ -1,0 +1,30 @@
+name: Product Test Imports
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    paths:
+      - 'tests/**'
+      - 'tools/check_product_test_imports.py'
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'tools/check_product_test_imports.py'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Check product test imports
+        run: python3 tools/check_product_test_imports.py

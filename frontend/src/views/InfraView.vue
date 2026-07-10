@@ -393,8 +393,8 @@ const toast = useToast()
 const SLOT_ORDER = ['auth', 'tunnel', 'vpn', 'dashboard', 'management']
 const SLOT_ICONS: Record<string, string> = { auth: '🔐', tunnel: '🌐', dashboard: '📊', management: '🐋', vpn: '🛡️' }
 const PROVIDER_ICONS: Record<string, string> = {
-  tinyauth: '🔐', authelia: '🔒', authentik: '🛡️',
-  cloudflared: '☁️', tailscale: '🌐', headscale: '🏠',
+  tinyauth: '🔐', authelia: '🔒', authentik: '🛡️', 'oauth2-proxy': '🔑',
+  cloudflared: '☁️', tailscale: '🌐', headscale: '🏠', netbird: '🕊️', zerotier: '⭕', pangolin: '🐧', nebula: '✨',
   homepage: '📋', glance: '👁️',
   portainer: '🐋', portainer_be: '💼', dockhand: '⚓', dockge: '🎩', komodo: '🦎',
   gluetun: '🛡️',
