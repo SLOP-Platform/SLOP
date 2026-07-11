@@ -361,7 +361,9 @@ def get_llm_agent_status() -> LLMAgentStatus:
         elif err_type == "dns":
             base_desc = f"DNS lookup failed for {url}. Check network connectivity and container name resolution."
         elif err_type == "auth":
-            base_desc = f"Authentication to {_pname} failed. Verify API keys, tokens, and credentials."
+            base_desc = (
+                f"Authentication to {_pname} failed. Verify API keys, tokens, and credentials."
+            )
         elif err_type == "timeout":
             base_desc = f"Model '{model}' took too long to respond. Try a smaller/faster model."
         elif err_type == "parse":
@@ -1726,7 +1728,8 @@ async def approve_fix(fix_id: int) -> dict[str, Any]:
 
 @router.post("/pending-fixes/{fix_id}/reject")
 def reject_fix(
-    fix_id: int, reason: str | None = None,
+    fix_id: int,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     """Reject a pending AI fix. Returns 404 if fix not found.
 
@@ -2047,7 +2050,9 @@ def llm_providers() -> dict[str, Any]:
             ),
         }
 
-    for key, meta in sorted(PROVIDERS.items(), key=lambda item: str(item[1].get("label") or item[0]).lower()):
+    for key, meta in sorted(
+        PROVIDERS.items(), key=lambda item: str(item[1].get("label") or item[0]).lower()
+    ):
         result[key] = _provider_row(key, meta)
 
     # Merge custom user-defined providers
@@ -2057,11 +2062,13 @@ def llm_providers() -> dict[str, Any]:
     try:
         with _SDB() as _db:
             custom_raw = _db.get_setting("custom_llm_providers") or "{}"
-        custom = _json_merge.loads(custom_raw) if isinstance(custom_raw, str) else (custom_raw or {})
+        custom = (
+            _json_merge.loads(custom_raw) if isinstance(custom_raw, str) else (custom_raw or {})
+        )
         for key, meta in custom.items():
             result[key] = _provider_row(key, meta)
     except Exception:
-        pass
+        log.debug("custom provider row build failed", exc_info=True)
 
     sorted_result = dict(
         sorted(result.items(), key=lambda item: str(item[1].get("label") or item[0]).lower())
@@ -2102,7 +2109,9 @@ def save_custom_provider(req: CustomProviderRequest) -> dict[str, Any]:
     try:
         assert_allowed_url(req.base_url, schemes=("http", "https"), allow_private=False)
     except UrlNotAllowed as err:
-        raise HTTPException(status_code=400, detail=safe_detail(err, "base_url not allowed.")) from err
+        raise HTTPException(
+            status_code=400, detail=safe_detail(err, "base_url not allowed.", log=log)
+        ) from err
 
     with StateDB() as db:
         raw = db.get_setting("custom_llm_providers") or "{}"
@@ -2110,7 +2119,9 @@ def save_custom_provider(req: CustomProviderRequest) -> dict[str, Any]:
         providers[key] = {
             "key": key,
             "label": req.label or key,
-            "base_url": req.base_url.rstrip("/") + "/v1" if not req.base_url.rstrip("/").endswith("/v1") else req.base_url.rstrip("/"),
+            "base_url": req.base_url.rstrip("/") + "/v1"
+            if not req.base_url.rstrip("/").endswith("/v1")
+            else req.base_url.rstrip("/"),
             "env_key": f"{key.upper()}_API_KEY",
             "default_model": req.default_model or "gpt-4o-mini",
             "free_tier": False,

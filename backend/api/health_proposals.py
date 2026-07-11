@@ -96,11 +96,11 @@ Start with: import pytest
 
             with StateDB() as db:
                 _agent_cfg_raw = db.get_setting("llm_agent_config")
-            _agent_cfg = normalize_llm_agent_config((
+            _agent_cfg = normalize_llm_agent_config(
                 _json.loads(_agent_cfg_raw)
                 if isinstance(_agent_cfg_raw, str)
                 else (_agent_cfg_raw or {})
-            ))
+            )
             _provider = _agent_cfg.get("provider", "ollama")
             if _provider == "llamacpp":
                 ollama_url = _agent_cfg.get("llamacpp_url", "http://localhost:8081")

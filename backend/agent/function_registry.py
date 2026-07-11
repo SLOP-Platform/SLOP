@@ -73,9 +73,7 @@ def list_probes() -> list[ProbeView]:
     in ``backend/agent/registry.py``, populated once ``backend/health/scheduler.py``
     has been imported.
     """
-    return [
-        ProbeView(id=m.id, description=m.description) for m in probe_specs()
-    ]
+    return [ProbeView(id=m.id, description=m.description) for m in probe_specs()]
 
 
 def agent_surface() -> AgentFunctionSurface:

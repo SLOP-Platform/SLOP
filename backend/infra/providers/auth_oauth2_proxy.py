@@ -271,7 +271,7 @@ class OAuth2ProxyProvider(InfraProvider):
         return ProviderResult.failure(
             "oauth2-proxy does not maintain a local user database. "
             "Users are authenticated by the external OAuth provider.",
-            "No users to export — authentication is fully delegated."
+            "No users to export — authentication is fully delegated.",
         )
 
     def import_users(self, users: list[dict[str, Any]]) -> ProviderResult:
@@ -279,14 +279,14 @@ class OAuth2ProxyProvider(InfraProvider):
         return ProviderResult.failure(
             "oauth2-proxy does not maintain a local user database. "
             "User management is handled by the external OAuth provider.",
-            "No users to import — authentication is fully delegated."
+            "No users to import — authentication is fully delegated.",
         )
 
     def pre_migration_snapshot(self) -> ProviderResult:
         """No local state to snapshot — oauth2-proxy is stateless (cookies only)."""
         return ProviderResult.success(
             "oauth2-proxy is stateless — no snapshot required.",
-            data={"note": "No local user database to snapshot"}
+            data={"note": "No local user database to snapshot"},
         )
 
     def restore_from_snapshot(self, snapshot: dict[str, Any]) -> ProviderResult:

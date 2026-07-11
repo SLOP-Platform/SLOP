@@ -125,4 +125,6 @@ class PangolinProvider(InfraProvider):
         return ProviderResult.success("Pangolin does not maintain per-app hostnames.", data={})
 
     def pre_migration_snapshot(self) -> ProviderResult:
-        return ProviderResult.success("Pangolin tunnel state is external; no local snapshot required.", data={})
+        return ProviderResult.success(
+            "Pangolin tunnel state is external; no local snapshot required.", data={}
+        )

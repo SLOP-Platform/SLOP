@@ -84,16 +84,12 @@ def list_all_slots() -> list[SlotView]:
 
 def list_deployable_slots() -> list[SlotView]:
     """Return host-mutating infra slots only (excludes selection slots)."""
-    return [
-        _to_view(SLOT_CONTRACTS[s]) for s in deployable_slots()
-    ]
+    return [_to_view(SLOT_CONTRACTS[s]) for s in deployable_slots()]
 
 
 def list_selection_slots() -> list[SlotView]:
     """Return registry-backed selection slots only."""
-    return [
-        _to_view(SLOT_CONTRACTS[s]) for s in selection_slots()
-    ]
+    return [_to_view(SLOT_CONTRACTS[s]) for s in selection_slots()]
 
 
 def get_slot_view(slot: str) -> SlotView | None:

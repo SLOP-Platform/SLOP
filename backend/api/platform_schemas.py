@@ -40,7 +40,9 @@ class WizardRequest(BaseModel):
     selected_stacks: list[str] = Field(
         default_factory=list, description="Quick stack IDs from Stage 4"
     )
-    llm_provider: str = Field("ollama", description="LLM provider: ollama|groq|cerebras|openai|awan|llamacpp")
+    llm_provider: str = Field(
+        "ollama", description="LLM provider: ollama|groq|cerebras|openai|awan|llamacpp"
+    )
     groq_api_key: str = Field("", description="Groq API key if provider=groq")
     config_root: str = Field(
         "/var/lib/slop/config",

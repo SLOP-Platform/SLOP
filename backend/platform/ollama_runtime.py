@@ -56,7 +56,7 @@ def build_local_ollama_fragment(network_name: str = STACK_NETWORK) -> dict[str, 
         "container_name": OLLAMA_AGENT_CONTAINER_NAME,
         "restart": "unless-stopped",
         "networks": [network_name],
-        "environment": {"OLLAMA_HOST": "0.0.0.0"},
+        "environment": {"OLLAMA_HOST": "0.0.0.0"},  # noqa: S104  # container must bind to all interfaces
         "volumes": volumes,
     }
     # Native-host installs need a loopback bind so the host process can talk to Ollama.
@@ -102,6 +102,81 @@ def _model_installed(base_url: str, model: str) -> bool:
     except Exception as exc:
         log.debug("ollama tags probe failed: %s", exc)
         return False
+
+
+def _wait_for_ollama_api(
+    base_url: str, progress: Callable[..., None] | None
+) -> ProviderResult | None:
+    """Poll the Ollama API until ready (up to 180s). Returns None on success, a failure result on timeout."""
+    for attempt in range(90):
+        time.sleep(2)
+        if _api_ready(base_url, timeout=5):
+            return None
+        elapsed = (attempt + 1) * 2
+        _emit(
+            progress,
+            phase="installing",
+            progress_pct=35 + min(attempt, 30),
+            message=f"Waiting for Ollama API... ({elapsed}s elapsed, up to 180s)",
+        )
+    return ProviderResult.failure(
+        "Ollama started but API not reachable after 180s.",
+        detail=(
+            f"Check: docker logs {OLLAMA_AGENT_CONTAINER_NAME}\n"
+            "Note: first start on GPU-backed hosts can take 2+ minutes."
+        ),
+    )
+
+
+def _pull_ollama_model(
+    model: str, base_url: str, progress: Callable[..., None] | None
+) -> ProviderResult:
+    """Pull `model` into the running Ollama container, streaming progress."""
+    _emit(progress, phase="pulling", progress_pct=40, message=f"Pulling model {model}...")
+    try:
+        proc = subprocess.Popen(
+            ["docker", "exec", OLLAMA_AGENT_CONTAINER_NAME, "ollama", "pull", model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        last_pct = 40
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            match = re.search(r"(\d+)%", line)
+            if match:
+                last_pct = 40 + int(int(match.group(1)) * 0.55)
+            _emit(
+                progress,
+                phase="pulling",
+                progress_pct=last_pct,
+                message=f"Downloading {model}: {line[:80]}",
+            )
+        proc.wait(timeout=600)
+        if proc.returncode != 0:
+            return ProviderResult.failure(
+                f"Model pull failed for {model}.",
+                detail=(
+                    f"docker exec {OLLAMA_AGENT_CONTAINER_NAME} ollama pull {model} "
+                    f"exited with code {proc.returncode}"
+                ),
+            )
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return ProviderResult.failure(
+            "Model download timed out after 10 minutes.",
+            detail="Try again or pick a smaller model.",
+        )
+    except Exception as exc:
+        return ProviderResult.failure("Model pull error.", detail=str(exc)[:500])
+
+    return ProviderResult.success(
+        f"Ollama ready. Model {model} loaded and available.",
+        data={"ollama_url": base_url, "model": model},
+    )
 
 
 def ensure_local_ollama_runtime(
@@ -160,26 +235,15 @@ def ensure_local_ollama_runtime(
     if rc != 0:
         return ProviderResult.failure("Ollama runtime failed to start.", detail=out[:500])
 
-    _emit(progress, phase="installing", progress_pct=35, message="Waiting for Ollama API to be ready...")
-    for attempt in range(90):
-        time.sleep(2)
-        if _api_ready(base_url, timeout=5):
-            break
-        elapsed = (attempt + 1) * 2
-        _emit(
-            progress,
-            phase="installing",
-            progress_pct=35 + min(attempt, 30),
-            message=f"Waiting for Ollama API... ({elapsed}s elapsed, up to 180s)",
-        )
-    else:
-        return ProviderResult.failure(
-            "Ollama started but API not reachable after 180s.",
-            detail=(
-                f"Check: docker logs {OLLAMA_AGENT_CONTAINER_NAME}\n"
-                "Note: first start on GPU-backed hosts can take 2+ minutes."
-            ),
-        )
+    _emit(
+        progress,
+        phase="installing",
+        progress_pct=35,
+        message="Waiting for Ollama API to be ready...",
+    )
+    api_result = _wait_for_ollama_api(base_url, progress)
+    if api_result is not None:
+        return api_result
 
     if _model_installed(base_url, model):
         return ProviderResult.success(
@@ -187,43 +251,4 @@ def ensure_local_ollama_runtime(
             data={"ollama_url": base_url, "model": model},
         )
 
-    _emit(progress, phase="pulling", progress_pct=40, message=f"Pulling model {model}...")
-    try:
-        proc = subprocess.Popen(
-            ["docker", "exec", OLLAMA_AGENT_CONTAINER_NAME, "ollama", "pull", model],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        last_pct = 40
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            match = re.search(r"(\d+)%", line)
-            if match:
-                last_pct = 40 + int(int(match.group(1)) * 0.55)
-            _emit(progress, phase="pulling", progress_pct=last_pct, message=f"Downloading {model}: {line[:80]}")
-        proc.wait(timeout=600)
-        if proc.returncode != 0:
-            return ProviderResult.failure(
-                f"Model pull failed for {model}.",
-                detail=(
-                    f"docker exec {OLLAMA_AGENT_CONTAINER_NAME} ollama pull {model} "
-                    f"exited with code {proc.returncode}"
-                ),
-            )
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        return ProviderResult.failure(
-            "Model download timed out after 10 minutes.",
-            detail="Try again or pick a smaller model.",
-        )
-    except Exception as exc:
-        return ProviderResult.failure("Model pull error.", detail=str(exc)[:500])
-
-    return ProviderResult.success(
-        f"Ollama ready. Model {model} loaded and available.",
-        data={"ollama_url": base_url, "model": model},
-    )
+    return _pull_ollama_model(model, base_url, progress)

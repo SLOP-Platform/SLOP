@@ -2097,13 +2097,15 @@ def wizard_save_llm(req: WizardLLMRequest) -> dict[str, Any]:
             elif provider == "ollama":
                 model_name = req.model or "phi4-mini"
                 ollama_url = req.ollama_url or local_ollama_runtime_url()
-                cfg = normalize_llm_agent_config({
-                    "provider": "ollama",
-                    "api_key": "",
-                    "model": model_name,
-                    "ollama_model": model_name,
-                    "ollama_url": ollama_url,
-                })
+                cfg = normalize_llm_agent_config(
+                    {
+                        "provider": "ollama",
+                        "api_key": "",
+                        "model": model_name,
+                        "ollama_model": model_name,
+                        "ollama_url": ollama_url,
+                    }
+                )
             elif provider == "llamacpp":
                 llamacpp_url = req.llamacpp_url or "http://localhost:8081"
                 model_name = req.model or "phi-4-mini"

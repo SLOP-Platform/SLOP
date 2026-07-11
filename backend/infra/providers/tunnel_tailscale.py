@@ -208,4 +208,6 @@ class TailscaleProvider(InfraProvider):
         return ProviderResult.success("All apps accessible via tailnet.", data={})
 
     def pre_migration_snapshot(self) -> ProviderResult:
-        return ProviderResult.success("Tailscale tunnel state is external; no local snapshot required.", data={})
+        return ProviderResult.success(
+            "Tailscale tunnel state is external; no local snapshot required.", data={}
+        )

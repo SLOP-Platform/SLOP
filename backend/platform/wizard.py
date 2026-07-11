@@ -120,7 +120,9 @@ class WizardInput:
     ollama_url: str = "http://ollama:11434"  # Ollama API URL (local container or remote)
     llamacpp_url: str = "http://localhost:8081"  # llama.cpp server URL
     # *arr apps auth bypass (disable onboard auth so SLOP can manage them)
-    arr_auth_bypass: bool = False  # True = set AuthenticationMethod=External, AuthenticationRequired=Disabled
+    arr_auth_bypass: bool = (
+        False  # True = set AuthenticationMethod=External, AuthenticationRequired=Disabled
+    )
     arr_auth_provider: str = "none"  # none | tinyauth | traefik (which auth to use instead)
     # Secrets collected by Stage 5 — written verbatim to .env
     secrets: dict[str, str] | None = None
@@ -675,8 +677,85 @@ def step_ollama_deploy(inp: WizardInput) -> StepResult:
         step="ollama_deploy",
         status="ok",
         message=result.message,
-        detail=result.detail or f"Ollama running at {local_ollama_runtime_url()} with model {model}.",
+        detail=result.detail
+        or f"Ollama running at {local_ollama_runtime_url()} with model {model}.",
     )
+
+
+def _arr_stop_containers(apps: list[str]) -> tuple[list[str], list[str]]:
+    """Stop *arr containers. Returns (stopped, failed)."""
+    import subprocess as _sp
+
+    stopped: list[str] = []
+    failed: list[str] = []
+    for _app in apps:
+        try:
+            _r = _sp.run(
+                ["docker", "stop", _app],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if _r.returncode == 0:
+                stopped.append(_app)
+            else:
+                failed.append(f"{_app}: stop failed ({_r.stderr.strip()[:50]})")
+        except Exception as e:
+            failed.append(f"{_app}: {str(e)[:50]}")
+    return stopped, failed
+
+
+def _arr_edit_configs(stopped: list[str], config_base: str) -> list[str]:
+    """Edit config.xml for each stopped app to disable auth. Returns list of failures."""
+    import subprocess as _sp
+
+    failed: list[str] = []
+    for _app in stopped:
+        _cfg = f"{config_base}/{_app}/config.xml"
+        try:
+            # Use sed to replace the auth tags in-place on the host filesystem
+            for _old, _new in [
+                (
+                    r"<AuthenticationMethod>.*</AuthenticationMethod>",
+                    "<AuthenticationMethod>External</AuthenticationMethod>",
+                ),
+                (
+                    r"<AuthenticationRequired>.*</AuthenticationRequired>",
+                    "<AuthenticationRequired>Disabled</AuthenticationRequired>",
+                ),
+            ]:
+                _r = _sp.run(
+                    ["sed", "-i", f"s|{_old}|{_new}|", _cfg],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if _r.returncode != 0:
+                    failed.append(f"{_app}: sed failed ({_r.stderr.strip()[:50]})")
+                    break
+        except Exception as e:
+            failed.append(f"{_app}: {str(e)[:50]}")
+    return failed
+
+
+def _arr_restart_containers(stopped: list[str]) -> list[str]:
+    """Restart *arr containers. Returns list of failures."""
+    import subprocess as _sp
+
+    failed: list[str] = []
+    for _app in stopped:
+        try:
+            _r = _sp.run(
+                ["docker", "start", _app],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if _r.returncode != 0:
+                failed.append(f"{_app}: start failed ({_r.stderr.strip()[:50]})")
+        except Exception as e:
+            failed.append(f"{_app}: {str(e)[:50]}")
+    return failed
 
 
 def step_arr_auth_bypass(inp: WizardInput) -> StepResult:
@@ -703,26 +782,9 @@ def step_arr_auth_bypass(inp: WizardInput) -> StepResult:
     _CONFIG_BASE = inp.config_root or "/srv/slop/data/config"
     _AUTH_PROVIDER = (inp.arr_auth_provider or "none").strip()
 
-    import subprocess as _sp
     import time as _time
 
-    _stopped: list[str] = []
-    _failed: list[str] = []
-
-    # ── Phase 1: Stop containers ─────────────────────────────────────
-    for _app in _ARR_APPS:
-        try:
-            _r = _sp.run(
-                ["docker", "stop", _app],
-                capture_output=True, text=True, timeout=30,
-            )
-            if _r.returncode == 0:
-                _stopped.append(_app)
-            else:
-                _failed.append(f"{_app}: stop failed ({_r.stderr.strip()[:50]})")
-        except Exception as e:
-            _failed.append(f"{_app}: {str(e)[:50]}")
-
+    _stopped, _failed = _arr_stop_containers(_ARR_APPS)
     if _failed:
         return StepResult(
             step="arr_auth_bypass",
@@ -733,38 +795,11 @@ def step_arr_auth_bypass(inp: WizardInput) -> StepResult:
 
     _time.sleep(3)  # wait for Docker to release file locks
 
-    # ── Phase 2: Edit config.xml ───────────────────────────────────
-    for _app in _stopped:
-        _cfg = f"{_CONFIG_BASE}/{_app}/config.xml"
-        try:
-            # Use sed to replace the auth tags in-place on the host filesystem
-            for _old, _new in [
-                (r"<AuthenticationMethod>.*</AuthenticationMethod>",
-                 "<AuthenticationMethod>External</AuthenticationMethod>"),
-                (r"<AuthenticationRequired>.*</AuthenticationRequired>",
-                 "<AuthenticationRequired>Disabled</AuthenticationRequired>"),
-            ]:
-                _r = _sp.run(
-                    ["sed", "-i", f"s|{_old}|{_new}|", _cfg],
-                    capture_output=True, text=True, timeout=10,
-                )
-                if _r.returncode != 0:
-                    _failed.append(f"{_app}: sed failed ({_r.stderr.strip()[:50]})")
-                    break
-        except Exception as e:
-            _failed.append(f"{_app}: {str(e)[:50]}")
+    _failed = _arr_edit_configs(_stopped, _CONFIG_BASE)
 
-    # ── Phase 3: Restart containers ─────────────────────────────────
-    for _app in _stopped:
-        try:
-            _r = _sp.run(
-                ["docker", "start", _app],
-                capture_output=True, text=True, timeout=30,
-            )
-            if _r.returncode != 0:
-                _failed.append(f"{_app}: start failed ({_r.stderr.strip()[:50]})")
-        except Exception as e:
-            _failed.append(f"{_app}: {str(e)[:50]}")
+    # Phase 3: Restart containers (runs even when config edits partially failed,
+    # mirroring the original behavior that always attempts restarts after edits)
+    _failed = _failed + _arr_restart_containers(_stopped)
 
     if _failed:
         return StepResult(
@@ -804,9 +839,10 @@ def step_complete(inp: WizardInput) -> StepResult:
         # readiness during startup (common on first-time wizard runs > 5 min).
         try:
             from backend.health.scheduler import start_scheduler
+
             start_scheduler()
         except Exception:
-            pass  # non-fatal — scheduler may already be running
+            log.debug("scheduler start skipped (may already be running)", exc_info=True)
         return StepResult(
             step="complete",
             status="ok",
@@ -1068,15 +1104,19 @@ def step_persist_settings(inp: WizardInput) -> StepResult:
             db.set_setting("timezone", inp.timezone)
             db.set_setting("traefik_dashboard_port", str(inp.traefik_dashboard_port or 8081))
             # LLM agent config — enables the AI agent automatically after wizard
-            _llm_cfg = normalize_llm_agent_config({
-                "enabled": True,
-                "provider": inp.llm_provider or "ollama",
-                "model": inp.ollama_model or "phi4-mini",
-                "ollama_model": inp.ollama_model or "phi4-mini",
-                "ollama_url": local_ollama_runtime_url() if inp.ollama_server == "local" else (inp.ollama_url or "http://localhost:11434"),
-                "llamacpp_url": inp.llamacpp_url or "http://localhost:8081",
-                "api_key": "",  # populated later for cloud providers
-            })
+            _llm_cfg = normalize_llm_agent_config(
+                {
+                    "enabled": True,
+                    "provider": inp.llm_provider or "ollama",
+                    "model": inp.ollama_model or "phi4-mini",
+                    "ollama_model": inp.ollama_model or "phi4-mini",
+                    "ollama_url": local_ollama_runtime_url()
+                    if inp.ollama_server == "local"
+                    else (inp.ollama_url or "http://localhost:11434"),
+                    "llamacpp_url": inp.llamacpp_url or "http://localhost:8081",
+                    "api_key": "",  # populated later for cloud providers
+                }
+            )
             db.set_setting("llm_agent_config", _json.dumps(_llm_cfg))
         return StepResult("persist_settings", "ok", "Settings saved to database.", "")
     except Exception as e:

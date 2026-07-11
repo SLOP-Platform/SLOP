@@ -99,7 +99,7 @@ def _get_repo_url() -> str | None:
 
         with StateDB() as db:
             url = db.get_setting("contribute_repo_url", default="")
-        return url.strip() or None
+        return (url or "").strip() or None
     except Exception:
         return None
 
@@ -130,7 +130,7 @@ def _post_to_repo(url: str, payload: dict[str, Any]) -> bool:
                 "contribute transport: accepted by moderation repo (HTTP %s)",
                 resp.status_code,
             )
-        return ok
+        return bool(ok)
     except Exception:
         try:
             import urllib.request
@@ -148,7 +148,7 @@ def _post_to_repo(url: str, payload: dict[str, Any]) -> bool:
                         "contribute transport: HTTP %s from moderation repo (urllib fallback)",
                         resp.status,
                     )
-                return ok
+                return bool(ok)
         except Exception as exc:
             log.warning("contribute transport: failed to reach moderation repo: %s", exc)
             return False
@@ -187,7 +187,9 @@ def contribute_back(row: dict[str, Any]) -> EgressOutcome:
         from backend.core.state import StateDB
 
         with StateDB() as db:
-            enabled = (db.get_setting("contribute_back_enabled", default="false").lower() == "true")
+            enabled = (
+                db.get_setting("contribute_back_enabled", default="false") or "false"
+            ).lower() == "true"
     except Exception:
         enabled = False  # fail-closed
 
@@ -206,7 +208,9 @@ def contribute_back(row: dict[str, Any]) -> EgressOutcome:
         if repo_url:
             _post_to_repo(repo_url, outcome.payload)
         else:
-            log.debug("contribute_back: no contribute_repo_url set — payload gated but not transmitted")
+            log.debug(
+                "contribute_back: no contribute_repo_url set — payload gated but not transmitted"
+            )
 
     return outcome
 

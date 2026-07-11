@@ -60,9 +60,7 @@ def _list_providers_for_slot(slot: str) -> list[str]:
         from backend.infra.registry import _REGISTRY, _ensure_providers_registered
 
         _ensure_providers_registered()
-        return sorted(
-            key for (s, key) in _REGISTRY if s == slot
-        )
+        return sorted(key for (s, key) in _REGISTRY if s == slot)
     except Exception:
         return []
 
@@ -76,7 +74,7 @@ def analyze_slots() -> dict[str, SlotAnalysis]:
     result: dict[str, SlotAnalysis] = {}
     for sv in list_all_slots():
         existing = _list_providers_for_slot(sv.slot)
-        needs = (sv.is_deployable and len(existing) == 0)
+        needs = sv.is_deployable and len(existing) == 0
         result[sv.slot] = SlotAnalysis(
             slot=sv.slot,
             slot_kind=sv.slot_kind,
@@ -86,9 +84,9 @@ def analyze_slots() -> dict[str, SlotAnalysis]:
             rationale=(
                 f"slot {sv.slot!r} ({sv.slot_kind}) has no registered providers "
                 f"— deployable slot must have at least one provider"
-            ) if needs else (
-                f"slot {sv.slot!r} has {len(existing)} provider(s): {existing}"
-            ),
+            )
+            if needs
+            else (f"slot {sv.slot!r} has {len(existing)} provider(s): {existing}"),
         )
     return result
 
@@ -187,9 +185,7 @@ def _resolve_operational_level(raw: Any) -> Any:
         from backend.core.state import StateDB
 
         with StateDB() as db:
-            return OperationalLevel.from_setting(
-                db.get_setting("agent_operational_level")
-            )
+            return OperationalLevel.from_setting(db.get_setting("agent_operational_level"))
     except Exception:
         return None
 

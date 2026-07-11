@@ -19,9 +19,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import TYPE_CHECKING, Any, cast
 
 from backend.core.logging import get_logger
 from backend.agent.mcp_adapter import dispatch, tool_definitions
+
+if TYPE_CHECKING:
+    pass
 
 try:
     from mcp.server import Server
@@ -32,13 +36,11 @@ except Exception as _mcp_import_err:
     # TypeError on Linux during import. Degrade gracefully so the module
     # remains importable; the MCP server is inoperative until the upstream
     # fix lands.
-    get_logger(__name__).warning(
-        "MCP import failed — server unavailable: %s", _mcp_import_err
-    )
-    Server = None  # type: ignore[misc,assignment]
-    stdio_server = None  # type: ignore[misc,assignment]
-    TextContent = None  # type: ignore[misc,assignment]
-    Tool = None  # type: ignore[misc,assignment]
+    get_logger(__name__).warning("MCP import failed — server unavailable: %s", _mcp_import_err)
+    Server = cast(Any, None)
+    stdio_server = cast(Any, None)
+    TextContent = cast(Any, None)
+    Tool = cast(Any, None)
 
 # ---------------------------------------------------------------------------
 # MCP server definition
@@ -47,7 +49,7 @@ except Exception as _mcp_import_err:
 if Server is not None:
     app = Server("agent-actions")
 
-    @app.list_tools()
+    @app.list_tools()  # type: ignore[untyped-decorator]
     async def list_tools() -> list[Tool]:
         definitions = tool_definitions()
         return [
@@ -59,8 +61,8 @@ if Server is not None:
             for d in definitions
         ]
 
-    @app.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    @app.call_tool()  # type: ignore[untyped-decorator]
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         result = dispatch(name, arguments)
         text_block = result.get("content", [])
         if not text_block:
@@ -68,7 +70,7 @@ if Server is not None:
 
         return [TextContent(type=b["type"], text=b["text"]) for b in text_block]
 else:
-    app = None  # type: ignore[assignment]
+    app = cast(Any, None)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ else:
 async def main() -> None:
     if app is None or stdio_server is None:
         import logging as _logging
+
         _logging.getLogger(__name__).error(
             "MCP server unavailable — mcp library import failed (see above). "
             "Check upstream issue or upgrade mcp>=1.24 when available."

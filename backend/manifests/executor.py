@@ -2020,7 +2020,6 @@ _CRITICALITY_MAP: dict[str, Criticality] = {
     "beszel": Criticality.ENHANCEMENT,
     "speedtest_tracker": Criticality.ENHANCEMENT,
     "changedetection": Criticality.ENHANCEMENT,
-    "glance": Criticality.ENHANCEMENT,
     "umami": Criticality.ENHANCEMENT,
     "litlyx": Criticality.ENHANCEMENT,
 }

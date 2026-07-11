@@ -740,7 +740,9 @@ def update_cloud_llm_settings(payload: CloudLLMUpdate) -> dict[str, Any]:
                 raise HTTPException(422, f"Unknown primary provider: {payload.provider}")
             agent_cfg["provider"] = payload.provider
             active = [
-                p for p in agent_cfg.get("active_providers", []) if isinstance(p, str) and p in PROVIDERS
+                p
+                for p in agent_cfg.get("active_providers", [])
+                if isinstance(p, str) and p in PROVIDERS
             ]
             if payload.provider not in active:
                 active.append(payload.provider)

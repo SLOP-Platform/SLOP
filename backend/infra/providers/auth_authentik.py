@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
-import yaml
 
 from backend.core.compose import compose_up, compose_down, write_fragment
 from backend.core.config import config
@@ -333,7 +332,7 @@ class AuthentikProvider(InfraProvider):
         return ProviderResult.failure(
             "Authentik user export requires the Authentik API. "
             "Use the Authentik admin UI to export users, or configure API access.",
-            "User data is stored in PostgreSQL and requires API access for export."
+            "User data is stored in PostgreSQL and requires API access for export.",
         )
 
     def import_users(self, users: list[dict[str, Any]]) -> ProviderResult:
@@ -345,7 +344,7 @@ class AuthentikProvider(InfraProvider):
         return ProviderResult.failure(
             "Authentik user import requires the Authentik API. "
             "Users must be created via the admin UI or API.",
-            "Migration to Authentik requires manual user creation or API scripting."
+            "Migration to Authentik requires manual user creation or API scripting.",
         )
 
     def pre_migration_snapshot(self) -> ProviderResult:
@@ -353,7 +352,7 @@ class AuthentikProvider(InfraProvider):
         return ProviderResult.success(
             "Authentik snapshot noted. PostgreSQL data is in the volume — "
             "manual backup may be required for full rollback.",
-            data={"note": "PostgreSQL volume must be backed up separately"}
+            data={"note": "PostgreSQL volume must be backed up separately"},
         )
 
     def restore_from_snapshot(self, snapshot: dict[str, Any]) -> ProviderResult:

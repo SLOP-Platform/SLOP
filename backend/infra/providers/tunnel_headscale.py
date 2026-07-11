@@ -212,7 +212,9 @@ dns_config:
         return ProviderResult.success("Headscale does not maintain per-app hostnames.", data={})
 
     def pre_migration_snapshot(self) -> ProviderResult:
-        return ProviderResult.success("Headscale tunnel state is external; no local snapshot required.", data={})
+        return ProviderResult.success(
+            "Headscale tunnel state is external; no local snapshot required.", data={}
+        )
 
     def remove(self) -> ProviderResult:
         try:

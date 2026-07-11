@@ -184,6 +184,34 @@ def _project_allowlisted(finding: Finding, *, cloud: bool) -> tuple[dict[str, An
     return payload, max(redactions, 0)
 
 
+def _scan_for_leak_markers(text: str) -> bool:
+    """Return True if *text* contains any residual leak marker.
+
+    Applies every pattern in :data:`_LEAK_PATTERNS`.  Pattern 7 (hostname-shaped)
+    uses Gate A+B: each FULL hyphenated token is tested individually, and tokens
+    starting with a known SLOP-native prefix are exempt.  This is the single
+    canonical leak-scan used by both :func:`verify_clean` and
+    :func:`verify_contribute_clean`.
+    """
+    for idx, pat in enumerate(_LEAK_PATTERNS):
+        if idx == _HOSTNAME_PATTERN_IDX:
+            # Gate A+B: extract each FULL hyphenated token from the value and
+            # test it individually.  Using the full token (not a sub-match)
+            # ensures "ms-health-1" is evaluated as a whole (starts with "ms-")
+            # rather than letting the regex engine find the sub-match "health-1".
+            for tok_m in _HYPHEN_TOKEN_RE.finditer(text):
+                tok = tok_m.group(0)
+                if not pat.search(tok):
+                    continue  # Gate A: token doesn't look like a hostname
+                tok_lower = tok.lower()
+                if any(tok_lower.startswith(pfx) for pfx in _P7_ALLOWLIST_PREFIXES):
+                    continue  # Gate B: token is a known-safe SLOP-native prefix
+                return True
+        elif pat.search(text):
+            return True
+    return False
+
+
 def verify_clean(payload: dict[str, Any]) -> tuple[bool, str]:
     """Independent verifier — the fail-closed gate.
 
@@ -208,22 +236,8 @@ def verify_clean(payload: dict[str, Any]) -> tuple[bool, str]:
         value = payload.get(key, "")
         if not isinstance(value, str):
             return False, f"non-string value for {key!r}"
-        for idx, pat in enumerate(_LEAK_PATTERNS):
-            if idx == _HOSTNAME_PATTERN_IDX:
-                # Gate A+B: extract each FULL hyphenated token from the value and
-                # test it individually.  Using the full token (not a sub-match)
-                # ensures "ms-health-1" is evaluated as a whole (starts with "ms-")
-                # rather than letting the regex engine find the sub-match "health-1".
-                for tok_m in _HYPHEN_TOKEN_RE.finditer(value):
-                    tok = tok_m.group(0)
-                    if not pat.search(tok):
-                        continue  # Gate A: token doesn't look like a hostname
-                    tok_lower = tok.lower()
-                    if any(tok_lower.startswith(pfx) for pfx in _P7_ALLOWLIST_PREFIXES):
-                        continue  # Gate B: token is a known-safe SLOP-native prefix
-                    return False, f"residual leak marker in {key!r}"
-            elif pat.search(value):
-                return False, f"residual leak marker in {key!r}"
+        if _scan_for_leak_markers(value):
+            return False, f"residual leak marker in {key!r}"
     return True, "clean"
 
 
@@ -329,18 +343,8 @@ def verify_contribute_clean(payload: dict[str, Any]) -> tuple[bool, str]:
             return False, f"non-numeric value for {key!r}"
     # suggested_fix is the only free-text field — leak-scan it
     fix_text = payload.get("suggested_fix", "")
-    for idx, pat in enumerate(_LEAK_PATTERNS):
-        if idx == _HOSTNAME_PATTERN_IDX:
-            for tok_m in _HYPHEN_TOKEN_RE.finditer(fix_text):
-                tok = tok_m.group(0)
-                if not pat.search(tok):
-                    continue
-                tok_lower = tok.lower()
-                if any(tok_lower.startswith(pfx) for pfx in _P7_ALLOWLIST_PREFIXES):
-                    continue
-                return False, "residual leak marker in contribute payload"
-        elif pat.search(fix_text):
-            return False, "residual leak marker in contribute payload"
+    if _scan_for_leak_markers(fix_text):
+        return False, "residual leak marker in contribute payload"
     return True, "clean"
 
 
@@ -360,7 +364,9 @@ def derive_contribute_key(
     Returns a 40-char hex SHA1 digest.
     """
     seed = f"{error_class}:{app_key}:{diagnosis_class}:{fix_type}"
-    return hashlib.sha1(seed.encode("utf-8")).hexdigest()  # noqa: S324 — security review §2.1 explicitly chose SHA1 for key derivation
+    # usedforsecurity=False: this is a deduplication key, not a password hash
+    # (security review §2.1).
+    return hashlib.sha1(seed.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def send_contribute_back(payload: dict[str, Any]) -> EgressOutcome:
@@ -389,9 +395,7 @@ def send_contribute_back(payload: dict[str, Any]) -> EgressOutcome:
         )
 
     if not clean:
-        log.warning(
-            "contribute refused: payload not provably clean", reason=reason
-        )
+        log.warning("contribute refused: payload not provably clean", reason=reason)
         return EgressOutcome(
             sent=False,
             provider="contribute-back",

@@ -25,8 +25,8 @@ def _has_product_marker(path: Path) -> bool:
     """Check if a test file has the @pytest.mark.product marker."""
     text = path.read_text()
     return bool(
-        re.search(r'pytestmark\s*=\s*\[.*pytest\.mark\.product.*\]', text)
-        or re.search(r'@pytest\.mark\.product', text)
+        re.search(r"pytestmark\s*=\s*\[.*pytest\.mark\.product.*\]", text)
+        or re.search(r"@pytest\.mark\.product", text)
     )
 
 
@@ -74,7 +74,9 @@ def main() -> int:
         all_violations.extend(check_file(f))
 
     if all_violations:
-        print(f"VIOLATIONS: product tests import forbidden internal modules ({len(all_violations)} hits)")
+        print(
+            f"VIOLATIONS: product tests import forbidden internal modules ({len(all_violations)} hits)"
+        )
         for v in all_violations:
             print(v)
         return 1

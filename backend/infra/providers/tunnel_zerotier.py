@@ -120,4 +120,6 @@ class ZeroTierProvider(InfraProvider):
         return ProviderResult.success("ZeroTier does not maintain per-app hostnames.", data={})
 
     def pre_migration_snapshot(self) -> ProviderResult:
-        return ProviderResult.success("ZeroTier tunnel state is external; no local snapshot required.", data={})
+        return ProviderResult.success(
+            "ZeroTier tunnel state is external; no local snapshot required.", data={}
+        )

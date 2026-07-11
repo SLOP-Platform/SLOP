@@ -145,4 +145,6 @@ class NetBirdProvider(InfraProvider):
         return ProviderResult.success("NetBird does not maintain per-app hostnames.", data={})
 
     def pre_migration_snapshot(self) -> ProviderResult:
-        return ProviderResult.success("NetBird tunnel state is external; no local snapshot required.", data={})
+        return ProviderResult.success(
+            "NetBird tunnel state is external; no local snapshot required.", data={}
+        )
