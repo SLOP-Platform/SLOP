@@ -20,10 +20,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from typing import Any
 
 from backend.agent.listener import install_failure_listener
-from backend.core.logging import get_logger
+from backend.core.logging import get_logger, reset_correlation_id, set_correlation_id
 
 log = get_logger(__name__)
 
@@ -54,6 +55,9 @@ async def _handle_event(event: dict[str, Any]) -> None:
     Filters by action (die/oom/health_status=unhealthy) and by container
     name (must match slop Compose pattern).  On match, builds a
     synthetic step_log and calls install_failure_listener().
+
+    Each event carries a unique correlation_id so the full
+    detection→diagnosis→execution timeline is traceable (#490).
     """
     action = event.get("Action", "")
     if action not in _FILTER_ACTIONS:
@@ -78,7 +82,11 @@ async def _handle_event(event: dict[str, Any]) -> None:
         "detail": f"Docker event: action={action} exitCode={exit_code}",
     }
 
-    await install_failure_listener(app_key, step_log)
+    token = set_correlation_id(f"wa-{uuid.uuid4().hex[:12]}")
+    try:
+        await install_failure_listener(app_key, step_log)
+    finally:
+        reset_correlation_id(token)
 
 
 async def _watch_loop() -> None:

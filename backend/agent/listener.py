@@ -25,10 +25,11 @@ must never propagate exceptions back into the install pipeline.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from backend.agent.classifier import classify_offline, classify_with_llm
-from backend.core.logging import get_logger
+from backend.core.logging import get_correlation_id, get_logger, reset_correlation_id, set_correlation_id
 from backend.health.swallow_counter import record_swallow
 
 log = get_logger(__name__)
@@ -56,43 +57,55 @@ async def install_failure_listener(app_key: str, step_log: dict[str, Any]) -> No
     if step_log.get("status") != "error":
         return
 
-    problem = str(step_log.get("detail") or step_log.get("message") or "")[:_PROBLEM_TRUNCATE]
-
-    # Phase C: classify with LLM (3-step fallback).
-    # db_path is obtained from the global StateDB configuration.
-    error_class_val = "UNKNOWN"
-    suggested_fix = ""
-    confidence = 0.0
+    # Generate correlation_id if none is set (e.g. called from executor.py
+    # without the watcher's context). The watcher entry point already sets
+    # one with 'wa-' prefix; the listener uses 'ls-' so the source is obvious.
+    _own_token = None
+    _existing = get_correlation_id()
+    if _existing == "(no-correlation)":
+        _own_token = set_correlation_id(f"ls-{uuid.uuid4().hex[:12]}")
 
     try:
-        import backend.core.state as _state_mod
+        problem = str(step_log.get("detail") or step_log.get("message") or "")[:_PROBLEM_TRUNCATE]
 
-        db_path_str = str(_state_mod._DB_PATH) if _state_mod._DB_PATH is not None else ""
-        error_class, suggested_fix, confidence = await classify_with_llm(
-            problem, app_key, db_path_str
-        )
-        error_class_val = error_class.value
-    except Exception as exc:
-        # classify_with_llm failed entirely (should never happen — but be safe).
-        log.debug(
-            "install_failure_listener: classify_with_llm failed for %s: %s",
-            app_key,
-            exc,
-        )
-        record_swallow("listener.classify_with_llm_fallback")
-        error_class_val = classify_offline(problem).value
+        # Phase C: classify with LLM (3-step fallback).
+        # db_path is obtained from the global StateDB configuration.
+        error_class_val = "UNKNOWN"
         suggested_fix = ""
         confidence = 0.0
 
-    try:
-        from backend.core.state import StateDB
+        try:
+            import backend.core.state as _state_mod
 
-        with StateDB() as db:
-            _write_pending_fix(db, app_key, problem, error_class_val, suggested_fix, confidence)
-    except Exception as exc:
-        # Never propagate — agent is a best-effort observer.
-        log.debug("install_failure_listener: DB write failed for %s: %s", app_key, exc)
-        record_swallow("listener.pending_fix_db_write")
+            db_path_str = str(_state_mod._DB_PATH) if _state_mod._DB_PATH is not None else ""
+            error_class, suggested_fix, confidence = await classify_with_llm(
+                problem, app_key, db_path_str
+            )
+            error_class_val = error_class.value
+        except Exception as exc:
+            # classify_with_llm failed entirely (should never happen — but be safe).
+            log.debug(
+                "install_failure_listener: classify_with_llm failed for %s: %s",
+                app_key,
+                exc,
+            )
+            record_swallow("listener.classify_with_llm_fallback")
+            error_class_val = classify_offline(problem).value
+            suggested_fix = ""
+            confidence = 0.0
+
+        try:
+            from backend.core.state import StateDB
+
+            with StateDB() as db:
+                _write_pending_fix(db, app_key, problem, error_class_val, suggested_fix, confidence)
+        except Exception as exc:
+            # Never propagate — agent is a best-effort observer.
+            log.debug("install_failure_listener: DB write failed for %s: %s", app_key, exc)
+            record_swallow("listener.pending_fix_db_write")
+    finally:
+        if _own_token is not None:
+            reset_correlation_id(_own_token)
 
 
 def _write_pending_fix(

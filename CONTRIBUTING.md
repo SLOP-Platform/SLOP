@@ -58,17 +58,13 @@ Out of scope:
 
 See [`docs/cleanup/STEP_2_1_SNAPSHOT_STRATEGY.md`](docs/cleanup/STEP_2_1_SNAPSHOT_STRATEGY.md) for the full target list and rationale.
 
-## Test independence (Core Rule 4.10 — pending; see step 1.5)
+## Test independence (Core Rule 4.16)
 
-The CI workflow `.github/workflows/test-randomly.yml` runs the full test suite under a random shuffle on every push/PR (`--randomly-seed=${GITHUB_RUN_ID}`). New tests must pass under arbitrary order.
+See [docs/CORE_RULES.md §4.16](docs/CORE_RULES.md) for the full Test Independence Discipline. The CI gate is informational (`continue-on-error: true`) until the order-dependent backlog (tracked in [`docs/TODO_2026_05_08_test_independence_backlog.md`](docs/TODO_2026_05_08_test_independence_backlog.md)) clears.
 
-If you write a test that mutates module-level state (settings, globals, config singletons), pair it with an `autouse=True` per-function fixture that resets that state — see `tests/test_llm_diagnose_refactor.py::_reset_module_state` for the established pattern.
+## Commit conventions (Core Rule 5.21)
 
-A backlog of pre-existing order-dependent tests is tracked in [`docs/TODO_2026_05_08_test_independence_backlog.md`](docs/TODO_2026_05_08_test_independence_backlog.md). The CI gate is informational (continue-on-error) until that backlog clears.
-
-## Commit conventions (Core Rule 7.1)
-
-Subjects follow **either** of two accepted forms:
+See [docs/CORE_RULES.md §5.21](docs/CORE_RULES.md) for the full Commit Discipline. Quick reference:
 
 ```
 type(scope): subject ≤ 100 chars, no trailing period      (Conventional Commits 1.0)
@@ -77,12 +73,9 @@ type(scope): subject ≤ 100 chars, no trailing period      (Conventional Commit
 
 Where:
 - `type` ∈ feat | fix | refactor | perf | test | docs | chore | ci | style | revert | build
-- `scope` is lowercase, underscores or hyphens (e.g. `api`, `health`, `manifests`). A **comma** is also permitted so a single commit addressing two tickets validates as a multi-ref scope (e.g. `docs(#1273,#1274): …`) — #1276 relax. Scopes stay lowercase; an uppercase scope (`feat(DTC):`) is still rejected.
-- **ticket-ref form** (`#1209`): `#` + ticket number, an optional space-led qualifier (a colon-free sub-task tag like `layer-2`, `COMPLETE`, `fix3`, `phase-1`), then `: subject`. This is the de-facto team-autonomous convention (#1209) — first-class alongside Conventional Commits, not a fallback.
-- The commit-msg hook (`tools/commit_msg_hook.py`) rejects subjects matching neither form.
-- `--no-verify` bypasses the hook but `tests/test_commit_format.py` catches the bypass on the next CI run.
-
-`ms-changelog` regenerates `CHANGELOG.md` from the trailing `git log` since the cutoff SHA. Run it on demand; do not hand-edit CHANGELOG.md.
+- `scope` is lowercase; comma permitted for multi-ref scopes (#1276). Uppercase scope rejected.
+- **ticket-ref form** (`#1209`): `#` + number, optional space-led qualifier, then `: subject` — first-class alongside Conventional Commits, not a fallback.
+- The commit-msg hook (`tools/commit_msg_hook.py`) rejects non-conforming subjects.
 
 ## Architecture Decision Records (Core Rule 4.15)
 

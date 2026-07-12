@@ -31,14 +31,56 @@ from backend.core.logging import get_logger
 log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
+# Fix-conclusion stripping — prevents RAG feedback loop (#491)
+# ---------------------------------------------------------------------------
+
+_FIX_CONCLUSION_MARKERS: re.Pattern[str] = re.compile(
+    r"(?i)\b(?:"
+    r"we\s+(?:determined|found|identified|discovered|concluded|established|believe|inferred)\b|"
+    r"it\s+was\s+caused\s+by\b|"
+    r"the\s+(?:root\s+cause|problem|issue)\s+(?:is|was)\b|"
+    r"the\s+(?:fix|solution|workaround|resolution)\s+(?:is|was|would\s+be)\b|"
+    r"this\s+(?:was\s+resolved|should\s+be\s+fixed|could\s+be\s+addressed)\s+by\b|"
+    r"the\s+issue\s+stems\s+from\b|"
+    r"\b(?:to\s+)?(?:fix|resolve|address)\s+this\b"
+    r")"
+)
+
+
+def _has_fix_conclusion(sentence: str) -> bool:
+    return bool(_FIX_CONCLUSION_MARKERS.search(sentence))
+
+
+def strip_fix_conclusions(text: str) -> str:
+    """Remove sentences containing fix-conclusion language.
+
+    Only factual observations are kept; derived fix conclusions (e.g.,
+    "we determined X was the root cause", "the fix was Y") are stripped
+    to prevent RAG feedback-loop self-reinforcement (#491).
+    """
+    if not text:
+        return text
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    factual = [p for p in parts if not _has_fix_conclusion(p)]
+    return " ".join(factual).strip()
+
+
+# ---------------------------------------------------------------------------
 # Knowledge base documents
 # ---------------------------------------------------------------------------
 
-KNOWLEDGE_BASE: list[dict[str, str]] = [
+# Flags:
+#   "derived-fix" — entry contains fix-instruction / conclusion language
+#   "factual"     — entry contains reference / observational facts
+# Entries may carry both flags when they mix observation with fix guidance.
+
+
+KNOWLEDGE_BASE: list[dict[str, Any]] = [
     # Docker errors
     {
         "id": "docker_oom",
         "title": "Container killed: OOM",
+        "flags": ["factual", "derived-fix"],
         "text": "Container killed with exit code 137 means Out of Memory. "
         "The container exceeded its memory limit. Fix: increase container memory limit, "
         "reduce the number of running containers, or add more RAM to the host. "
@@ -47,6 +89,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "docker_permission",
         "title": "Permission denied in container",
+        "flags": ["factual", "derived-fix"],
         "text": "Permission denied errors in containers usually mean PUID/PGID mismatch. "
         "The container user (PUID/PGID) doesn't own the mounted files. "
         "Fix: chown the host directory to match PUID:PGID, or check /etc/passwd in the container. "
@@ -55,6 +98,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "docker_port_conflict",
         "title": "Port already in use",
+        "flags": ["factual", "derived-fix"],
         "text": "Error 'address already in use' or 'port is already allocated' means another process "
         "is using the same port. Fix: check what's using the port with 'ss -tlnp | grep PORT', "
         "stop the conflicting service, or change the host port mapping.",
@@ -62,6 +106,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "docker_network",
         "title": "Container not on network",
+        "flags": ["factual", "derived-fix"],
         "text": "Container can't reach other containers: check they're on the same Docker network. "
         "All SLOP apps should be on the 'slop' network. "
         "Fix: docker network inspect slop — verify the container appears in Containers list.",
@@ -70,6 +115,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "db_locked",
         "title": "SQLite database is locked",
+        "flags": ["factual", "derived-fix"],
         "text": "Database locked error means two processes are trying to write simultaneously, "
         "or a previous process crashed without releasing the lock. "
         "Fix: restart the container. If it persists, check for zombie processes, "
@@ -78,6 +124,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "db_corrupt",
         "title": "Database corruption",
+        "flags": ["factual", "derived-fix"],
         "text": "Database corruption usually happens from sudden power loss or disk full. "
         "Fix: sqlite3 database.db 'PRAGMA integrity_check'. "
         "For arr apps, restore from backup in /config/Backups/ or /config/backups/. "
@@ -87,6 +134,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "traefik_cert",
         "title": "Traefik certificate not issued",
+        "flags": ["factual", "derived-fix"],
         "text": "Certificate not being issued: check CF_DNS_API_TOKEN is set and valid. "
         "Verify Cloudflare API token has 'Zone:DNS:Edit' permission. "
         "Check traefik logs: docker logs traefik | grep -i acme. "
@@ -96,6 +144,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "traefik_middleware",
         "title": "Traefik middleware not found",
+        "flags": ["factual", "derived-fix"],
         "text": "Error 'middleware X@docker does not exist': the middleware is defined via labels "
         "on a container that isn't running yet. This is non-fatal for Traefik itself. "
         "For traefik-auth@docker: deploy TinyAuth infra slot first. "
@@ -104,6 +153,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "traefik_docker_api",
         "title": "Traefik Docker API version mismatch",
+        "flags": ["factual", "derived-fix"],
         "text": "Error 'client version 1.24 is too old': Traefik v3.3 has a known incompatibility "
         "with Docker 29+. Fix: use traefik:v3.2 or traefik:latest image tag. "
         "Update the compose fragment and recreate the container.",
@@ -112,6 +162,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "arr_indexer",
         "title": "Sonarr/Radarr indexer errors",
+        "flags": ["factual", "derived-fix"],
         "text": "No indexers configured: install Prowlarr first, then sync it to Sonarr/Radarr "
         "via Settings > Indexers > Prowlarr. "
         "Indexer returning errors: check the indexer is accessible and not rate-limited. "
@@ -120,6 +171,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "arr_download",
         "title": "Sonarr/Radarr download client errors",
+        "flags": ["factual", "derived-fix"],
         "text": "Download client not configured or unreachable: configure qBittorrent or SABnzbd "
         "in Settings > Download Clients. "
         "If using Gluetun VPN: make sure the download client container uses network_mode: "
@@ -128,6 +180,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "arr_quality",
         "title": "No downloads found by arr apps",
+        "flags": ["factual", "derived-fix"],
         "text": "Sonarr/Radarr not downloading: check quality profiles allow the available formats. "
         "Check indexers are working (Prowlarr > Indexers > Test All). "
         "Check release restrictions aren't too strict. "
@@ -137,6 +190,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "media_transcode",
         "title": "Plex/Jellyfin transcoding issues",
+        "flags": ["factual", "derived-fix"],
         "text": "Transcoding failing or slow: check hardware transcoding is enabled if available. "
         "For Plex: Settings > Transcoder > Use hardware acceleration. "
         "For Jellyfin: Admin > Playback > Hardware Acceleration. "
@@ -146,6 +200,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "plex_claim",
         "title": "Plex not signing in",
+        "flags": ["factual", "derived-fix"],
         "text": "Plex claim token expired or missing: get a fresh token from plex.tv/claim "
         "and add it as PLEX_CLAIM environment variable. Tokens expire in 4 minutes. "
         "For existing servers, sign in via the Plex web UI directly.",
@@ -154,6 +209,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "disk_full",
         "title": "Disk full",
+        "flags": ["factual", "derived-fix"],
         "text": "No space left on device: check disk usage with 'df -h'. "
         "Docker images accumulate — clean with 'docker system prune -a'. "
         "Check Docker volumes: 'docker system df'. "
@@ -163,6 +219,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "container_restart",
         "title": "Container restart loop",
+        "flags": ["factual", "derived-fix"],
         "text": "Container in restart loop (status: restarting): check logs immediately after restart "
         "with 'docker logs CONTAINER --tail 50'. "
         "Common causes: missing config file, bad environment variable, port conflict, "
@@ -171,6 +228,7 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
     {
         "id": "container_unhealthy",
         "title": "Container health check failing",
+        "flags": ["factual", "derived-fix"],
         "text": "Container shows as 'unhealthy': the health check command is failing. "
         "Check the actual health check: docker inspect CONTAINER | grep -A5 Health. "
         "Common: web service not responding to HTTP health check, "
@@ -188,14 +246,14 @@ KNOWLEDGE_BASE: list[dict[str, str]] = [
 class SimpleRetriever:
     """Lightweight TF-IDF retriever. No external dependencies."""
 
-    docs: list[dict[str, str]] = field(default_factory=list)
+    docs: list[dict[str, Any]] = field(default_factory=list)
     _idf: dict[str, float] = field(default_factory=dict)
     _tfs: list[dict[str, float]] = field(default_factory=list)
 
     def _tokenize(self, text: str) -> list[str]:
         return re.findall(r"\b[a-z]{2,}\b", text.lower())
 
-    def build(self, docs: list[dict[str, str]]) -> None:
+    def build(self, docs: list[dict[str, Any]]) -> None:
         self.docs = docs
         N = len(docs)
         df: dict[str, int] = {}
@@ -255,7 +313,7 @@ class ChromaRetriever:
         self._collection: Any = None
         self._ready = False
 
-    def build(self, docs: list[dict[str, str]]) -> None:
+    def build(self, docs: list[dict[str, Any]]) -> None:
         """Index static KNOWLEDGE_BASE documents into chromadb.
 
         Only documents whose IDs are in ``_STATIC_KB_IDS`` (the IDs present at

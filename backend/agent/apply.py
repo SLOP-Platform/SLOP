@@ -306,16 +306,23 @@ def _warn_if_no_recent_backup(app_key: str) -> None:
 
 
 def _restart_container(app_key: str) -> ApplyResult:
-    """Run `docker restart <app_key>` synchronously.
+    """Run `docker restart <app_key>` synchronously — WITH snapshot-and-rollback.
+
+    Captures container state before the restart via ``safe_update.snapshot_container``.
+    On a subprocess failure, the rollback attempts to restore the prior running state.
+    Fail-safe: if snapshot capture fails, the mutation does not proceed.
 
     Timeout: 30 s.  Raises CalledProcessError / TimeoutExpired on failure.
     """
-    subprocess.run(
-        ["docker", "restart", app_key],
-        check=True,
-        timeout=30,
-        capture_output=True,
-    )
+    from backend.agent.safe_update import snapshot_container
+
+    with snapshot_container(app_key):
+        subprocess.run(
+            ["docker", "restart", app_key],
+            check=True,
+            timeout=30,
+            capture_output=True,
+        )
     log.info("_restart_container: %s restarted successfully", app_key)
     return {
         "ok": True,
@@ -355,7 +362,11 @@ def _repull_restart(app_key: str, metadata: dict[str, Any]) -> ApplyResult:
 
 
 def _restart_managed_service(app_key: str, params: dict[str, Any]) -> ApplyResult:
-    """Restart a managed service unit (N3 — T2 recoverable).
+    """Restart a managed service unit (N3 — T2 recoverable) — WITH snapshot-and-rollback.
+
+    Captures container state before the restart via ``safe_update.snapshot_container``.
+    On a subprocess failure, the rollback attempts to restore the prior running state.
+    Fail-safe: if snapshot capture fails, the mutation does not proceed.
 
     The managed-service surface in SLOP is the per-app container, so a safe
     restart of a managed service is a VERIFIED container restart on the SAME
@@ -368,12 +379,15 @@ def _restart_managed_service(app_key: str, params: dict[str, Any]) -> ApplyResul
     Returns the ApplyResult shape. Raises CalledProcessError / TimeoutExpired if
     the docker restart itself fails (caller records the failure).
     """
-    subprocess.run(
-        ["docker", "restart", app_key],
-        check=True,
-        timeout=30,
-        capture_output=True,
-    )
+    from backend.agent.safe_update import snapshot_container
+
+    with snapshot_container(app_key):
+        subprocess.run(
+            ["docker", "restart", app_key],
+            check=True,
+            timeout=30,
+            capture_output=True,
+        )
     healthy, summary = verify_container_healthy(app_key)
     log.info("_restart_managed_service: %s restarted; healthy=%s; %s", app_key, healthy, summary)
     return {

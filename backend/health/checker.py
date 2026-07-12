@@ -364,21 +364,35 @@ _HEAL_ALIASES: dict[str, str] = {
 def _heal_restart_container(app_key: str) -> bool:
     import subprocess as _sub
 
+    from backend.agent.safe_update import _capture_container_state, _rollback_to_state
+
+    prior = _capture_container_state(app_key)
+    if prior is None:
+        log.warning("Self-heal restart aborted for %s: snapshot capture failed", app_key)
+        return False
     r = _sub.run(["docker", "restart", "-t", "10", app_key], capture_output=True, timeout=30)
     if r.returncode == 0:
         log.info("Self-healed '%s' via manifest restart", app_key)
         return True
     log.warning("Self-heal restart failed for %s: %s", app_key, r.stderr.decode()[:100])
+    _rollback_to_state(app_key, prior)
     return False
 
 
 def _heal_reload_config(app_key: str) -> bool:
     import subprocess as _sub
 
+    from backend.agent.safe_update import _capture_container_state, _rollback_to_state
+
+    prior = _capture_container_state(app_key)
+    if prior is None:
+        log.warning("Self-heal reload_config aborted for %s: snapshot capture failed", app_key)
+        return False
     r = _sub.run(["docker", "kill", "--signal=HUP", app_key], capture_output=True, timeout=10)
     if r.returncode == 0:
         log.info("Self-healed '%s' via manifest reload_config", app_key)
         return True
+    _rollback_to_state(app_key, prior)
     return False
 
 
@@ -450,19 +464,32 @@ def _heal_rewire(app_key: str) -> bool:
 def _heal_remount_storage(app_key: str) -> bool:
     import subprocess as _sub
 
+    from backend.agent.safe_update import _capture_container_state, _rollback_to_state
+
     with StateDB() as _db:
         _stores = _db.execute(
             "SELECT name, source_type FROM storage_sources WHERE status='error'"
         ).fetchall()
     for s in _stores:
         cname = f"rclone-{s['name'].lower().replace(' ', '-')}"
-        _sub.run(["docker", "restart", cname], capture_output=True, timeout=15)
+        prior = _capture_container_state(cname)
+        if prior is None:
+            log.warning(
+                "Self-heal remount_storage aborted for rclone '%s': snapshot capture failed",
+                cname,
+            )
+            continue
+        r = _sub.run(["docker", "restart", cname], capture_output=True, timeout=15)
+        if r.returncode != 0:
+            _rollback_to_state(cname, prior)
     log.info("Self-healed '%s' via manifest remount_storage", app_key)
     return bool(_stores)
 
 
 def _heal_restart_managed_service(app_key: str) -> bool:
     import subprocess as _sub
+
+    from backend.agent.safe_update import _capture_container_state, _rollback_to_state
 
     with StateDB() as _db:
         _dep = _db.execute(
@@ -474,10 +501,19 @@ def _heal_restart_managed_service(app_key: str) -> bool:
         ).fetchone()
     if not _dep:
         return False
-    r = _sub.run(["docker", "restart", _dep["container_name"]], capture_output=True, timeout=30)
+    container_name = _dep["container_name"]
+    prior = _capture_container_state(container_name)
+    if prior is None:
+        log.warning(
+            "Self-heal restart_managed_service aborted for %s: snapshot capture failed",
+            container_name,
+        )
+        return False
+    r = _sub.run(["docker", "restart", container_name], capture_output=True, timeout=30)
     if r.returncode == 0:
         log.info("Self-healed '%s' via manifest restart_managed_service", app_key)
         return True
+    _rollback_to_state(container_name, prior)
     return False
 
 

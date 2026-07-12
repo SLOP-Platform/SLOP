@@ -625,7 +625,13 @@ def _read_api_key(env_key: str) -> str:
 
 def _index_escalation_in_rag(prompt: str, response: str, purpose: str) -> None:
     """Append the prompt/response to the RAG knowledge base + force
-    rebuild on next query. Best-effort; failures are silenced."""
+    rebuild on next query. Best-effort; failures are silenced.
+
+    Fix-conclusion language is stripped before indexing (#491) to prevent
+    RAG feedback-loop self-reinforcement: derived conclusions like
+    "we determined X was the root cause" are removed; only factual
+    observations are stored.
+    """
     try:
         import backend.core.rag as _rag_mod
 
@@ -633,7 +639,10 @@ def _index_escalation_in_rag(prompt: str, response: str, purpose: str) -> None:
             {
                 "id": f"escalation_{int(time.time())}",
                 "title": f"Cloud LLM escalation: {purpose}",
-                "text": f"Problem context: {prompt[:500]}\nSolution: {response[:500]}",
+                "text": (
+                    f"Problem context: {_rag_mod.strip_fix_conclusions(prompt[:500])}\n"
+                    f"Solution: {_rag_mod.strip_fix_conclusions(response[:500])}"
+                ),
             }
         )
         _rag_mod._built_at = 0  # force RAG rebuild on next query

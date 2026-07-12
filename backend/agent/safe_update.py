@@ -25,8 +25,11 @@ that must never fire without an explicit autonomy decision upstream.
 
 from __future__ import annotations
 
+import json
 import subprocess
+from contextlib import contextmanager
 from typing import Any
+from collections.abc import Iterator
 
 from backend.agent.types import OperationalLevel
 from backend.agent.verify import verify_container_healthy
@@ -103,6 +106,103 @@ def _retag(image_id: str, image_ref: str) -> bool:
         log.warning("safe_update: retag failed (%s -> %s): %s", image_id, image_ref, exc)
         return False
     return r.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-and-rollback gate — capture prior state before ANY mutation
+# ---------------------------------------------------------------------------
+#
+# Reuses the safe_update_container pattern (capture -> mutate -> verify -> rollback)
+# for every blind docker mutation in apply.py and checker.py.  A mutation that
+# fails to restore leaves the system in unknown state; this gate makes it recoverable.
+#
+# Fail-safe rule: if snapshot capture itself fails, the mutation MUST NOT proceed.
+# Never raises for an expected docker inspect failure — returns None to signal abort.
+
+SnapshotState = dict[str, Any]  # {"image_id": str, "running": bool, "restart_count": int, ...}
+
+_SNAPSHOT_INSPECT_TIMEOUT_S = 10
+
+
+def _capture_container_state(container: str) -> SnapshotState | None:
+    """Return the container's current image id, running status, and restart count.
+
+    Returns None on any failure — the caller MUST abort the mutation (fail-safe).
+    """
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .}}", container],
+            capture_output=True,
+            text=True,
+            timeout=_SNAPSHOT_INSPECT_TIMEOUT_S,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        log.warning("snapshot: inspect failed for %s: %s", container, exc)
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        state = json.loads(r.stdout.strip())
+    except (json.JSONDecodeError, ValueError) as exc:
+        log.warning("snapshot: inspect output parse failed for %s: %s", container, exc)
+        return None
+    return {
+        "image_id": state.get("Image", ""),
+        "running": state.get("State", {}).get("Running", False),
+        "restart_count": state.get("State", {}).get("RestartCount", 0),
+        "container_name": container,
+    }
+
+
+def _rollback_to_state(container: str, prior: SnapshotState) -> None:
+    """Best-effort rollback: if the container was running before the mutation but
+    isn't running now, attempt to start it. Logs at WARNING on failure but never
+    raises — the original exception already propagates."""
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", container],
+            capture_output=True,
+            text=True,
+            timeout=_SNAPSHOT_INSPECT_TIMEOUT_S,
+        )
+        currently_running = r.returncode == 0 and r.stdout.strip() == "true"
+    except (subprocess.SubprocessError, OSError):
+        currently_running = False
+
+    if prior.get("running") and not currently_running:
+        log.warning(
+            "snapshot rollback: %s was running before mutation, not running now — attempting start",
+            container,
+        )
+        try:
+            subprocess.run(
+                ["docker", "start", container],
+                capture_output=True,
+                timeout=_RESTART_TIMEOUT_S,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            log.warning("snapshot rollback: start failed for %s: %s", container, exc)
+
+
+@contextmanager
+def snapshot_container(container: str) -> Iterator[dict[str, Any]]:
+    """Context manager: capture container state before a mutation, roll back on exception.
+
+    Fail-safe: if snapshot capture itself fails, raises RuntimeError so the caller
+    does NOT proceed with the mutation.
+
+    On context exit with an exception, ``_rollback_to_state`` is called to attempt
+    restoring the container to its prior running state. The original exception
+    always propagates through.
+    """
+    prior = _capture_container_state(container)
+    if prior is None:
+        raise RuntimeError(f"Snapshot capture failed for {container}: cannot proceed with mutation")
+    try:
+        yield prior
+    except Exception:
+        _rollback_to_state(container, prior)
+        raise
 
 
 def safe_update_container(container: str, image_ref: str) -> SafeUpdateResult:
@@ -239,6 +339,10 @@ def evaluate_update_gate(app_key: str, level: OperationalLevel) -> GateDecision:
 __all__ = [
     "GateDecision",
     "SafeUpdateResult",
+    "SnapshotState",
+    "_capture_container_state",
+    "_rollback_to_state",
     "evaluate_update_gate",
     "safe_update_container",
+    "snapshot_container",
 ]

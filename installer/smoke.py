@@ -34,7 +34,7 @@ _QUICKSTART_PATH = "/api/v1/quickstart"
 # P5: SPA signature patterns (three-part match per ADR 0015 §3).
 _SPA_RE_MOUNT = re.compile(r'id=["\']app["\']')
 _SPA_RE_ASSET = re.compile(r"/assets/index-")
-_SPA_RE_TITLE = re.compile(r"slop", re.IGNORECASE)
+_SPA_RE_TITLE = re.compile(r"s\.?l\.?o\.?p", re.IGNORECASE)
 
 # INV-8: unfilled placeholder regex.
 _UNFILLED_RE = re.compile(r"<[a-z_]+>")
